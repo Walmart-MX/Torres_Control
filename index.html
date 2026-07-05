@@ -6,6 +6,7 @@
 <title>SmartDispatch · CeDis VHSA</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -1002,13 +1003,12 @@ input, textarea { font-family: inherit; }
             <input class="cat-input" id="catOpInput" placeholder="Nombre operador (como aparece en PDF)" style="flex:2;min-width:160px">
             <input class="cat-input" id="catLicInput" placeholder="Licencia" style="flex:1;min-width:90px">
             <button class="btn btn-success btn-sm" id="btnCatAdd">+ Agregar</button>
-            <div class="cat-actions">
-              <div class="btn btn-ghost btn-sm cat-import-btn">
-                📥 Importar
-                <input type="file" id="catImportFile" accept=".xlsx,.xls">
-              </div>
-              <button class="btn btn-primary btn-sm" id="btnCatSave">💾 Guardar</button>
-            </div>
+          <div class="cat-actions">
+  <div class="btn btn-ghost btn-sm cat-import-btn">
+    📥 Importar
+    <input type="file" id="catImportFile" accept=".xlsx,.xls">
+  </div>
+</div>
           </div>
           <div class="cat-table-wrap">
             <table class="cat-table">
@@ -1214,13 +1214,9 @@ import { init } from './src/core/app.js';
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-// CATALOG_DATA permanece aquí hasta la integración con Supabase (Camino B),
-// donde migrará a la tabla `operators`. El slot JSON_START/END lo necesita
-// saveCatalog() para actualizar el catálogo embebido al descargar el HTML.
-const CATALOG_DATA = /*CATALOG_JSON_START*/[{"op":"ALBERTO MORALES HERNANDEZ","lic":"1CH2064633"},{"op":"PORFIRIO SOLIS HERNANDEZ","lic":"1CH2123351"},{"op":"FRANCO CALET CONDE COLORADO","lic":"LFD01205667"}]/*CATALOG_JSON_END*/;
-
-// Boot
-init(CATALOG_DATA);
+// Boot — el catálogo de operadores se carga desde Supabase (Camino B,
+// Fase 1). Ver src/core/app.js → init() → initCatalog().
+init();
 </script>
 </body>
 </html>
