@@ -99,15 +99,18 @@ export const Events = {
       State.xlsData  = rows;
       State.factData = factData;
 
-      // cacheUpdating: refleja el estado en el panel "Historial de caché".
-      // persist() hoy es síncrono (localStorage), así que la ventana es
-      // casi instantánea — queda listo para cuando fact_cache migre a
-      // Supabase en Camino B Fase 2, donde sí habrá una espera real.
+      // FactCache.persist() ahora escribe en Supabase (Camino B Fase 2) —
+      // es una llamada de red real. No la esperamos antes de correr el
+      // merge: runMerge() usa State.factData como fuente primaria, el
+      // caché remoto solo es fallback de OTROS días (ya cargado en
+      // memoria desde el arranque). El estado del panel de diagnóstico
+      // se refresca cuando la escritura termina, sin bloquear la UI.
       State.cacheUpdating = true;
       UI.renderCacheHistory();
-      FactCache.persist(factData);
-      State.cacheUpdating = false;
-      UI.renderCacheHistory();
+      FactCache.persist(factData).finally(() => {
+        State.cacheUpdating = false;
+        UI.renderCacheHistory();
+      });
 
       UI.setBadge('xlsBadge', `✓ ${rows.length} rutas · ${factSheetLabel}`, 'done');
       UI.setDZDone('dropXLS', file.name);
