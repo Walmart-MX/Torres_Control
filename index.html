@@ -585,6 +585,9 @@ input, textarea { font-family: inherit; }
   font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600;
   background: var(--green-bg); color: var(--green); border: 1px solid var(--green-bd);
   border-radius: 20px; padding: 2px 9px; margin-left: auto;
+   .cat-badge-count.warn { background: var(--orange-bg); color: var(--orange); border-color: var(--orange-bd); }
+.cat-badge-count.err  { background: var(--red-bg);    color: var(--red);    border-color: var(--red-bd); }
+.cat-badge-count.idle { background: var(--surface3);   color: var(--text3); border-color: var(--border); }
 }
 .cat-chev { font-size: 11px; color: var(--text3); transition: transform .2s; }
 .cat-panel.open .cat-chev { transform: rotate(180deg); }
@@ -1017,6 +1020,29 @@ input, textarea { font-family: inherit; }
             </table>
           </div>
           <div class="cat-status" id="catSt"></div>
+        </div>
+      </div>
+
+      <!-- Historial de Caché — diagnóstico del fact_cache -->
+      <div class="cat-panel" id="cacheHistPanel">
+        <div class="cat-toggle" id="cacheHistToggle">
+          <span style="font-size:15px">🗄️</span>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--text)">Historial de caché</div>
+            <div style="font-size:11px;color:var(--text3)">Facturas guardadas por día · diagnóstico</div>
+          </div>
+          <span class="cat-badge-count" id="cacheHistBadge">—</span>
+          <span class="cat-chev">▾</span>
+        </div>
+        <div class="cat-body">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.5">
+            Cargar el mismo día <strong>actualiza</strong> las facturas existentes y agrega
+            las nuevas — nunca borra los datos de otros días.
+          </div>
+          <div id="cacheHistList"></div>
+          <div style="margin-top:10px;text-align:right">
+            <button class="btn btn-danger-outline btn-sm" id="btnCacheHistClear">🗑 Limpiar caché histórico</button>
+          </div>
         </div>
       </div>
 
