@@ -432,6 +432,73 @@ export const UI = {
     el.textContent = msg;
   },
 
+  // ── Cache History ──
+  // Panel de diagnóstico del FactCache — reutiliza las clases visuales
+  // de .cat-panel (contenedor) y .sve-group (acordeón por fecha) que ya
+  // existen en el CSS, para no agregar estilos nuevos salvo los 3
+  // modificadores de badge (.warn/.err/.idle) documentados en index.html.
+  renderCacheHistory() {
+    const summary  = FactCache.dateSummary();
+    const badge    = document.getElementById('cacheHistBadge');
+    const list     = document.getElementById('cacheHistList');
+    const totalInv = summary.reduce((s, d) => s + d.count, 0);
+
+    if (State.cacheUpdating) {
+      badge.textContent = '🔄 Actualizando…';
+      badge.className   = 'cat-badge-count';
+    } else if (!summary.length) {
+      badge.textContent = '❌ Sin datos';
+      badge.className   = 'cat-badge-count err';
+    } else if (summary.some(d => d.status === 'err')) {
+      badge.textContent = `⚠️ ${summary.length} día${summary.length > 1 ? 's' : ''} · revisar`;
+      badge.className   = 'cat-badge-count warn';
+    } else {
+      badge.textContent = `✅ ${summary.length} día${summary.length > 1 ? 's' : ''} · ${totalInv} facturas`;
+      badge.className   = 'cat-badge-count';
+    }
+
+    if (!summary.length) {
+      list.innerHTML = '<div class="cat-empty">Sin caché guardado — carga un Excel con hoja de facturas para comenzar.</div>';
+      return;
+    }
+
+    const fmtTs = ts => ts ? new Date(ts).toLocaleString('es-MX', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '—';
+    const STATUS_ICON  = { ok: '✅', warn: '⚠️', err: '❌' };
+    const STATUS_LABEL = { ok: 'Disponible', warn: 'Sin registro de guardado', err: 'Error al guardar' };
+
+    list.innerHTML = summary.map(d => {
+      const gid = 'cacheDay_' + d.date.replace(/\D/g, '');
+      return `
+        <div class="sve-group" id="${gid}">
+          <div class="sve-group-hdr" onclick="document.getElementById('${gid}').classList.toggle('open')">
+            <span class="sve-issue-ico">${STATUS_ICON[d.status]}</span>
+            <span class="sve-group-name">${escH(d.date)} — ${STATUS_LABEL[d.status]}</span>
+            <span class="sve-group-count">${d.count} factura${d.count !== 1 ? 's' : ''}</span>
+            <span class="sve-group-chev">▾</span>
+          </div>
+          <div class="sve-group-body">
+            <div style="padding:8px 18px;font-size:10px;color:var(--text3);font-family:'JetBrains Mono',monospace">
+              Generado: ${fmtTs(d.firstSavedAt)} · Última actualización: ${fmtTs(d.lastSavedAt)}
+            </div>
+            <div class="cat-table-wrap" style="margin:0 16px 12px">
+              <table class="cat-table">
+                <thead><tr><th>Factura</th><th>GLS</th><th>Hora facturación</th><th>Guardado</th></tr></thead>
+                <tbody>
+                  ${FactCache.entriesForDate(d.date).map(e => `
+                    <tr>
+                      <td class="td-op">${escH(e.invoice)}</td>
+                      <td>${escH(e.gls)}</td>
+                      <td>${escH(e.horaFact)}</td>
+                      <td>${fmtTs(e.savedAt)}</td>
+                    </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  },
+
   // ── Buttons ──
   // Warnings never disable export — they trigger a confirmation modal instead.
   setActionsEnabled(on) {
