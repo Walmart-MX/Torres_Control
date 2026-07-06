@@ -49,8 +49,9 @@ export async function init() {
   UI.applyTheme(State.theme);
   UI.setUser(State.user);
 
-  // ── Load FactCache from localStorage ──
-  State.factCache = FactCache.load();
+  // ── Load FactCache from Supabase (Camino B, Fase 2) ──
+  State.factCache    = await FactCache.load();
+  State.factCacheLog = await FactCache.loadLog();
   const fcStats = FactCache.stats();
   if (fcStats.total > 0) {
     console.log('[FactCache] Loaded', fcStats.total, 'invoices from', fcStats.days, 'day(s):', fcStats.dates.join(', '));
@@ -117,10 +118,10 @@ export async function init() {
   // ── Historial de caché ──
   document.getElementById('cacheHistToggle').addEventListener('click', () =>
     document.getElementById('cacheHistPanel').classList.toggle('open'));
-  document.getElementById('btnCacheHistClear').addEventListener('click', () => {
+  document.getElementById('btnCacheHistClear').addEventListener('click', async () => {
     if (!confirm('¿Eliminar todo el caché histórico de facturas? Esta acción no se puede deshacer.')) return;
-    FactCache.clear();
-    FactCache.clearLog();
+    await FactCache.clear();
+    await FactCache.clearLog();
     UI.renderCacheHistory();
   });
 

@@ -34,8 +34,14 @@ export const State = {
   edits: [],
 
   // Fact cache — persistent multi-day concentrado storage
-  // Loaded from localStorage on init, written on each XLS load
-  factCache: new Map(), // invoice# → { gls, horaFact, date, source }
+  // Loaded from Supabase on init (Camino B Fase 2), written on each XLS load
+  factCache: new Map(), // invoice# → { gls, horaFact, date, savedAt, source }
+
+  // Log de operaciones de FactCache.persist() — usado por el panel
+  // "Historial de caché" para mostrar estado ✅/⚠️/❌ por fecha.
+  // Cargado desde fact_cache_log (Supabase) al iniciar, actualizado de
+  // forma optimista por FactCache._logResult() en cada persist().
+  factCacheLog: [],
 
   // cacheUpdating: true mientras FactCache.persist() está en curso — usado
   // por el panel "Historial de caché" para mostrar el indicador 🔄.
