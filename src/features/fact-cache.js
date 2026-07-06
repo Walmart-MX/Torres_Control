@@ -2,115 +2,168 @@
  * features/fact-cache.js
  * FACT CACHE — persistent multi-day concentrado.
  *
- * Estrategia:
+ * CAMBIO Camino B / Fase 2: migrado de localStorage a Supabase
+ * (tablas `fact_cache` y `fact_cache_log`) — compartido entre todos
+ * los usuarios/equipos, igual que el catálogo de operadores en Fase 1.
+ *
+ * Estrategia (sin cambios respecto a Camino A):
  * - En cada carga de Excel, los nuevos datos de factura se fusionan
- *   con el caché existente en localStorage.
- * - Clave de caché: número de factura. Valor: { gls, horaFact, date, source }.
- * - En el merge: si una factura no está en los datos del Excel actual,
- *   se recurre al caché como fallback.
- * - TTL: 7 días — entradas más viejas se descartan al cargar.
+ *   (upsert) con el caché existente.
+ * - Clave: número de factura (invoice). TTL: 7 días — entradas más
+ *   viejas se descartan al cargar (filtro en el SELECT, no borrado
+ *   físico — ver comentario en el SQL de la Fase 2).
  * - Marcador visual: las filas que usan datos de caché llevan
- *   _factSource = 'cache' (ver merge.js).
- * - Estimado de almacenamiento: ~200 bytes/factura × 500 facturas
- *   = ~100KB/día × 7 días = ~700KB — dentro del límite de 5MB de localStorage.
+ *   _factSource = 'cache' (ver merge.js) — SIN CAMBIOS ahí.
  *
- * Dependencia: State.factCache (definida en core/state.js). Este módulo
- * lee y escribe esa propiedad directamente — es la única fuente de verdad
- * en memoria para el caché ya cargado.
+ * INTERFAZ PÚBLICA — qué cambió y qué no:
+ *   load(), persist(), clear(), clearLog(), loadLog() → pasan a ser
+ *     async (ahora hacen red). Los únicos callers son core/app.js
+ *     (bootstrap, ya es async) y events.js (handleXLS, ya es async).
+ *   lookup(), stats(), dateSummary(), entriesForDate(), getLog() →
+ *     SIGUEN SÍNCRONOS. Operan sobre State.factCache / State.factCacheLog
+ *     ya cargados en memoria — exactamente el mismo contrato que tenían
+ *     con localStorage. merge.js y ui.js no se modifican por esta fase.
  *
- * DIAGNÓSTICO — Historial de Caché (agregado sobre Camino A, previo a
- * Camino B Fase 2):
- *   Se agrega un log de operaciones (_appendLog/getLog/clearLog) separado
- *   del caché de datos — registra cada persist() exitoso o fallido, para
- *   que el panel "Historial de caché" (ui.js → renderCacheHistory) pueda
- *   mostrar estado ✅/⚠️/❌ por fecha sin adivinar. dateSummary() y
- *   entriesForDate() son funciones de solo lectura que combinan
- *   State.factCache + el log — no mutan nada, seguras de llamar en
- *   cualquier momento (ej. al abrir el panel).
+ * DECISIÓN DE RENDIMIENTO: persist() se llama en events.js sin esperar
+ * su resultado antes de correr el merge (fire-and-forget + .finally()
+ * para refrescar el panel de diagnóstico). runMerge() usa State.factData
+ * (el Excel recién leído) como fuente primaria — el caché remoto solo
+ * importa como fallback de OTROS días, que ya está cargado en memoria
+ * desde el arranque de la app. Por eso el merge no necesita esperar a
+ * que termine de escribirse en Supabase.
  *
- * Nota para integración futura con Supabase (Fase 2 del roadmap de
- * Camino B): esta es la pieza que migrará de localStorage a una tabla
- * compartida. La interfaz pública (load/persist/lookup/clear/stats,
- * y ahora dateSummary/entriesForDate/getLog) está diseñada para no
- * cambiar cuando eso ocurra — solo cambia la implementación interna.
+ * Dependencias:
+ *   - State (core/state.js) — lee/escribe State.factCache y State.factCacheLog
+ *   - sb (core/supabase-client.js) — cliente Supabase compartido
  */
 import { State } from '../core/state.js';
+import { sb } from '../core/supabase-client.js';
+
+const TABLE     = 'fact_cache';
+const LOG_TABLE = 'fact_cache_log';
 
 export const FactCache = {
-  STORAGE_KEY:     'sd_fact_cache',
-  STORAGE_KEY_LOG: 'sd_fact_cache_log',
-  MAX_LOG_ENTRIES: 30,
   TTL_DAYS:        7,
+  MAX_LOG_ENTRIES: 30,
 
   /**
-   * Carga el caché desde localStorage, descartando entradas expiradas.
-   * @returns {Map<string, object>}
+   * Carga el caché vigente desde Supabase (descarta lo más viejo que TTL_DAYS).
+   * @returns {Promise<Map<string, object>>}
    */
-  load() {
-    try {
-      const raw  = localStorage.getItem(FactCache.STORAGE_KEY);
-      if (!raw) return new Map();
-      const obj  = JSON.parse(raw);
-      const now  = Date.now();
-      const ttl  = FactCache.TTL_DAYS * 86400 * 1000;
-      const map  = new Map();
-      for (const [inv, entry] of Object.entries(obj)) {
-        if (now - (entry.savedAt || 0) < ttl) map.set(inv, entry);
-      }
-      return map;
-    } catch { return new Map(); }
+  async load() {
+    const cutoff = new Date(Date.now() - FactCache.TTL_DAYS * 86400 * 1000).toISOString();
+    const { data, error } = await sb.from(TABLE)
+      .select('invoice, gls, hora_fact, cache_date, saved_at, source')
+      .gte('saved_at', cutoff);
+
+    if (error) {
+      console.warn('[FactCache] Error cargando caché desde Supabase:', error.message);
+      return new Map();
+    }
+
+    const map = new Map();
+    for (const row of data) {
+      map.set(row.invoice, {
+        gls:      row.gls || '',
+        horaFact: row.hora_fact || '',
+        date:     row.cache_date,
+        savedAt:  new Date(row.saved_at).getTime(),
+        source:   row.source || 'current'
+      });
+    }
+    return map;
   },
 
   /**
-   * Fusiona nuevos datos de factura (de un Excel recién cargado) con el
-   * caché persistente, guarda en localStorage, y actualiza State.factCache.
-   * Registra el resultado (éxito/error) en el log de operaciones.
-   * @param {Map<string, object>} newFactData
+   * Carga el log de operaciones (más reciente primero) desde Supabase.
+   * @returns {Promise<Array<object>>}
    */
-  persist(newFactData) {
-    const today = new Date().toISOString().slice(0, 10);
-    try {
-      const cache   = FactCache.load();
-      const savedAt = Date.now();
-      newFactData.forEach((val, inv) => {
-        cache.set(inv, { ...val, date: today, savedAt, source: 'current' });
-      });
-      const obj = {};
-      cache.forEach((v, k) => { obj[k] = v; });
-      localStorage.setItem(FactCache.STORAGE_KEY, JSON.stringify(obj));
-      State.factCache = cache;
-      FactCache._appendLog({ ts: savedAt, date: today, count: newFactData.size, status: 'ok' });
-      console.log('[FactCache] Persisted', newFactData.size, 'entries. Total cache:', cache.size);
-    } catch (e) {
-      FactCache._appendLog({ ts: Date.now(), date: today, count: newFactData.size, status: 'error', error: e.message });
-      console.warn('[FactCache] Could not persist:', e.message);
+  async loadLog() {
+    const { data, error } = await sb.from(LOG_TABLE)
+      .select('ts, cache_date, count, status, error, user_name')
+      .order('ts', { ascending: false })
+      .limit(FactCache.MAX_LOG_ENTRIES);
+
+    if (error) {
+      console.warn('[FactCache] Error cargando log desde Supabase:', error.message);
+      return [];
     }
+
+    return data.map(r => ({
+      ts: new Date(r.ts).getTime(), date: r.cache_date,
+      count: r.count, status: r.status, error: r.error, user: r.user_name
+    }));
+  },
+
+  /**
+   * Fusiona (upsert) nuevos datos de factura con el caché remoto y
+   * actualiza State.factCache de forma optimista (sin round-trip extra
+   * de lectura). Registra el resultado en fact_cache_log.
+   * @param {Map<string, object>} newFactData
+   * @returns {Promise<void>}
+   */
+  async persist(newFactData) {
+    const today      = new Date().toISOString().slice(0, 10);
+    const savedAt    = Date.now();
+    const savedAtIso = new Date(savedAt).toISOString();
+
+    const rows = [];
+    newFactData.forEach((val, inv) => {
+      rows.push({
+        invoice: inv, gls: val.gls || '', hora_fact: val.horaFact || '',
+        cache_date: today, saved_at: savedAtIso, source: 'current'
+      });
+    });
+
+    if (!rows.length) {
+      await FactCache._logResult({ date: today, count: 0, status: 'ok' });
+      return;
+    }
+
+    const { error } = await sb.from(TABLE).upsert(rows, { onConflict: 'invoice' });
+
+    if (error) {
+      console.warn('[FactCache] Could not persist:', error.message);
+      await FactCache._logResult({ date: today, count: newFactData.size, status: 'error', error: error.message });
+      return;
+    }
+
+    newFactData.forEach((val, inv) => {
+      State.factCache.set(inv, { gls: val.gls || '', horaFact: val.horaFact || '', date: today, savedAt, source: 'current' });
+    });
+    console.log('[FactCache] Persisted', newFactData.size, 'entries to Supabase.');
+    await FactCache._logResult({ date: today, count: newFactData.size, status: 'ok' });
   },
 
   /**
    * Busca una factura en el caché ya cargado en memoria (State.factCache).
-   * Usado como fallback cuando el Excel actual no trae esa factura.
-   * @param {string} inv — número de factura
+   * SÍNCRONO — sin cambios respecto a Camino A. Usado como fallback en merge.js.
+   * @param {string} inv
    * @returns {object|null}
    */
   lookup(inv) {
     return State.factCache.get(inv) || null;
   },
 
-  /** Limpia el caché de datos por completo (localStorage + memoria). No toca el log. */
-  clear() {
-    localStorage.removeItem(FactCache.STORAGE_KEY);
+  /** Limpia el caché de datos por completo (Supabase + memoria). No toca el log. */
+  async clear() {
+    // fact_cache.invoice nunca es cadena vacía en la práctica — .neq('invoice','')
+    // matchea todas las filas reales, es el idiom estándar para "delete all"
+    // cuando la PK no es un uuid (a diferencia de fact_cache_log, ver clearLog).
+    const { error } = await sb.from(TABLE).delete().neq('invoice', '');
+    if (error) { console.warn('[FactCache] Error limpiando caché:', error.message); return; }
     State.factCache = new Map();
   },
 
-  /** Limpia el log de operaciones (usado junto con clear() desde el panel de diagnóstico). */
-  clearLog() {
-    localStorage.removeItem(FactCache.STORAGE_KEY_LOG);
+  /** Limpia el log de operaciones (Supabase + memoria). */
+  async clearLog() {
+    const { error } = await sb.from(LOG_TABLE).delete().gte('ts', '1900-01-01');
+    if (error) { console.warn('[FactCache] Error limpiando log:', error.message); return; }
+    State.factCacheLog = [];
   },
 
   /**
-   * Estadísticas del caché actual — usado en el badge de XLS
-   * y en mensajes de diagnóstico.
+   * Estadísticas del caché actual — SÍNCRONO, lee State.factCache.
    * @returns {{ total: number, days: number, dates: string[] }}
    */
   stats() {
@@ -119,54 +172,41 @@ export const FactCache = {
     return { total: cache.size, days: days.size, dates: [...days].sort().reverse() };
   },
 
-  // ── Log de operaciones (privado + lectura pública) ──
-
   /**
-   * Registra una operación de persist() en el log, más reciente primero,
-   * capado a MAX_LOG_ENTRIES para no crecer indefinidamente en localStorage.
+   * Inserta una fila en fact_cache_log y actualiza State.factCacheLog
+   * de forma optimista. Privado — llamado desde persist().
    * @private
    */
-  _appendLog(entry) {
-    try {
-      const raw = localStorage.getItem(FactCache.STORAGE_KEY_LOG);
-      const log = raw ? JSON.parse(raw) : [];
-      log.unshift(entry);
-      if (log.length > FactCache.MAX_LOG_ENTRIES) log.length = FactCache.MAX_LOG_ENTRIES;
-      localStorage.setItem(FactCache.STORAGE_KEY_LOG, JSON.stringify(log));
-    } catch {
-      // El log es solo diagnóstico — si falla (ej. localStorage lleno),
-      // no debe interrumpir el flujo real de persist().
+  async _logResult({ date, count, status, error }) {
+    const row = {
+      ts: new Date().toISOString(), cache_date: date, count, status,
+      error: error || null, user_name: State.user || null
+    };
+    const { error: insertError } = await sb.from(LOG_TABLE).insert(row);
+    if (insertError) {
+      console.warn('[FactCache] No se pudo escribir el log:', insertError.message);
+      return;
     }
+    State.factCacheLog.unshift({ ts: Date.now(), date, count, status, error, user: State.user });
+    if (State.factCacheLog.length > FactCache.MAX_LOG_ENTRIES) State.factCacheLog.length = FactCache.MAX_LOG_ENTRIES;
   },
 
   /**
-   * Devuelve el log de operaciones de caché, más reciente primero.
-   * @returns {Array<{ ts:number, date:string, count:number, status:'ok'|'error', error?:string }>}
+   * Devuelve el log de operaciones ya cargado en memoria, más reciente primero.
+   * SÍNCRONO — sin cambios de contrato respecto a Camino A (antes leía
+   * localStorage directamente; ahora lee State.factCacheLog, poblado por
+   * loadLog() al iniciar y actualizado de forma optimista por persist()).
+   * @returns {Array<object>}
    */
   getLog() {
-    try {
-      const raw = localStorage.getItem(FactCache.STORAGE_KEY_LOG);
-      return raw ? JSON.parse(raw) : [];
-    } catch { return []; }
+    return State.factCacheLog;
   },
 
-  // ── Consultas para el panel "Historial de caché" (solo lectura) ──
-
   /**
-   * Resumen por fecha del caché actual — combina State.factCache (datos)
-   * con el log de operaciones (estado del último guardado por fecha).
-   * Fuente de datos de UI.renderCacheHistory().
-   *
-   * status:
-   *   'ok'   — hay un registro de guardado exitoso más reciente para esa fecha
-   *   'err'  — el último persist() registrado para esa fecha falló
-   *   'warn' — hay datos pero no hay registro de guardado (ej. caché de
-   *            antes de que este log existiera) — no es un error real,
-   *            se resuelve solo con el siguiente persist() o al expirar TTL
-   *
+   * Resumen por fecha del caché actual — SÍNCRONO, sin cambios de lógica
+   * respecto a Camino A. Fuente de datos de UI.renderCacheHistory().
    * @returns {Array<{ date:string, count:number, firstSavedAt:number,
    *                    lastSavedAt:number, status:'ok'|'warn'|'err' }>}
-   *          ordenado por fecha descendente (más reciente primero)
    */
   dateSummary() {
     const byDate = new Map();
@@ -186,20 +226,15 @@ export const FactCache = {
       const lastLogForDate = log.find(l => l.date === g.date);
       let status = 'warn';
       if (lastLogForDate) status = lastLogForDate.status === 'error' ? 'err' : 'ok';
-      return {
-        ...g,
-        firstSavedAt: g.firstSavedAt === Infinity ? 0 : g.firstSavedAt,
-        status
-      };
+      return { ...g, firstSavedAt: g.firstSavedAt === Infinity ? 0 : g.firstSavedAt, status };
     });
 
     return result.sort((a, b) => b.date.localeCompare(a.date));
   },
 
   /**
-   * Lista el detalle de facturas guardadas para una fecha específica.
-   * Usado por la vista de detalle expandible del Historial de Caché.
-   *
+   * Lista el detalle de facturas guardadas para una fecha. SÍNCRONO,
+   * sin cambios respecto a Camino A.
    * @param {string} date — YYYY-MM-DD
    * @returns {Array<{ invoice:string, gls:string, horaFact:string, savedAt:number }>}
    */
