@@ -98,7 +98,16 @@ export const Events = {
       const { rows, factData, ruteoName, factSheetLabel } = await processXLS(file);
       State.xlsData  = rows;
       State.factData = factData;
+
+      // cacheUpdating: refleja el estado en el panel "Historial de caché".
+      // persist() hoy es síncrono (localStorage), así que la ventana es
+      // casi instantánea — queda listo para cuando fact_cache migre a
+      // Supabase en Camino B Fase 2, donde sí habrá una espera real.
+      State.cacheUpdating = true;
+      UI.renderCacheHistory();
       FactCache.persist(factData);
+      State.cacheUpdating = false;
+      UI.renderCacheHistory();
 
       UI.setBadge('xlsBadge', `✓ ${rows.length} rutas · ${factSheetLabel}`, 'done');
       UI.setDZDone('dropXLS', file.name);
