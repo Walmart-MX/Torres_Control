@@ -252,22 +252,38 @@ export const UI = {
 
   // ── Table preview ──
   renderTable() {
-    const thead = document.getElementById('thead');
-    const tbody = document.getElementById('tbody');
+    document.getElementById('thead').innerHTML = UI._previewTheadHtml();
+    UI._renderRowsBody(State.merged, 'tbody');
+    document.getElementById('legendRow').classList.add('on');
+  },
 
-    thead.innerHTML = PREVIEW_COLS.map(c => {
+  /**
+   * HTML del <thead> de vista previa — compartido entre la tabla principal
+   * (renderTable) y el preview del Historial de Procesamientos
+   * (renderHistoryPreview), para no duplicar la lógica de columnas/colores.
+   * @private
+   */
+  _previewTheadHtml() {
+    return PREVIEW_COLS.map(c => {
       const cls = c==='RUTA' ? 'h-key' : COLS_PDF.has(c) ? 'h-pdf' : COLS_DESP.has(c) ? 'h-desp' : COLS_FILL.has(c) ? 'h-fill' : '';
       return `<th class="${cls}">${c.trim()}</th>`;
     }).join('');
+  },
 
-    const rows = State.merged.slice(0, 50);
-    if (!rows.length) {
+  /**
+   * HTML del <tbody> de vista previa para un array arbitrario de rows
+   * (mismo shape que State.merged) — compartido entre la tabla principal
+   * y el preview del Historial de Procesamientos.
+   * @private
+   */
+  _renderRowsBody(rows, tbodyId) {
+    const tbody = document.getElementById(tbodyId);
+    const slice = rows.slice(0, 50);
+    if (!slice.length) {
       tbody.innerHTML = '<tr><td colspan="22"><div class="empty-state"><div class="empty-ico">📂</div><div class="empty-title">Sin datos</div></div></td></tr>';
       return;
     }
-
-    tbody.innerHTML = rows.map((row, rowIdx) => {
-      // Row-level indicator: cache-sourced fact data
+    tbody.innerHTML = slice.map(row => {
       const cacheIndicator = row._factSource === 'cache'
         ? ` title="Datos de factura del ${row._factCacheDate||'día anterior'} (concentrado histórico)"`
         : '';
@@ -276,14 +292,11 @@ export const UI = {
         if (val instanceof Date) val = fmtDate(val);
         if (!row._matched && COLS_PDF.has(c)) return '<td><span class="no-data">—</span></td>';
         const cls = c==='RUTA' ? 'c-key' : COLS_PDF.has(c) ? 'c-pdf' : COLS_DESP.has(c) ? 'c-desp' : COLS_FILL.has(c) ? 'c-fill' : '';
-        // GLS / HORA_FACT from cache: add subtle amber tint
         const isCacheField = row._factSource === 'cache' && (c === 'GLS DE EMB.' || c === 'HORA DE FACTURACION');
         const extraStyle   = isCacheField ? ` style="color:var(--amber-dk);opacity:.8" title="Fuente: concentrado histórico ${escH(row._factCacheDate||'')}"` : '';
         return `<td><span class="${cls}"${extraStyle}>${escH(String(val))}</span></td>`;
       }).join('') + '</tr>';
     }).join('');
-
-    document.getElementById('legendRow').classList.add('on');
   },
 
   // ── SVE ──
@@ -506,6 +519,75 @@ export const UI = {
     document.getElementById('btnExport2').disabled = !on || State.sveHasCritical;
     document.getElementById('btnAddPDF').disabled  = !on;
     document.getElementById('btnClear').disabled   = !on;
+  },
+
+  // ── Dispatch History (Camino B / Fase 3) ──
+
+  /** Muestra "💾 Guardando…" en los botones de export mientras se persiste la sesión. */
+  setExportBusy(isBusy) {
+    ['btnExport', 'btnExport2'].forEach(id => {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      if (isBusy) {
+        btn.dataset.origText = btn.textContent;
+        btn.textContent = '💾 Guardando…';
+        btn.disabled = true;
+      } else {
+        if (btn.dataset.origText) btn.textContent = btn.dataset.origText;
+        btn.disabled = State.sveHasCritical; // respeta el gate crítico al reactivar
+      }
+    });
+  },
+
+  /** Aviso "El día operativo de hoy ya fue procesado" — session=null lo oculta. */
+  renderTodayBanner(session) {
+    const banner = document.getElementById('todayBanner');
+    if (!banner) return;
+    if (!session) { banner.classList.add('hidden'); return; }
+    banner.classList.remove('hidden');
+    const time = session.finished_at
+      ? new Date(session.finished_at).toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit' })
+      : '—';
+    document.getElementById('todayBannerInfo').innerHTML =
+      `Procesado por: <strong>${escH(session.finished_by || session.created_by || '—')}</strong> · ` +
+      `Hora: <strong>${escH(time)}</strong> · ${session.row_count} registros`;
+  },
+
+  /** Lista de sesiones para el panel "Historial de Procesamientos". */
+  renderHistoryList(sessions) {
+    const el = document.getElementById('historyList');
+    if (!sessions.length) {
+      el.innerHTML = '<div class="cat-empty">Sin procesamientos registrados todavía.</div>';
+      return;
+    }
+    const STATUS_ICON  = { completed: '✅', processing: '⏳', error: '❌' };
+    const STATUS_LABEL = { completed: '', processing: ' (en curso)', error: ' (falló al guardar)' };
+    el.innerHTML = sessions.map(s => {
+      const time = s.finished_at
+        ? new Date(s.finished_at).toLocaleString('es-MX', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
+        : new Date(s.started_at).toLocaleString('es-MX', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+      const clickable = s.status === 'completed';
+      return `
+        <div class="sve-issue"${clickable ? ` data-session-id="${escH(s.id)}" style="cursor:pointer"` : ''}>
+          <div class="sve-issue-ico">${STATUS_ICON[s.status] || '❓'}</div>
+          <div style="flex:1">
+            <div class="sve-issue-desc">${escH(s.session_date)} — ${escH(time)}${STATUS_LABEL[s.status] || ''}</div>
+            <div class="sve-issue-meta">
+              <span class="sve-tag-ruta">${escH(s.created_by || 'desconocido')}</span>
+              <span class="sve-tag-extra">${s.row_count} registros · calidad ${s.quality ?? '—'}%</span>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  },
+
+  /** Vista previa de una sesión seleccionada del historial. */
+  renderHistoryPreview(rows, session) {
+    document.getElementById('historyPreviewMeta').innerHTML =
+      `${escH(session.session_date)} · Procesado por ${escH(session.created_by || '—')} · ` +
+      `${rows.length} registros · calidad ${session.quality ?? '—'}%`;
+    document.getElementById('histPreviewThead').innerHTML = UI._previewTheadHtml();
+    UI._renderRowsBody(rows, 'histPreviewTbody');
   },
 
   // ── Reset everything ──
