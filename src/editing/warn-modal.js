@@ -4,14 +4,24 @@
  * y el SVE tiene advertencias pero ningún error crítico. Permite revisar
  * las advertencias o exportar directamente asumiendo la responsabilidad.
  *
+ * CAMBIO Camino B / Fase 3: exportAnyway() ya no llama exportXLSX()
+ * directamente ni escribe en State.sveAuditLog por su cuenta — ambas
+ * cosas se centralizaron en Events.finalizeAndExport(), que además
+ * persiste la sesión en el historial permanente de Supabase (ver
+ * features/dispatch-history.js). Como events.js ya importa WarnModal
+ * (para handleExport → WarnModal.show()), un import estático de Events
+ * aquí crearía un ciclo — se resuelve con el mismo patrón de setter
+ * diferido ya usado entre ui.js y events.js.
+ *
  * Dependencias:
- *   - State (core/state.js) — lee sveLastQuality y sveAuditLog
- *   - exportXLSX (features/export.js) — llamada cuando el usuario confirma
  *   - UI (ui/ui.js) — para hacer scroll al panel SVE en caso de revisión
+ *   - Events (events/events.js) — resuelto en runtime vía _setEvents()
  */
-import { State } from '../core/state.js';
-import { exportXLSX } from '../features/export.js';
 import { UI } from '../ui/ui.js';
+
+let Events;
+/** Resuelve la dependencia circular WarnModal ↔ Events — llamado desde core/app.js */
+export function _setEvents(ev) { Events = ev; }
 
 export const WarnModal = {
   show() {
@@ -42,16 +52,7 @@ export const WarnModal = {
 
   exportAnyway() {
     WarnModal.close();
-    const ts    = new Date().toLocaleString('es-MX');
-    const user  = State.user || 'desconocido';
     const nWarn = parseInt(document.getElementById('sveWarn').textContent || '0', 10);
-    State.sveAuditLog.push({
-      ts, user,
-      action: 'EXPORT_WITH_WARNINGS',
-      quality: State.sveLastQuality,
-      warnings: nWarn
-    });
-    console.info('[SVE AUDIT] Exportación con advertencias:', State.sveAuditLog[State.sveAuditLog.length - 1]);
-    exportXLSX();
+    Events.finalizeAndExport({ exportType: 'despacho', action: 'warn_confirmed', warnings: nWarn });
   }
 };
