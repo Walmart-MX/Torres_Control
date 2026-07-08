@@ -94,7 +94,15 @@ function buildWorkbook(rows, format) {
       const d = parseDateTime(String(val));
       return d ? d : val;
     }
-    if (INT_COLS.has(col)) {
+if (INT_COLS.has(col)) {
+      // FIX (auditoría post-Camino B / #6 rutas partidas): RUTA puede
+      // contener valores no puramente numéricos ("4102-2"). Antes se le
+      // quitaban los caracteres no numéricos antes de convertir a
+      // entero, perdiendo el guion ("4102-2" → 41022). Se preserva tal
+      // cual cuando no es puramente dígitos — el resto de columnas de
+      // INT_COLS (TARIMAS, CAJAS, marchamos, etc.) no cambia su
+      // comportamiento.
+      if (col === 'RUTA' && !/^\d+$/.test(String(val).trim())) return val;
       const n = parseInt(String(val).replace(/[^\d]/g,''), 10);
       return isNaN(n) ? val : n;
     }
