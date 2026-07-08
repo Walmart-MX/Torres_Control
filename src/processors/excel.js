@@ -3,6 +3,18 @@
  * Lectura del Excel macro: hoja RUTEO NUEVO (rutas del día) y hoja
  * CONCENTRADO FACTURAS (datos de facturación) si existe.
  *
+ * FIX (auditoría post-Camino B): _fixExcelDateRow() — SheetJS
+ * (cellDates:true) construye los Date de celdas de fecha usando UTC
+ * medianoche (Date.UTC(y,m,d)). El resto de la app lee esos objetos con
+ * métodos LOCALES (getFullYear/getMonth/getDate, usados en
+ * features/export.js al armar la columna FECHA). En una zona horaria con
+ * offset negativo (México, UTC-6), el objeto "retrocede" al día
+ * anterior — la columna FECHA salía con un día menos que el real. Se
+ * reconstruye cada Date usando sus propios componentes UTC como si
+ * fueran locales, así el resto de la app (que ya asume fechas locales)
+ * los lee correctamente. Se aplica a ambas hojas por robustez — cualquier
+ * columna de fecha en cualquiera de las dos sufre el mismo bug de SheetJS.
+ *
  * Dependencias:
  *   - XLSX (SheetJS, cargado globalmente desde el CDN en index.html)
  *   - SHEET_RUTEO, SHEET_FACTURAS (core/constants.js) — nombres alternativos
@@ -12,6 +24,26 @@
  */
 import { SHEET_RUTEO, SHEET_FACTURAS } from '../core/constants.js';
 import { formatFactDate } from '../utils/format.js';
+
+/**
+ * Corrige el desfase de zona horaria de SheetJS: reconstruye cualquier
+ * valor Date de la fila usando sus componentes UTC como si fueran
+ * locales. Ver nota de cabecera del módulo.
+ * @private
+ */
+function _fixExcelDateRow(row) {
+  const fixed = { ...row };
+  for (const key of Object.keys(fixed)) {
+    const val = fixed[key];
+    if (val instanceof Date && !isNaN(val.getTime())) {
+      fixed[key] = new Date(
+        val.getUTCFullYear(), val.getUTCMonth(), val.getUTCDate(),
+        val.getUTCHours(), val.getUTCMinutes(), val.getUTCSeconds()
+      );
+    }
+  }
+  return fixed;
+}
 
 /**
  * Lee el archivo Excel y extrae:
@@ -37,7 +69,7 @@ export async function processXLS(file) {
     SHEET_RUTEO.some(s => n.toUpperCase().includes(s.toUpperCase()))
   ) || wb.SheetNames[0];
   const wsRuteo = wb.Sheets[ruteoName];
-  const raw     = XLSX.utils.sheet_to_json(wsRuteo, { defval: '' });
+  const raw     = XLSX.utils.sheet_to_json(wsRuteo, { defval: '' }).map(_fixExcelDateRow);
 
   const factName = wb.SheetNames.find(n =>
     SHEET_FACTURAS.some(s => n.toUpperCase().includes(s.toUpperCase()))
@@ -47,7 +79,7 @@ export async function processXLS(file) {
 
   if (factName) {
     const wsFact  = wb.Sheets[factName];
-    const rawFact = XLSX.utils.sheet_to_json(wsFact, { defval: '' });
+    const rawFact = XLSX.utils.sheet_to_json(wsFact, { defval: '' }).map(_fixExcelDateRow);
     const keys    = Object.keys(rawFact[0] || {});
     const colInv  = keys.find(k => /INVOICE|FACTURA|FOLIO/i.test(k));
     const colLoad = keys.find(k => /LOAD|GLS/i.test(k));
