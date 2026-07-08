@@ -11,11 +11,26 @@
  * - Los saves mutan el objeto vivo en State.merged directamente.
  * - Cada save re-ejecuta runSVE() para feedback inmediato.
  *
+ * FIX (auditoría post-Camino B):
+ *   1. saveAndRevalidate() ya no envuelve el re-render del SVE en un
+ *      setTimeout(...,80) — no había ninguna razón técnica para ese
+ *      retraso (las escrituras al DOM ya son síncronas) y generaba una
+ *      ventana donde el usuario percibía que la advertencia "no se
+ *      actualizaba". Ahora runSVE()/renderSVE() se ejecutan en el mismo
+ *      tick que el guardado.
+ *   2. Cuando el campo corregido es la licencia (_LIC), se sincroniza de
+ *      inmediato con el catálogo de Supabase vía addOperator() — alta si
+ *      el operador es nuevo, actualización si ya existía. Fire-and-forget
+ *      (mismo patrón que FactCache.persist()), no bloquea el refresco de
+ *      tabla/SVE mientras se guarda. No requiere cambios de esquema: usa
+ *      el mismo addOperator()/tabla `operators` de la Fase 1.
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - escH (utils/dom.js)
  *   - UI (ui/ui.js)
  *   - runSVE (features/validation/sve.js)
+ *   - addOperator (features/catalog.js) — sincronización de licencia
  *   - RoutePicker (editing/route-picker.js) — importación cruzada entre
  *     módulos de edición: EditSystem.locateAndEdit() delega a RoutePicker
  *     cuando hay múltiples candidatos. RoutePicker importa EditSystem a su
@@ -26,6 +41,7 @@ import { State } from '../core/state.js';
 import { escH } from '../utils/dom.js';
 import { UI } from '../ui/ui.js';
 import { runSVE } from '../features/validation/sve.js';
+import { addOperator } from '../features/catalog.js';
 
 // Importación diferida para evitar inicialización circular:
 // RoutePicker también importa EditSystem, así que usamos una referencia
@@ -177,7 +193,22 @@ export const EditSystem = {
       const oldVal = EditSystem._originalValues[field] || '';
       if (newVal !== oldVal) {
         row[field] = newVal;
-        if (field === '_LIC') row['LIC.'] = newVal;
+        if (field === '_LIC') {
+          row['LIC.'] = newVal;
+          // Camino B — sincroniza la licencia corregida con el catálogo
+          // de Supabase: alta si el operador es nuevo, actualización si
+          // ya existía. Depende de que OPERADOR ya esté resuelto en este
+          // mismo row — como OPERADOR aparece antes que _LIC en
+          // EDITABLE_FIELDS, si ambos se editan a la vez, row['OPERADOR']
+          // ya refleja el valor nuevo para cuando llegamos aquí.
+          const opName = String(row['OPERADOR'] || '').trim();
+          if (opName && newVal) {
+            addOperator(opName, newVal).then(result => {
+              UI.renderCatalog();
+              if (!result.ok) console.warn('[EditSystem] No se pudo sincronizar la licencia con el catálogo:', result.msg);
+            });
+          }
+        }
         State.edits.push({
           rowId: EditSystem._currentRowId,
           ruta:  String(row['RUTA']||''),
@@ -190,15 +221,18 @@ export const EditSystem = {
     EditSystem.close();
     UI.renderTable();
     UI.updateStats();
-    setTimeout(() => {
-      const sveResult = runSVE(State.merged);
-      if (sveResult) {
-        UI.renderSVE(sveResult.issues, sveResult.quality, sveResult.nCrit, sveResult.nWarn, sveResult.nInfo, sveResult.nPass);
-      } else {
-        UI.resetSVE();
-      }
-      UI.updateHealthRail();
-    }, 80);
+
+    // FIX: se elimina el setTimeout(...,80) previo — no aportaba nada
+    // funcional (el DOM ya está listo en este punto) y solo introducía
+    // una ventana donde el usuario podía percibir que la corrección "no
+    // se reflejaba".
+    const sveResult = runSVE(State.merged);
+    if (sveResult) {
+      UI.renderSVE(sveResult.issues, sveResult.quality, sveResult.nCrit, sveResult.nWarn, sveResult.nInfo, sveResult.nPass);
+    } else {
+      UI.resetSVE();
+    }
+    UI.updateHealthRail();
   },
 
   close() {
