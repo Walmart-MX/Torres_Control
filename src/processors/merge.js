@@ -9,11 +9,24 @@
  * State.catalog directamente, y escribe el resultado en State.merged.
  * Es intencional — preserva exactamente el comportamiento original.
  *
+ * FIX (auditoría post-Camino B): se agrega usedPdfRows — un Set que
+ * rastrea, por identidad de objeto, qué pdfRow ya fue asignado a una
+ * entrega en esta corrida de merge. Antes, cuando el Excel traía una
+ * entrega adicional sin match específico (sin factura/DETTE coincidente),
+ * el fallback "cualquier PDF con la misma ruta" tomaba el primer PDF de
+ * esa ruta sin importar que ya estuviera asignado a otra entrega —
+ * duplicando marchamos y tarimas entre dos entregas distintas. Ahora el
+ * fallback (y por consistencia, también los matches específicos) omiten
+ * cualquier pdfRow ya reclamado; si no queda ninguno libre, la entrega
+ * queda correctamente sin match (_matched:false) en vez de heredar datos
+ * ajenos.
+ *
  * Estrategia de match PDF (en orden de prioridad):
  *   1. ruta + factura del Excel (match específico)
  *   2. ruta + DETTE.1 del Excel (match específico)
  *   3. ruta + DETTE del Excel (match específico)
- *   4. cualquier PDF con la misma ruta (fallback, primera coincidencia)
+ *   4. cualquier PDF con la misma ruta que aún no haya sido asignado
+ *      a otra entrega (fallback)
  *
  * Estrategia de match de factura:
  *   1. State.factData (concentrado del Excel recién cargado)
@@ -40,21 +53,26 @@ export function runMerge() {
   if (!State.xlsData || State.pdfData.size === 0) return;
   State.merged = [];
 
+  // Ver nota de cabecera — evita que el mismo pdfRow se asigne dos veces
+  // dentro de la misma corrida de merge.
+  const usedPdfRows = new Set();
+
   for (const row of State.xlsData) {
     const ruta    = String(row[COL_RUTA]    || '').trim();
     const detteF  = String(row[COL_DETTE_F] || '').trim();
     const factXls = String(row[COL_FACT]    || '').trim();
 
     let pdfRow = null, pdfMatchType = 'none';
-    if (factXls) { const r = State.pdfData.get(ruta + '|' + factXls); if (r) { pdfRow = r; pdfMatchType = 'specific'; } }
-    if (!pdfRow && detteF) { const r = State.pdfData.get(ruta + '|D|' + detteF); if (r) { pdfRow = r; pdfMatchType = 'specific'; } }
+    if (factXls) { const r = State.pdfData.get(ruta + '|' + factXls); if (r && !usedPdfRows.has(r)) { pdfRow = r; pdfMatchType = 'specific'; } }
+    if (!pdfRow && detteF) { const r = State.pdfData.get(ruta + '|D|' + detteF); if (r && !usedPdfRows.has(r)) { pdfRow = r; pdfMatchType = 'specific'; } }
     if (!pdfRow) {
       const detteE = String(row[COL_DETTE_E] || '').trim();
-      if (detteE) { const r = State.pdfData.get(ruta + '|D|' + detteE); if (r) { pdfRow = r; pdfMatchType = 'specific'; } }
+      if (detteE) { const r = State.pdfData.get(ruta + '|D|' + detteE); if (r && !usedPdfRows.has(r)) { pdfRow = r; pdfMatchType = 'specific'; } }
     }
     if (!pdfRow && ruta) {
-      for (const [, v] of State.pdfData) { if (v.ruta === ruta) { pdfRow = v; pdfMatchType = 'fallback'; break; } }
+      for (const [, v] of State.pdfData) { if (v.ruta === ruta && !usedPdfRows.has(v)) { pdfRow = v; pdfMatchType = 'fallback'; break; } }
     }
+    if (pdfRow) usedPdfRows.add(pdfRow);
 
     const factKey = pdfRow ? String(pdfRow.factura || '').trim() : '';
     let   factRow = factKey ? (State.factData.get(factKey) || null) : null;
