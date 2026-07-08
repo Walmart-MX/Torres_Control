@@ -32,10 +32,11 @@ import { State } from './state.js';
 import { UI, _setEvents } from '../ui/ui.js';
 import { Events } from '../events/events.js';
 import { EditSystem, _setRoutePicker } from '../editing/edit-system.js';
-import { WarnModal } from '../editing/warn-modal.js';
+import { WarnModal, _setEvents as _setWarnModalEvents } from '../editing/warn-modal.js';
 import { RoutePicker } from '../editing/route-picker.js';
 import { FactCache } from '../features/fact-cache.js';
 import { initCatalog } from '../features/catalog.js';
+import { DispatchHistory } from '../features/dispatch-history.js';
 
 /**
  * Inicializa la aplicación completa.
@@ -44,6 +45,7 @@ export async function init() {
   // ── Resolver dependencias circulares ──
   _setRoutePicker(RoutePicker);
   _setEvents(Events);
+  _setWarnModalEvents(Events);
 
   // ── Theme & User ──
   UI.applyTheme(State.theme);
@@ -161,6 +163,28 @@ export async function init() {
     if (e.key === 'Escape') { EditSystem.close(); WarnModal.close(); RoutePicker.close(); }
   });
 
+  // ── Historial de Procesamientos (Camino B, Fase 3) ──
+  document.getElementById('btnHistoryOpen').addEventListener('click', () => Events.openHistory());
+  document.getElementById('btnHistoryClose').addEventListener('click', () =>
+    document.getElementById('historyModalOverlay').classList.add('hidden'));
+  document.getElementById('historyModalOverlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('historyModalOverlay')) document.getElementById('historyModalOverlay').classList.add('hidden');
+  });
+  document.getElementById('historyList').addEventListener('click', e => {
+    const item = e.target.closest('[data-session-id]');
+    if (!item) return;
+    Events.selectHistorySession(item.dataset.sessionId);
+  });
+  document.getElementById('btnHistoryBack').addEventListener('click', () => {
+    document.getElementById('historyListView').style.display = '';
+    document.getElementById('historyPreviewView').style.display = 'none';
+  });
+  document.getElementById('btnHistoryRedownload').addEventListener('click', () => Events.redownloadHistorySession());
+
+  // ── Aviso "día ya procesado" ──
+  document.getElementById('btnTodayPreview').addEventListener('click', () => Events.previewTodaySession());
+  document.getElementById('btnTodayRedownload').addEventListener('click', () => Events.redownloadToday());
+
   // ── Init pipeline (visual, no depende del catálogo) ──
   UI.setPipeStep(1, 'active', 'En espera');
   UI.setActionsEnabled(false);
@@ -171,6 +195,10 @@ export async function init() {
   const catResult = await initCatalog();
   UI.renderCatalog();
   UI.setCatStatus(catResult.msg, catResult.ok ? 'ok' : 'err');
+
+  // ── Aviso de día ya procesado (Camino B, Fase 3) ──
+  const todaySession = await DispatchHistory.getTodaySession();
+  UI.renderTodayBanner(todaySession);
 
   // ── First-run modal ──
   setTimeout(() => {
