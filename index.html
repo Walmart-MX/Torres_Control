@@ -810,6 +810,26 @@ input, textarea { font-family: inherit; }
   font-family: inherit;
 }
 .route-picker-cancel:hover { background: var(--surface2); color: var(--text); }
+   /* ── TODAY BANNER — aviso de día operativo ya procesado ── */
+.today-banner {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--green-bg); border: 1px solid var(--green-bd);
+  border-radius: var(--r-lg); padding: 12px 18px; margin-bottom: 16px;
+  box-shadow: var(--shadow-sm);
+}
+.today-banner.hidden { display: none; }
+.today-banner-icon { font-size: 22px; flex-shrink: 0; }
+.today-banner-text { flex: 1; min-width: 200px; font-size: 12px; color: var(--text2); }
+.today-banner-text strong { display: block; font-size: 13px; color: var(--green); margin-bottom: 2px; }
+.today-banner-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+/* ── HISTORY MODAL — historial de procesamientos ── */
+.history-modal-box {
+  width: 760px; max-width: 100%; max-height: 82vh;
+  overflow-y: auto; display: flex; flex-direction: column;
+}
+.history-modal-hdr { display: flex; align-items: center; margin-bottom: 16px; gap: 10px; }
+.history-modal-title { font-size: 15px; font-weight: 800; color: var(--text); }
 </style>
 </head>
 <body>
@@ -878,12 +898,26 @@ input, textarea { font-family: inherit; }
     <span class="tb-user-label">Captura</span>
     <span class="tb-user-name" id="tbUserName">—</span>
   </div>
+  <button class="tb-theme-btn" id="btnHistoryOpen" title="Historial de procesamientos">🗂️</button>
   <button class="tb-theme-btn" id="btnTheme" title="Cambiar tema">🌙</button>
 </header>
 
 <!-- ── APP ── -->
 <div class="app-shell">
 <div class="page">
+
+  <!-- Aviso: día operativo ya procesado (Camino B, Fase 3) -->
+  <div class="today-banner hidden" id="todayBanner">
+    <div class="today-banner-icon">✅</div>
+    <div class="today-banner-text">
+      <strong>El día operativo de hoy ya fue procesado.</strong>
+      <span id="todayBannerInfo"></span>
+    </div>
+    <div class="today-banner-actions">
+      <button class="btn btn-ghost btn-sm" id="btnTodayPreview">👁 Ver vista previa</button>
+      <button class="btn btn-amber btn-sm" id="btnTodayRedownload">⬇ Descargar de nuevo</button>
+    </div>
+  </div>
 
   <!-- Pipeline status -->
   <div class="pipeline" id="pipeline">
@@ -1211,7 +1245,36 @@ input, textarea { font-family: inherit; }
     <button class="route-picker-cancel" id="rpCancel">Cancelar</button>
   </div>
 </div>
+<!-- ── HISTORIAL DE PROCESAMIENTOS ── -->
+<div class="modal-overlay hidden" id="historyModalOverlay">
+  <div class="modal-box history-modal-box">
+    <div class="history-modal-hdr">
+      <span style="font-size:20px">🗂️</span>
+      <div class="history-modal-title">Historial de Procesamientos</div>
+      <button class="btn btn-ghost btn-sm" id="btnHistoryClose" style="margin-left:auto">✕ Cerrar</button>
+    </div>
 
+    <div id="historyListView">
+      <div id="historyList"></div>
+    </div>
+
+    <div id="historyPreviewView" style="display:none">
+      <button class="btn btn-ghost btn-sm" id="btnHistoryBack">← Volver a la lista</button>
+      <div id="historyPreviewMeta" style="margin:12px 0;font-size:12px;color:var(--text2)"></div>
+      <div class="table-wrap" style="max-height:400px">
+        <table class="data-table">
+          <thead><tr id="histPreviewThead"></tr></thead>
+          <tbody id="histPreviewTbody"></tbody>
+        </table>
+      </div>
+      <div style="margin-top:14px;text-align:right">
+        <button class="btn btn-amber" id="btnHistoryRedownload">⬇ Descargar de nuevo</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── EDIT DRAWER ── -->
 <!-- ── EDIT DRAWER ── -->
 <div class="edit-drawer" id="editDrawer">
   <div class="edit-drawer-hdr">
