@@ -14,12 +14,23 @@
  * necesita await si no le importa esperar el resultado, ver renderCatalog
  * en ui.js, que las invoca en un onclick inline sin await).
  *
+ * CAMBIO Camino B / Fase 3: toda exportación pasa ahora por
+ * finalizeAndExport() — un único punto de entrada que persiste la sesión
+ * en el historial permanente (dispatch_sessions/dispatch_rows en
+ * Supabase) y siempre dispara la descarga local, incluso si el guardado
+ * remoto falla. handleExport(), handleForceExport() y
+ * WarnModal.exportAnyway() convergen ahí. También se agregan los
+ * manejadores del panel "Historial de Procesamientos" y del aviso de
+ * "día ya procesado" (openHistory, selectHistorySession,
+ * redownloadHistorySession, previewTodaySession, redownloadToday).
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - normOp (utils/format.js)
  *   - UI (ui/ui.js)
  *   - EditSystem, WarnModal, RoutePicker (editing/)
  *   - FactCache (features/fact-cache.js)
+ *   - DispatchHistory (features/dispatch-history.js)
  *   - pdfExtract, parsePDF (processors/pdf.js)
  *   - processXLS (processors/excel.js)
  *   - processPaste (processors/paste.js)
@@ -43,6 +54,7 @@ import { runMerge } from '../processors/merge.js';
 import { runSVE } from '../features/validation/sve.js';
 import { exportXLSX } from '../features/export.js';
 import { addOperator, deleteOperator, importOperators } from '../features/catalog.js';
+import { DispatchHistory } from '../features/dispatch-history.js';
 
 export const Events = {
 
@@ -175,11 +187,12 @@ export const Events = {
     }, 100);
   },
 
-  // ── Export ──
+  // ── Export (Camino B / Fase 3 — historial permanente) ──
   // Tres ramas según el estado del SVE:
   //   critical  → flash del gate, no exporta
-  //   warn-only → muestra WarnModal para confirmar
-  //   clean     → exporta directamente
+  //   warn-only → muestra WarnModal para confirmar (WarnModal.exportAnyway
+  //               llama Events.finalizeAndExport al confirmar)
+  //   clean     → finalizeAndExport directo
   handleExport() {
     if (State.sveHasCritical) {
       document.getElementById('svePanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -193,22 +206,105 @@ export const Events = {
       WarnModal.show();
       return;
     }
-    exportXLSX();
+    Events.finalizeAndExport({ exportType: 'despacho', action: 'clean' });
   },
 
   handleForceExport() {
     const ts   = new Date().toLocaleString('es-MX');
     const user = State.user || 'desconocido';
     const nc   = parseInt(document.getElementById('sveCrit').textContent || '0', 10);
-    State.sveAuditLog.push({ ts, user, action:'FORCE_EXPORT', quality:State.sveLastQuality, critErrors:nc });
-    console.warn('[SVE AUDIT] Exportación forzada:', State.sveAuditLog[State.sveAuditLog.length-1]);
 
     document.getElementById('btnExport').disabled  = false;
     document.getElementById('btnExport2').disabled = false;
     const gate = document.getElementById('exportGate');
     gate.classList.add('forced');
     gate.innerHTML = `<div class="gate-msg"><strong style="color:var(--orange)">⚠ Exportación forzada registrada</strong><span>${ts} · ${user} · Calidad: ${State.sveLastQuality}% · ${nc} error${nc>1?'es':''} crítico${nc>1?'s':''}.</span></div>`;
+
+    Events.finalizeAndExport({ exportType: 'despacho', action: 'forced', critErrors: nc });
+  },
+
+  /**
+   * Punto único de entrada para toda exportación: persiste la sesión en
+   * el historial permanente de Supabase (dispatch_sessions/dispatch_rows)
+   * y SIEMPRE dispara la descarga local del Excel, incluso si el guardado
+   * remoto falla — un problema de red no debe impedir sacar el despacho
+   * del día. auditMeta se guarda tal cual en dispatch_sessions.meta.
+   * @param {object} auditMeta — { exportType, action, ...detalles }
+   */
+  async finalizeAndExport(auditMeta = {}) {
+    if (!State.merged.length) return;
+    const ts   = new Date().toLocaleString('es-MX');
+    const user = State.user || 'desconocido';
+
+    // Se conserva el audit log local (consola) además del historial
+    // permanente en Supabase — no son mutuamente excluyentes.
+    State.sveAuditLog.push({ ts, user, action: (auditMeta.action || 'export').toUpperCase(), quality: State.sveLastQuality, ...auditMeta });
+    console.info('[SVE AUDIT]', State.sveAuditLog[State.sveAuditLog.length - 1]);
+
+    UI.setExportBusy(true);
+    try {
+      await DispatchHistory.finalizeSession(State.merged, { ...auditMeta, ts, user });
+    } catch (e) {
+      console.warn('[DispatchHistory] No se pudo guardar el historial:', e.message);
+      // No bloqueamos la descarga local aunque falle el guardado remoto.
+    }
+    UI.setExportBusy(false);
+
     exportXLSX();
+    Events.refreshTodayBanner();
+  },
+
+  async refreshTodayBanner() {
+    const session = await DispatchHistory.getTodaySession();
+    UI.renderTodayBanner(session);
+  },
+
+  // ── Historial de Procesamientos ──
+  _historySessions: [],
+  _currentHistorySession: null,
+  _currentHistoryRows: null,
+
+  async openHistory() {
+    document.getElementById('historyModalOverlay').classList.remove('hidden');
+    document.getElementById('historyListView').style.display = '';
+    document.getElementById('historyPreviewView').style.display = 'none';
+    Events._historySessions = await DispatchHistory.listSessions(50);
+    UI.renderHistoryList(Events._historySessions);
+  },
+
+  async selectHistorySession(sessionId) {
+    const session = Events._historySessions.find(s => s.id === sessionId);
+    if (!session || session.status !== 'completed') return;
+    const rows = await DispatchHistory.getSessionRows(sessionId);
+    Events._currentHistorySession = session;
+    Events._currentHistoryRows    = rows;
+    document.getElementById('historyListView').style.display = 'none';
+    document.getElementById('historyPreviewView').style.display = '';
+    UI.renderHistoryPreview(rows, session);
+  },
+
+  redownloadHistorySession() {
+    if (!Events._currentHistoryRows || !Events._currentHistorySession) return;
+    exportXLSX(Events._currentHistoryRows, 'despacho', Events._currentHistorySession.session_date);
+  },
+
+  async previewTodaySession() {
+    const session = await DispatchHistory.getTodaySession();
+    if (!session) return;
+    document.getElementById('historyModalOverlay').classList.remove('hidden');
+    document.getElementById('historyListView').style.display = 'none';
+    document.getElementById('historyPreviewView').style.display = '';
+    const rows = await DispatchHistory.getSessionRows(session.id);
+    Events._currentHistorySession = session;
+    Events._currentHistoryRows    = rows;
+    UI.renderHistoryPreview(rows, session);
+  },
+
+  async redownloadToday() {
+    const session = await DispatchHistory.getTodaySession();
+    if (!session) return;
+    const rows = await DispatchHistory.getSessionRows(session.id);
+    exportXLSX(rows, 'despacho', session.session_date);
   },
 
   // ── Catalog (Camino B / Fase 1 — Supabase) ──
