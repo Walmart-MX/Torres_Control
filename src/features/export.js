@@ -85,9 +85,18 @@ function buildWorkbook(rows, format) {
   const dataRows = rows.map(row => format.columns.map(col => {
     let val = getMapped(row, col);
     if (val === '' || val === null || val === undefined) return '';
+    // src/features/export.js — dentro de buildWorkbook()
+
     if (DATE_COLS.has(col)) {
       const d = val instanceof Date ? val : new Date(val);
-      return isNaN(d.getTime()) ? val : new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      // FIX: SheetJS escribe usando el instante UTC crudo del Date, sin
+      // ajustar por huso horario — igual que al leer (Date.UTC(y,m,d)
+      // en excel.js). Si aquí reconstruimos con el constructor LOCAL,
+      // el instante no corresponde a la medianoche UTC que el escritor
+      // espera, y el Excel exportado vuelve a mostrar la fecha desfasada.
+      // Se usan los componentes LOCALES ya correctos de `d`, pero anclados
+      // con Date.UTC() — espejo exacto de _fixExcelDateRow.
+      return isNaN(d.getTime()) ? val : new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
     }
     if (DATETIME_COLS.has(col)) {
       if (val instanceof Date && !isNaN(val.getTime())) return val;
