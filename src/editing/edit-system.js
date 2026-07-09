@@ -42,6 +42,10 @@ import { escH } from '../utils/dom.js';
 import { UI } from '../ui/ui.js';
 import { runSVE } from '../features/validation/sve.js';
 import { addOperator } from '../features/catalog.js';
+// src/editing/edit-system.js
+
+// Agregar import:
+import { normOp } from '../utils/format.js';
 
 // Importación diferida para evitar inicialización circular:
 // RoutePicker también importa EditSystem, así que usamos una referencia
@@ -195,14 +199,21 @@ export const EditSystem = {
         row[field] = newVal;
         if (field === '_LIC') {
           row['LIC.'] = newVal;
-          // Camino B — sincroniza la licencia corregida con el catálogo
-          // de Supabase: alta si el operador es nuevo, actualización si
-          // ya existía. Depende de que OPERADOR ya esté resuelto en este
-          // mismo row — como OPERADOR aparece antes que _LIC en
-          // EDITABLE_FIELDS, si ambos se editan a la vez, row['OPERADOR']
-          // ya refleja el valor nuevo para cuando llegamos aquí.
           const opName = String(row['OPERADOR'] || '').trim();
           if (opName && newVal) {
+            // FIX: la licencia es un valor único por operador, no por
+            // entrega — se propaga de inmediato a todas las demás filas
+            // de este mismo operador en State.merged, sin esperar a un
+            // nuevo merge. Antes solo se corregía la fila editada, y
+            // había que repetir la corrección entrega por entrega.
+            const opKey = normOp(opName);
+            State.merged.forEach(r => {
+              if (r._rowId !== row._rowId &&
+                  normOp(String(r['OPERADOR'] || '').trim()) === opKey) {
+                r['_LIC'] = newVal;
+                r['LIC.'] = newVal;
+              }
+            });
             addOperator(opName, newVal).then(result => {
               UI.renderCatalog();
               if (!result.ok) console.warn('[EditSystem] No se pudo sincronizar la licencia con el catálogo:', result.msg);
