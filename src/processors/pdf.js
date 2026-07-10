@@ -98,17 +98,32 @@ export async function pdfExtract(file) {
       // todo lo que matcheaba antes, más formatos con dígitos sin padding
       // o año corto.
       const dateMatch = allText.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
-      // FIX #7: se agrega espacio como separador válido de hora, además
-      // de : . ; — cubre extracciones de texto donde el separador se
-      // pierde y queda como espacio simple.
-      const timeMatch = allText.match(/(\d{1,2})[:.;\s]\s*(\d{2})(?![\/\-\d])/);
-      if (!dateMatch) continue;
+      if (!dateMatch) {
+        // Diagnóstico: si alguna cita sigue sin reconocerse y no tenemos
+        // un ejemplo concreto del texto que falla, este log deja
+        // constancia en consola del contenido exacto de la anotación —
+        // la próxima vez que ocurra, revisa la consola del navegador
+        // para ver qué formato falta cubrir, en vez de adivinar.
+        if (allText) console.warn('[pdf.js] Anotación con fecha no reconocida:', JSON.stringify(allText));
+        continue;
+      }
 
       let [, dd, mm, yy] = dateMatch;
       dd = dd.padStart(2, '0');
       mm = mm.padStart(2, '0');
       if (yy.length === 2) yy = '20' + yy;
       const fecha = `${dd}/${mm}/${yy}`;
+
+      // FIX (regresión): el timeMatch anterior buscaba en TODO allText,
+      // incluyendo los dígitos de la fecha ya capturada. Al aceptar
+      // espacio como separador de hora, un texto como
+      // "03/07/2026 08:00" podía matchear "26 08" (año + hora) ANTES de
+      // llegar al "08:00" real, produciendo horas inválidas (26:08 →
+      // normalizado a 00:09). Se acota la búsqueda al texto que viene
+      // DESPUÉS de la fecha — elimina el falso positivo sin perder la
+      // tolerancia al separador de espacio para el caso real.
+      const afterDate = allText.slice(dateMatch.index + dateMatch[0].length);
+      const timeMatch = afterDate.match(/(\d{1,2})[:.;\s]\s*(\d{2})(?![\/\-\d])/);
 
       let cita = fecha;
       if (timeMatch) {
