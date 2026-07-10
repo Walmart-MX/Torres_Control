@@ -200,21 +200,35 @@ export const EditSystem = {
         row[field] = newVal;
         if (field === '_LIC') {
           row['LIC.'] = newVal;
-          const opName = String(row['OPERADOR'] || '').trim();
-          if (opName && newVal) {
-            // FIX: la licencia es un valor único por operador, no por
-            // entrega — se propaga de inmediato a todas las demás filas
-            // de este mismo operador en State.merged, sin esperar a un
-            // nuevo merge. Antes solo se corregía la fila editada, y
-            // había que repetir la corrección entrega por entrega.
-            const opKey = normOp(opName);
+
+          // FIX: la licencia es un atributo del OPERADOR, no de la
+          // entrega — un mismo operador puede tener varias entregas en
+          // la misma corrida. Antes había que repetir la corrección
+          // entrega por entrega. Ahora se propaga a todas las filas de
+          // State.merged cuyo OPERADOR normalizado coincida, en la
+          // misma corrida actual (no requiere recargar ni reprocesar).
+          const opNorm = normOp(row['OPERADOR'] || '');
+          let propagated = 0;
+          if (opNorm) {
             State.merged.forEach(r => {
-              if (r._rowId !== row._rowId &&
-                  normOp(String(r['OPERADOR'] || '').trim()) === opKey) {
+              if (r === row) return;
+              if (normOp(r['OPERADOR'] || '') === opNorm && r['_LIC'] !== newVal) {
                 r['_LIC'] = newVal;
                 r['LIC.'] = newVal;
+                propagated++;
               }
             });
+          }
+          if (propagated) console.log(`[EditSystem] Licencia propagada a ${propagated} entrega(s) adicional(es) del mismo operador.`);
+
+          // Camino B — sincroniza la licencia corregida con el catálogo
+          // de Supabase: alta si el operador es nuevo, actualización si
+          // ya existía. Depende de que OPERADOR ya esté resuelto en este
+          // mismo row — como OPERADOR aparece antes que _LIC en
+          // EDITABLE_FIELDS, si ambos se editan a la vez, row['OPERADOR']
+          // ya refleja el valor nuevo para cuando llegamos aquí.
+          const opName = String(row['OPERADOR'] || '').trim();
+          if (opName && newVal) {
             addOperator(opName, newVal).then(result => {
               UI.renderCatalog();
               if (!result.ok) console.warn('[EditSystem] No se pudo sincronizar la licencia con el catálogo:', result.msg);
