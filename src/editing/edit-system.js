@@ -45,6 +45,7 @@ import { addOperator } from '../features/catalog.js';
 // src/editing/edit-system.js
 
 // Agregar import:
+import { addOperator } from '../features/catalog.js';
 import { normOp } from '../utils/format.js';
 
 // Importación diferida para evitar inicialización circular:
