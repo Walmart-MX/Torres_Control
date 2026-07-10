@@ -42,11 +42,8 @@ import { escH } from '../utils/dom.js';
 import { UI } from '../ui/ui.js';
 import { runSVE } from '../features/validation/sve.js';
 import { addOperator } from '../features/catalog.js';
-// src/editing/edit-system.js
-
-// Agregar import:
-import { addOperator } from '../features/catalog.js';
 import { normOp } from '../utils/format.js';
+
 
 // Importación diferida para evitar inicialización circular:
 // RoutePicker también importa EditSystem, así que usamos una referencia
