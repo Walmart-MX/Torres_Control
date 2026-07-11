@@ -6,6 +6,31 @@
  * Ningún método de UI debe tomar decisiones de negocio — eso es
  * responsabilidad de Events, EditSystem o los processors.
  *
+ * CAMBIO — Fase 1 del rediseño "Centro de Operaciones" (PulseBar):
+ *   updateHealthRail() y updateStats() dejaban de tener sentido tal
+ *   cual estaban — pintaban a IDs (hPDF/hCov/hQual/hStatus,
+ *   stMatch/stNoMatch/stLic/stDesp) que ya no existen en index.html,
+ *   reemplazados por la PulseBar del topbar (ver ui/pulse-bar.js).
+ *   Se CONSERVAN AMBOS NOMBRES PÚBLICOS sin cambios — todos los
+ *   callers existentes (core/app.js, events.js, editing/edit-system.js,
+ *   y la propia ui.js en resetAll/renderSVE) siguen llamándolos
+ *   exactamente igual. Internamente:
+ *     - updateHealthRail() ahora arma los datos agregados del día y
+ *       delega el pintado a PulseBar.render().
+ *     - updateStats() perdió los `set()` a stMatch/stNoMatch/stLic/
+ *       stDesp (elementos eliminados) pero conserva intacto todo lo
+ *       demás: el badge de cache-hits, los badges bdgPDF/bdgXLS/
+ *       bdgMatch/bdgNoMatch/bdgDesp (siguen en la barra de acciones,
+ *       fuera del alcance de esta fase) y previewDesc.
+ *   renderSVE() perdió el bloque que pintaba shield/ring/subtitle
+ *   (elementos eliminados de index.html) pero conserva sin cambios:
+ *   los contadores sveCrit/sveWarn/sveInfo/svePass (ahora ocultos vía
+ *   CSS `.sve-counters-hidden`, NO eliminados del DOM — events.js
+ *   `handleForceExport()` y warn-modal.js `show()`/`exportAnyway()`
+ *   siguen leyendo su textContent directamente y no se tocan en esta
+ *   fase), el render de grupos de incidencias (sveAlerts) y la lógica
+ *   completa del export gate. Cero cambio de comportamiento funcional.
+ *
  * Dependencias:
  *   - State (core/state.js) — lee estado para calcular lo que muestra,
  *     y en algunos métodos lo muta (resetAll, resetSVE, setUser)
@@ -15,6 +40,8 @@
  *     PREVIEW_COLS (core/constants.js) — para renderizar la tabla
  *   - SVE_CRIT, SVE_WARN, SVE_INFO, SVE_ICONS
  *     (features/validation/sve.js) — para renderizar el panel SVE
+ *   - PulseBar (ui/pulse-bar.js) — pinta el resumen de salud del día
+ *     en el topbar (Fase 1 del rediseño)
  *   - Events (events/events.js) — resuelto en tiempo de ejecución vía
  *     _setEvents(), ver nota abajo.
  *
@@ -42,6 +69,7 @@ import {
 } from '../core/constants.js';
 import { SVE_CRIT, SVE_WARN, SVE_INFO, SVE_ICONS } from '../features/validation/sve.js';
 import { FactCache } from '../features/fact-cache.js';
+import { PulseBar } from './pulse-bar.js';
 
 let Events;
 /** Resuelve la dependencia circular UI ↔ Events — llamado una vez desde core/app.js */
@@ -111,40 +139,27 @@ export const UI = {
     if (stat) stEl.textContent = stat;
   },
 
-  // ── Health rail (topbar) ──
+  // ── Pulse Bar (topbar) — Fase 1 del rediseño ──
+  // Nombre público conservado (updateHealthRail) por compatibilidad con
+  // todos los callers existentes — ver nota de cabecera del módulo.
+  // Internamente arma los datos agregados del día y delega el pintado
+  // a PulseBar.render(). nCrit/nWarn se leen de los contadores ocultos
+  // del SVE (sveCrit/sveWarn), el mismo patrón que ya usa
+  // events.js → handleForceExport() para leer esos valores.
   updateHealthRail() {
-    const { merged, pdfData } = State;
-    const total = merged.length || 0;
-    const match = merged.filter(r => r._matched).length;
-    const q     = State.sveLastQuality;
-
-    const pdfEl  = document.getElementById('hPDF');
-    const covEl  = document.getElementById('hCov');
-    const qualEl = document.getElementById('hQual');
-    const stEl   = document.getElementById('hStatus');
-
-    // PDFs
-    const pdfCount = new Set([...pdfData.keys()].filter(k => !k.includes('|D|'))).size;
-    pdfEl.textContent = pdfCount || '—';
-    pdfEl.className   = 'health-pill-val ' + (pdfCount > 0 ? 'ok' : 'idle');
-
-    // Coverage
-    const covPct = total ? Math.round(match / total * 100) : null;
-    covEl.textContent = covPct !== null ? covPct + '%' : '—';
-    covEl.className   = 'health-pill-val ' + (covPct === null ? 'idle' : covPct === 100 ? 'ok' : covPct >= 70 ? 'warn' : 'crit');
-
-    // Quality
-    qualEl.textContent = total ? q + '%' : '—';
-    qualEl.className   = 'health-pill-val ' + (!total ? 'idle' : q >= 90 ? 'ok' : q >= 60 ? 'warn' : 'crit');
-
-    // Status
-    if (!total) { stEl.textContent = 'En espera'; stEl.className = 'health-pill-val idle'; }
-    else if (State.sveHasCritical) { stEl.textContent = '⚠ Bloqueado'; stEl.className = 'health-pill-val crit'; }
-    else if (covPct === 100 && q >= 90) { stEl.textContent = '✓ Listo'; stEl.className = 'health-pill-val ok'; }
-    else { stEl.textContent = 'Revisar'; stEl.className = 'health-pill-val warn'; }
+    const total   = State.merged.length || 0;
+    const matched = State.merged.filter(r => r._matched).length;
+    const nCrit   = parseInt(document.getElementById('sveCrit')?.textContent || '0', 10);
+    const nWarn   = parseInt(document.getElementById('sveWarn')?.textContent || '0', 10);
+    PulseBar.render({ total, matched, quality: State.sveLastQuality, nCrit, nWarn });
   },
 
   // ── Stats strip ──
+  // CAMBIO Fase 1: se retiraron los `set()` a stMatch/stNoMatch/stLic/
+  // stDesp — esos elementos ya no existen en index.html (la PulseBar
+  // resume esta información arriba). Todo lo demás de esta función
+  // (badge de cache-hits, badges de la barra de acciones, previewDesc)
+  // se conserva sin cambios.
   updateStats() {
     // Show cache-hit summary if any rows used historical data
     const cacheHits = State.merged.filter(r => r._factSource === 'cache').length;
@@ -157,19 +172,7 @@ export const UI = {
     const total = State.merged.length;
     const match = State.matchCount;
     const noM   = total - match;
-    const lic   = State.licCount;
     const desp  = State.despCount;
-    const p     = (v) => total ? Math.round(v/total*100)+'%' : '0%';
-
-    const set = (id, val, sub, cls) => {
-      document.getElementById(id).textContent = val;
-      const subEl = document.getElementById(id + 'Sub');
-      if (subEl) { subEl.textContent = sub; subEl.className = 'stat-sub ' + cls; }
-    };
-    set('stMatch',   match, p(match) + ' del total',  match===total?'ok':'warn');
-    set('stNoMatch', noM,   p(noM)   + ' del total',  noM===0?'ok':'warn');
-    set('stLic',     lic,   p(lic)   + ' del total',  lic===total?'ok':'warn');
-    set('stDesp',    desp,  p(desp)  + ' del total',  desp>0?'ok':'idle');
 
     // Badges
     const bdg = (id, v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
@@ -179,7 +182,7 @@ export const UI = {
     bdg('bdgNoMatch', noM);
     bdg('bdgDesp',    desp);
 
-    document.getElementById('previewDesc').textContent = `${total} rutas · ${match} con PDF · ${lic} con licencia`;
+    document.getElementById('previewDesc').textContent = `${total} rutas · ${match} con PDF · ${State.licCount} con licencia`;
   },
 
   // ── Progress ──
@@ -300,41 +303,40 @@ export const UI = {
   },
 
   // ── SVE ──
+  // CAMBIO Fase 1: resetSVE() ahora también limpia los contadores
+  // ocultos (sveCrit/sveWarn/sveInfo/svePass) a '0' — antes esto no
+  // era necesario porque el ring/shield se repintaban siempre que
+  // renderSVE() corría, pero ahora updateHealthRail() puede leer esos
+  // contadores en cualquier momento (incluido después de un reset), así
+  // que deben quedar consistentes con "sin datos" en vez de conservar
+  // el último valor pintado.
   resetSVE() {
     document.getElementById('svePanel').classList.remove('on');
+    UI._resetSveCounters();
     State.sveHasCritical = false;
     State.sveHasWarnings = false;
     State.sveLastQuality = 100;
   },
+
+  /** @private — ver nota en resetSVE() */
+  _resetSveCounters() {
+    ['sveCrit','sveWarn','sveInfo','svePass'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = '0';
+    });
+  },
+
   renderSVE(issues, quality, nCrit, nWarn, nInfo, nPass) {
     const panel = document.getElementById('svePanel');
     panel.classList.add('on');
 
-    // Ring
-    const CIRC = 175.9;
-    const fill = document.getElementById('ringFill');
-    fill.style.strokeDashoffset = CIRC - (CIRC * quality / 100);
-    const ring  = document.getElementById('sveRing');
-    ring.className = 'sve-ring ' + (quality===100?'q-100':quality>=80?'q-high':quality>=50?'q-med':'q-low');
-    document.getElementById('ringPct').textContent = quality + '%';
-
-    // Counters
+    // Contadores — SIGUEN en el DOM aunque ya no se muestren
+    // visualmente (ver nota de cabecera del módulo): events.js y
+    // warn-modal.js leen su textContent directamente.
     document.getElementById('sveCrit').textContent = nCrit;
     document.getElementById('sveWarn').textContent = nWarn;
     document.getElementById('sveInfo').textContent = nInfo;
     document.getElementById('svePass').textContent = nPass;
-
-    // Shield
-    const shield = document.getElementById('sveShield');
-    shield.className = 'sve-shield-wrap ' + (nCrit>0?'crit':nWarn>0?'warn':'ok');
-    shield.textContent = nCrit>0 ? '🚨' : nWarn>0 ? '⚠️' : '🛡️';
-
-    // Subtitle
-    const sub = document.getElementById('sveSubtitle');
-    if (quality===100) sub.textContent = 'Auditoría completada — todos los datos superaron las validaciones.';
-    else if (nCrit>0)  sub.textContent = `${nCrit} error${nCrit>1?'es':''} crítico${nCrit>1?'s':''} detectado${nCrit>1?'s':''} — exportación bloqueada hasta corregir.`;
-    else if (nWarn>0)  sub.textContent = `${nWarn} advertencia${nWarn>1?'s':''} — revisa antes de exportar.`;
-    else               sub.textContent = 'Solo incidencias informativas — puedes exportar con seguridad.';
 
     // Alerts
     const container = document.getElementById('sveAlerts');
@@ -591,6 +593,10 @@ export const UI = {
   },
 
   // ── Reset everything ──
+  // CAMBIO Fase 1: se retiró el bloque que reseteaba stMatch/stNoMatch/
+  // stLic/stDesp (elementos eliminados de index.html). Todo lo demás
+  // se conserva igual — incluyendo el reset de los badges de la barra
+  // de acciones (bdgPDF/bdgXLS/bdgMatch/bdgNoMatch), que siguen vigentes.
   resetAll() {
     State.pdfData  = new Map();
     State.xlsData  = null;
@@ -606,10 +612,6 @@ export const UI = {
     UI.setBadge('pdfBadge', '● 0 archivos');
     UI.setBadge('xlsBadge', '● 0 rutas');
 
-    ['stMatch','stNoMatch','stLic','stDesp'].forEach(id => {
-      document.getElementById(id).textContent = '—';
-      const sub = document.getElementById(id + 'Sub'); if (sub) { sub.textContent = '—'; sub.className = 'stat-sub idle'; }
-    });
     ['bdgPDF','bdgXLS','bdgMatch','bdgNoMatch'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent='—'; });
     document.getElementById('bdgDesp').textContent = '0';
 
@@ -630,6 +632,7 @@ export const UI = {
     document.getElementById('pipeNum2').textContent = '2';
 
     document.getElementById('svePanel').classList.remove('on');
+    UI._resetSveCounters();
     document.getElementById('exportGate').classList.remove('on','forced');
     UI.clearErrors();
     UI.hideProgress();
