@@ -26,6 +26,13 @@
  * EditSystem y RoutePicker, para no crear un ciclo de imports estático
  * entre ui.js y events.js (events.js ya importa UI directamente).
  *
+ * CAMBIO Fase 1 del rediseño "Centro de Operaciones" (PulseBar): se
+ * agrega un único listener nuevo — click en la PulseBar del topbar
+ * hace scroll al panel SVE si está visible. Es intencionalmente el
+ * único punto de interacción de la PulseBar en esta fase (ver
+ * ui/pulse-bar.js — todavía no filtra ni prioriza nada, eso llega con
+ * el Feed de Atención en la Fase 3).
+ *
  * Dependencias: todos los módulos de la aplicación.
  */
 import { State } from './state.js';
@@ -93,6 +100,17 @@ export async function init() {
   // ── Enter key en name input ──
   document.getElementById('nameInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') document.getElementById('nameModalBtn').click();
+  });
+
+  // ── Pulse Bar (Fase 1 del rediseño) ──
+  // Único punto de interacción de esta fase: click hace scroll al panel
+  // SVE si tiene algo que mostrar (clase 'on'). Si está vacío/oculto no
+  // hace nada — no tiene sentido saltar a un panel sin contenido.
+  document.getElementById('pulseBar').addEventListener('click', () => {
+    const svePanel = document.getElementById('svePanel');
+    if (svePanel.classList.contains('on')) {
+      svePanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   });
 
   // ── Catalog ──
