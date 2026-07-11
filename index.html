@@ -128,37 +128,46 @@ input, textarea { font-family: inherit; }
 .tb-context { font-size: 11px; color: rgba(255,255,255,.4); letter-spacing: .01em; }
 .tb-spacer { flex: 1; }
 
-/* Health rail — the signature element */
-.health-rail {
-  display: flex; align-items: center; gap: 6px;
+/* Pulse Bar — Fase 1 del rediseño "Centro de Operaciones".
+   Reemplaza al antiguo Health Rail (4 pills) — ver
+   src/ui/pulse-bar.js para la lógica de render. Única fuente de
+   verdad de "¿cómo va el día?" en el topbar. */
+.pulse-bar {
+  display: flex; flex-direction: column; justify-content: center; gap: 3px;
   background: rgba(255,255,255,.07);
   border: 1px solid rgba(255,255,255,.12);
-  border-radius: 8px; padding: 4px 10px; gap: 10px;
-  transition: background .2s;
+  border-radius: 8px; padding: 6px 14px;
+  min-width: 260px; cursor: pointer;
+  transition: background .15s;
 }
-.health-pill {
-  display: flex; align-items: center; gap: 5px;
-  font-size: 11px; color: rgba(255,255,255,.5);
+.pulse-bar:hover { background: rgba(255,255,255,.12); }
+.pulse-track {
+  width: 100%; height: 4px; border-radius: 4px;
+  background: rgba(255,255,255,.15); overflow: hidden;
 }
-.health-pill-val {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px; font-weight: 600; color: rgba(255,255,255,.85);
+.pulse-fill {
+  height: 100%; width: 0%; border-radius: 4px;
+  background: var(--text4); transition: width .3s ease, background .2s;
 }
-.health-pill-val.ok    { color: #34D399; }
-.health-pill-val.warn  { color: var(--amber); }
-.health-pill-val.crit  { color: #F87171; }
-.health-pill-val.idle  { color: rgba(255,255,255,.3); }
-.health-sep { width: 1px; height: 14px; background: rgba(255,255,255,.12); }
+.pulse-bar.idle .pulse-fill { background: rgba(255,255,255,.25); }
+.pulse-bar.ok   .pulse-fill { background: #34D399; }
+.pulse-bar.warn .pulse-fill { background: var(--amber); }
+.pulse-bar.crit .pulse-fill { background: #F87171; }
+.pulse-text {
+  font-family: 'JetBrains Mono', monospace; font-size: 10px;
+  color: rgba(255,255,255,.65); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.pulse-bar.crit .pulse-text { color: #FCA5A5; }
+.pulse-bar.warn .pulse-text { color: var(--amber-bd); }
 
 /* Topbar responsive */
 @media (max-width: 1200px) {
-  .health-rail { gap: 6px; padding: 4px 8px; }
-  .health-pill { gap: 3px; }
-  .health-pill > span:first-child { display: none; }
+  .pulse-bar { min-width: 200px; }
   .tb-context { display: none; }
 }
 @media (max-width: 900px) {
-  .health-rail { display: none; }
+  .pulse-bar { display: none; }
 }
 
 /* User chip */
@@ -353,38 +362,6 @@ input, textarea { font-family: inherit; }
 .right-panel { grid-column: 2; display: flex; flex-direction: column; gap: 14px; }
 @media (max-width: 960px) { .right-panel { grid-column: 1; } }
 
-/* ── RESULT STATS STRIP ── */
-.stats-strip {
-  display: grid; grid-template-columns: repeat(4, 1fr);
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--r-lg); box-shadow: var(--shadow-sm);
-  overflow: hidden;
-}
-@media (max-width: 640px) {
-  .stats-strip { grid-template-columns: repeat(2, 1fr); }
-  .stats-strip .stat-cell:nth-child(2) { border-right: none; }
-  .stats-strip .stat-cell:nth-child(3) { border-top: 1px solid var(--border); }
-}
-.stat-cell {
-  padding: 14px 16px; border-right: 1px solid var(--border);
-  display: flex; align-items: center; gap: 10px;
-}
-.stat-cell:last-child { border-right: none; }
-.stat-ico { font-size: 18px; flex-shrink: 0; }
-.stat-num {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 22px; font-weight: 800; color: var(--text); line-height: 1;
-}
-.stat-num.green  { color: var(--green); }
-.stat-num.orange { color: var(--orange); }
-.stat-num.blue   { color: var(--blue); }
-.stat-num.purple { color: var(--purple); }
-.stat-lbl { font-size: 10px; color: var(--text3); margin-top: 2px; }
-.stat-sub { font-size: 10px; font-weight: 600; margin-top: 1px; }
-.stat-sub.ok   { color: var(--green); }
-.stat-sub.warn { color: var(--orange); }
-.stat-sub.idle { color: var(--text4); }
-
 /* ── PROGRESS BAR ── */
 .prog-bar { display: none; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--navy); }
 .prog-bar.on { display: block; }
@@ -466,54 +443,13 @@ input, textarea { font-family: inherit; }
 .sve-panel { display: none; }
 .sve-panel.on { display: block; }
 
-.sve-header {
-  display: flex; align-items: center; gap: 16px;
-  padding: 14px 18px; border-bottom: 1px solid var(--border); flex-wrap: wrap;
-}
-.sve-shield-wrap {
-  width: 40px; height: 40px; border-radius: 10px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 20px; flex-shrink: 0; transition: all .3s;
-  background: var(--surface3);
-}
-.sve-shield-wrap.ok   { background: var(--green-bg); }
-.sve-shield-wrap.warn { background: var(--orange-bg); }
-.sve-shield-wrap.crit { background: var(--red-bg); }
-.sve-title-block { flex: 1; min-width: 0; }
-.sve-main-title { font-size: 13px; font-weight: 700; color: var(--text); }
-.sve-subtitle   { font-size: 11px; color: var(--text3); margin-top: 2px; }
-
-/* Quality ring */
-.sve-ring-wrap  { display: flex; align-items: center; gap: 14px; }
-.sve-ring       { position: relative; width: 68px; height: 68px; flex-shrink: 0; }
-.sve-ring svg   { transform: rotate(-90deg); }
-.ring-track     { stroke: var(--border2); fill: none; stroke-width: 6; }
-.ring-fill      { fill: none; stroke-width: 6; stroke-linecap: round; transition: stroke-dashoffset .7s cubic-bezier(.4,0,.2,1), stroke .3s; }
-.sve-ring-label { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-.ring-pct       { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 800; line-height: 1; color: var(--text); }
-.ring-sub       { font-size: 8px; font-weight: 700; color: var(--text3); letter-spacing: .05em; margin-top: 1px; }
-
-/* Quality tiers */
-.q-100  .ring-fill, .q-high .ring-fill { stroke: var(--green); }
-.q-med  .ring-fill { stroke: var(--amber); }
-.q-low  .ring-fill { stroke: var(--red); }
-.q-100  .ring-pct, .q-high .ring-pct { color: var(--green); }
-.q-med  .ring-pct { color: var(--amber-dk); }
-.q-low  .ring-pct { color: var(--red); }
-
-.sve-counters { display: flex; gap: 6px; flex-wrap: wrap; }
-.sve-count {
-  display: flex; flex-direction: column; align-items: center;
-  padding: 6px 12px; border-radius: var(--r);
-  background: var(--surface3); border: 1px solid var(--border);
-  min-width: 54px;
-}
-.sve-count-val  { font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 800; line-height: 1; }
-.sve-count-val.crit { color: var(--red); }
-.sve-count-val.warn { color: var(--orange); }
-.sve-count-val.info { color: var(--blue); }
-.sve-count-val.pass { color: var(--green); }
-.sve-count-lbl  { font-size: 9px; color: var(--text3); margin-top: 3px; font-weight: 500; }
+/* Contadores ocultos — Fase 1 del rediseño. El shield/ring/contadores
+   visuales del header SVE se retiraron (la PulseBar del topbar ya
+   resume esto), PERO sveCrit/sveWarn/sveInfo/svePass SIGUEN en el DOM
+   porque events.js (handleForceExport) y warn-modal.js
+   (show/exportAnyway) leen su textContent directamente. No se tocan
+   esos módulos en esta fase — ver Fase 1, riesgo #3. */
+.sve-counters-hidden { display: none; }
 
 /* Alert groups */
 .sve-group { border-top: 1px solid var(--border); }
@@ -557,7 +493,7 @@ input, textarea { font-family: inherit; }
 
 .sve-empty-msg {
   text-align: center; padding: 24px; color: var(--text3);
-  font-size: 11px; border-top: 1px solid var(--border);
+  font-size: 11px;
 }
 
 /* Export gate */
@@ -871,27 +807,15 @@ input, textarea { font-family: inherit; }
   <span class="tb-context">CeDis VHSA · Perecederos</span>
   <div class="tb-spacer"></div>
 
-  <!-- Session Health Rail (signature element) -->
-  <div class="health-rail" id="healthRail">
-    <div class="health-pill">
-      <span>PDFs</span>
-      <span class="health-pill-val idle" id="hPDF">—</span>
-    </div>
-    <div class="health-sep"></div>
-    <div class="health-pill">
-      <span>Cobertura</span>
-      <span class="health-pill-val idle" id="hCov">—</span>
-    </div>
-    <div class="health-sep"></div>
-    <div class="health-pill">
-      <span>Calidad</span>
-      <span class="health-pill-val idle" id="hQual">—</span>
-    </div>
-    <div class="health-sep"></div>
-    <div class="health-pill">
-      <span>Estado</span>
-      <span class="health-pill-val idle" id="hStatus">En espera</span>
-    </div>
+  <!-- Pulse Bar — Fase 1 del rediseño "Centro de Operaciones".
+       Reemplaza al Health Rail anterior (4 pills separadas). Única
+       fuente de verdad de la salud del día. Ver src/ui/pulse-bar.js.
+       Alcance de esta fase: informativa + click-to-scroll al panel
+       SVE — todavía no filtra ni prioriza (eso llega con el Feed de
+       Atención en la Fase 3). -->
+  <div class="pulse-bar idle" id="pulseBar" title="Ver incidencias">
+    <div class="pulse-track"><div class="pulse-fill" id="pulseFill"></div></div>
+    <span class="pulse-text" id="pulseText">En espera</span>
   </div>
 
   <div class="tb-user" id="tbUser">
@@ -1085,42 +1009,6 @@ input, textarea { font-family: inherit; }
     <!-- RIGHT: Results panel -->
     <div class="right-panel">
 
-      <!-- Stats strip -->
-      <div class="stats-strip" id="statsStrip">
-        <div class="stat-cell">
-          <div class="stat-ico">✅</div>
-          <div>
-            <div class="stat-lbl">Match PDF</div>
-            <div class="stat-num green" id="stMatch">—</div>
-            <div class="stat-sub idle" id="stMatchSub">—</div>
-          </div>
-        </div>
-        <div class="stat-cell">
-          <div class="stat-ico">⚠️</div>
-          <div>
-            <div class="stat-lbl">Sin match</div>
-            <div class="stat-num orange" id="stNoMatch">—</div>
-            <div class="stat-sub idle" id="stNoMatchSub">—</div>
-          </div>
-        </div>
-        <div class="stat-cell">
-          <div class="stat-ico">🪪</div>
-          <div>
-            <div class="stat-lbl">Con licencia</div>
-            <div class="stat-num blue" id="stLic">—</div>
-            <div class="stat-sub idle" id="stLicSub">—</div>
-          </div>
-        </div>
-        <div class="stat-cell">
-          <div class="stat-ico">📋</div>
-          <div>
-            <div class="stat-lbl">Con despacho</div>
-            <div class="stat-num purple" id="stDesp">—</div>
-            <div class="stat-sub idle" id="stDespSub">—</div>
-          </div>
-        </div>
-      </div>
-
       <!-- Action bar -->
       <div class="action-bar">
         <button class="btn btn-amber" id="btnExport" disabled>⬇ Descargar Excel</button>
@@ -1137,31 +1025,8 @@ input, textarea { font-family: inherit; }
 
       <!-- SVE Panel -->
       <div class="card sve-panel" id="svePanel">
-        <div class="sve-header">
-          <div class="sve-shield-wrap" id="sveShield">🛡️</div>
-          <div class="sve-title-block">
-            <div class="sve-main-title">Validación inteligente</div>
-            <div class="sve-subtitle" id="sveSubtitle">Ejecutando auditoría…</div>
-          </div>
-          <div class="sve-ring-wrap">
-            <div class="sve-ring" id="sveRing">
-              <svg width="68" height="68" viewBox="0 0 68 68">
-                <circle class="ring-track" cx="34" cy="34" r="28"/>
-                <circle class="ring-fill" id="ringFill" cx="34" cy="34" r="28"
-                  stroke-dasharray="175.9" stroke-dashoffset="175.9"/>
-              </svg>
-              <div class="sve-ring-label">
-                <div class="ring-pct" id="ringPct">—</div>
-                <div class="ring-sub">CALIDAD</div>
-              </div>
-            </div>
-            <div class="sve-counters">
-              <div class="sve-count"><div class="sve-count-val crit" id="sveCrit">0</div><div class="sve-count-lbl">Críticas</div></div>
-              <div class="sve-count"><div class="sve-count-val warn" id="sveWarn">0</div><div class="sve-count-lbl">Advertencias</div></div>
-              <div class="sve-count"><div class="sve-count-val info" id="sveInfo">0</div><div class="sve-count-lbl">Informativas</div></div>
-              <div class="sve-count"><div class="sve-count-val pass" id="svePass">0</div><div class="sve-count-lbl">Aprobadas</div></div>
-            </div>
-          </div>
+        <div class="sve-counters-hidden" aria-hidden="true">
+          <span id="sveCrit">0</span><span id="sveWarn">0</span><span id="sveInfo">0</span><span id="svePass">0</span>
         </div>
         <div id="sveAlerts">
           <div class="sve-empty-msg">Sin incidencias detectadas — los datos lucen bien.</div>
