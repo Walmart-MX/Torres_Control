@@ -25,6 +25,13 @@
  *      tabla/SVE mientras se guarda. No requiere cambios de esquema: usa
  *      el mismo addOperator()/tabla `operators` de la Fase 1.
  *
+ * CAMBIO — Fase 5 del rediseño "Centro de Operaciones"
+ * (ModeSurface / operationalMode): saveAndRevalidate() ahora también
+ * llama a UI.applyMode() al final — una corrección puede hacer que
+ * State.sveHasCritical/sveHasWarnings cambien, lo que a su vez cambia
+ * State.operationalMode (por ejemplo, de 'correccion' a 'listo' al
+ * resolver la última advertencia).
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - escH (utils/dom.js)
@@ -256,6 +263,7 @@ export const EditSystem = {
       UI.resetSVE();
     }
     UI.updateHealthRail();
+    UI.applyMode();
   },
 
   close() {
