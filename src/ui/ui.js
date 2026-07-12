@@ -31,6 +31,17 @@
  *   fase), el render de grupos de incidencias (sveAlerts) y la lógica
  *   completa del export gate. Cero cambio de comportamiento funcional.
  *
+ * CAMBIO — Fase 3 del rediseño (SVE como semáforo colapsable):
+ *   renderSVE() ahora también pinta una barra de resumen de una línea
+ *   (sveSummaryToggle/Ico/Text) y decide si el cuerpo del panel
+ *   (sveBody: grupos de incidencias + gate) queda expandido o
+ *   colapsado. Regla: un crítico siempre fuerza la expansión; si no
+ *   hay críticos, se conserva el estado de expansión que el usuario ya
+ *   tenía (renderSVE() se re-ejecuta en cada guardado del drawer de
+ *   edición, y no debe cerrarle el panel en plena revisión). resetSVE()
+ *   colapsa el panel y limpia el resumen. El toggle de clic vive en
+ *   core/app.js. Cero cambio en sve.js — sigue devolviendo datos puros.
+ *
  * Dependencias:
  *   - State (core/state.js) — lee estado para calcular lo que muestra,
  *     y en algunos métodos lo muta (resetAll, resetSVE, setUser)
@@ -311,7 +322,10 @@ export const UI = {
   // que deben quedar consistentes con "sin datos" en vez de conservar
   // el último valor pintado.
   resetSVE() {
-    document.getElementById('svePanel').classList.remove('on');
+    document.getElementById('svePanel').classList.remove('on', 'expanded');
+    document.getElementById('sveSummaryToggle').className = 'sve-summary-toggle';
+    document.getElementById('sveSummaryIco').textContent  = '🛡️';
+    document.getElementById('sveSummaryText').textContent = 'Sin incidencias detectadas';
     UI._resetSveCounters();
     State.sveHasCritical = false;
     State.sveHasWarnings = false;
@@ -337,6 +351,34 @@ export const UI = {
     document.getElementById('sveWarn').textContent = nWarn;
     document.getElementById('sveInfo').textContent = nInfo;
     document.getElementById('svePass').textContent = nPass;
+
+    // Barra de resumen (Fase 3) — única parte visible por defecto.
+    // Reemplaza al antiguo shield+ring+subtitle del header eliminado
+    // en la Fase 1, condensado en una sola línea.
+    const summaryToggle = document.getElementById('sveSummaryToggle');
+    const summaryIco    = document.getElementById('sveSummaryIco');
+    const summaryText   = document.getElementById('sveSummaryText');
+    let tier = 'ok';
+    if (nCrit > 0) tier = 'crit'; else if (nWarn > 0) tier = 'warn';
+    summaryToggle.className = 'sve-summary-toggle ' + tier;
+    summaryIco.textContent  = nCrit > 0 ? '🚨' : nWarn > 0 ? '⚠️' : '🛡️';
+    if (quality === 100) {
+      summaryText.textContent = `Auditoría completada — todo en orden (calidad ${quality}%)`;
+    } else if (nCrit > 0) {
+      summaryText.textContent = `${nCrit} error${nCrit>1?'es':''} crítico${nCrit>1?'s':''} — exportación bloqueada`;
+    } else if (nWarn > 0) {
+      summaryText.textContent = `${nWarn} advertencia${nWarn>1?'s':''} — revisa antes de exportar (calidad ${quality}%)`;
+    } else {
+      summaryText.textContent = `Solo incidencias informativas — calidad ${quality}%`;
+    }
+
+    // Expandido/colapsado: un crítico siempre fuerza la expansión (no
+    // se puede ocultar un bloqueo). Si no hay críticos, se conserva el
+    // estado que el usuario ya tenía (este método se re-ejecuta en
+    // cada guardado del drawer de edición — no debe cerrarle el panel
+    // en plena revisión).
+    const wasExpanded = panel.classList.contains('expanded');
+    panel.classList.toggle('expanded', nCrit > 0 || wasExpanded);
 
     // Alerts
     const container = document.getElementById('sveAlerts');
