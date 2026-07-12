@@ -42,6 +42,17 @@
  *   colapsa el panel y limpia el resumen. El toggle de clic vive en
  *   core/app.js. Cero cambio en sve.js — sigue devolviendo datos puros.
  *
+ * CAMBIO — Fase 5 del rediseño (ModeSurface / operationalMode):
+ *   updateHealthRail() ahora también lee State.operationalMode (getter
+ *   puro en core/state.js) y se lo pasa a PulseBar.render() para que
+ *   distinga 'arranque' de 'triage' en su mensaje idle. Se agrega
+ *   applyMode() — un método de una sola línea que refleja el modo
+ *   como atributo data-mode en <body>; todo el comportamiento visual
+ *   por modo (colapso de las tarjetas de ingesta, énfasis del botón de
+ *   exportar en modo 'listo') vive en CSS puro en index.html, no aquí.
+ *   Se llama desde los mismos puntos donde ya se recalculaba el estado
+ *   global — ver comentario del propio método para la lista completa.
+ *
  * Dependencias:
  *   - State (core/state.js) — lee estado para calcular lo que muestra,
  *     y en algunos métodos lo muta (resetAll, resetSVE, setUser)
@@ -157,12 +168,31 @@ export const UI = {
   // a PulseBar.render(). nCrit/nWarn se leen de los contadores ocultos
   // del SVE (sveCrit/sveWarn), el mismo patrón que ya usa
   // events.js → handleForceExport() para leer esos valores.
+  // CAMBIO Fase 5: también pasa State.operationalMode, para que la
+  // PulseBar distinga 'arranque' de 'triage' en su mensaje idle.
   updateHealthRail() {
     const total   = State.merged.length || 0;
     const matched = State.merged.filter(r => r._matched).length;
     const nCrit   = parseInt(document.getElementById('sveCrit')?.textContent || '0', 10);
     const nWarn   = parseInt(document.getElementById('sveWarn')?.textContent || '0', 10);
-    PulseBar.render({ total, matched, quality: State.sveLastQuality, nCrit, nWarn });
+    PulseBar.render({ total, matched, quality: State.sveLastQuality, nCrit, nWarn, mode: State.operationalMode });
+  },
+
+  // ── ModeSurface — Fase 5 del rediseño "Centro de Operaciones" ──
+  // Aplica State.operationalMode como atributo data-mode en <body>.
+  // Deliberadamente NO contiene lógica de negocio ni decide nada por sí
+  // mismo — solo refleja el getter puro de State en el DOM. Todo el
+  // comportamiento visual por modo vive en CSS (selectores
+  // body[data-mode="..."] en index.html), siguiendo el mismo principio
+  // que ya usamos en el resto de la app: UI pinta, no decide.
+  //
+  // Se llama junto a updateHealthRail() en los mismos puntos donde el
+  // estado global ya se recalcula: triggerMerge() y
+  // saveAndRevalidate() (vía events.js/edit-system.js),
+  // refreshTodayBanner() (vía events.js), resetAll() (abajo) y el
+  // bootstrap de core/app.js.
+  applyMode() {
+    document.body.dataset.mode = State.operationalMode;
   },
 
   // ── Stats strip ──
@@ -680,5 +710,6 @@ export const UI = {
     UI.hideProgress();
     UI.setActionsEnabled(false);
     UI.updateHealthRail();
+    UI.applyMode();
   }
 };

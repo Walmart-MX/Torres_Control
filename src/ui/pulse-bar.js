@@ -7,16 +7,22 @@
  * panel SVE. Única fuente de verdad visual de "¿cómo va el día?".
  *
  * ALCANCE DE ESTA FASE: la PulseBar es informativa únicamente — no
- * filtra ni prioriza rutas todavía (eso llega en la Fase 3, cuando
- * exista el Feed de Atención). El único punto de interacción hoy es
- * el listener de click registrado en core/app.js, que hace scroll al
- * panel SVE si está visible.
+ * filtra ni prioriza rutas todavía (eso llega en una fase futura,
+ * cuando exista el Feed de Atención). El único punto de interacción
+ * hoy es el listener de click registrado en core/app.js, que hace
+ * scroll y expande el panel SVE si está visible.
+ *
+ * CAMBIO — Fase 5 del rediseño (ModeSurface / operationalMode): el
+ * estado "sin rutas todavía" ya no es un único mensaje genérico — se
+ * distingue 'arranque' (nada cargado) de 'triage' (algo cargado, el
+ * merge todavía no corrió), reflejando State.operationalMode. El resto
+ * del render no cambia.
  *
  * Nota de diseño: el wireframe del documento de rediseño muestra una
  * barra "segmentada" (un punto por ruta). Eso requiere la granularidad
  * por ruta que todavía no existe en la UI (llega con el Feed de
- * Atención, Fase 3) — con cientos de rutas, un punto por ruta tampoco
- * sería legible. Por eso esta fase usa una barra de progreso continua
+ * Atención) — con cientos de rutas, un punto por ruta tampoco sería
+ * legible. Por eso esta fase usa una barra de progreso continua
  * (% de cobertura) coloreada por severidad — mismo lenguaje visual,
  * complejidad apropiada al alcance real de esta fase.
  *
@@ -34,8 +40,10 @@ export const PulseBar = {
    * @param {number} p.quality  — State.sveLastQuality (0-100)
    * @param {number} p.nCrit    — incidencias críticas del SVE
    * @param {number} p.nWarn    — advertencias del SVE
+   * @param {string} [p.mode]   — State.operationalMode (Fase 5), solo se
+   *                              usa para diferenciar el mensaje idle
    */
-  render({ total, matched, quality, nCrit, nWarn }) {
+  render({ total, matched, quality, nCrit, nWarn, mode }) {
     const bar  = document.getElementById('pulseBar');
     const fill = document.getElementById('pulseFill');
     const text = document.getElementById('pulseText');
@@ -44,7 +52,7 @@ export const PulseBar = {
     if (!total) {
       bar.className   = 'pulse-bar idle';
       fill.style.width = '0%';
-      text.textContent = 'En espera';
+      text.textContent = mode === 'triage' ? 'Cargando fuentes…' : 'En espera';
       return;
     }
 
