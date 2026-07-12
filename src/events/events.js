@@ -24,6 +24,16 @@
  * "día ya procesado" (openHistory, selectHistorySession,
  * redownloadHistorySession, previewTodaySession, redownloadToday).
  *
+ * CAMBIO — Fase 5 del rediseño "Centro de Operaciones"
+ * (ModeSurface / operationalMode): triggerMerge() y
+ * refreshTodayBanner() ahora también llaman a UI.applyMode() después
+ * de actualizar el estado — son los dos puntos de este archivo donde
+ * cambia algo que State.operationalMode necesita para recalcularse
+ * (merged/SVE en triggerMerge, todaySession en refreshTodayBanner).
+ * refreshTodayBanner() además guarda la sesión en State.todaySession,
+ * que antes solo se pasaba directo a UI.renderTodayBanner() sin
+ * persistirse en el estado global.
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - normOp (utils/format.js)
@@ -184,6 +194,7 @@ export const Events = {
         UI.resetSVE();
       }
       UI.updateHealthRail();
+      UI.applyMode();
     }, 100);
   },
 
@@ -256,7 +267,9 @@ export const Events = {
 
   async refreshTodayBanner() {
     const session = await DispatchHistory.getTodaySession();
+    State.todaySession = session;
     UI.renderTodayBanner(session);
+    UI.applyMode();
   },
 
   // ── Historial de Procesamientos ──
