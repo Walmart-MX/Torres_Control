@@ -41,6 +41,12 @@
  * cambiaron, así que ningún otro listener de este archivo ni de
  * ui.js/events.js/catalog.js/fact-cache.js necesitó modificarse.
  *
+ * CAMBIO Fase 3 del rediseño (SVE colapsable): se agrega el listener
+ * de sveSummaryToggle (expande/colapsa el cuerpo del panel SVE) y el
+ * listener de la PulseBar ahora también expande el panel antes de
+ * hacer scroll. La lógica de qué se muestra en el resumen y cuándo se
+ * auto-expande vive en ui.js → renderSVE(), no aquí.
+ *
  * Dependencias: todos los módulos de la aplicación.
  */
 import { State } from './state.js';
@@ -111,15 +117,20 @@ export async function init() {
   });
 
   // ── Pulse Bar (Fase 1 del rediseño) ──
-  // Único punto de interacción de esta fase: click hace scroll al panel
-  // SVE si tiene algo que mostrar (clase 'on'). Si está vacío/oculto no
-  // hace nada — no tiene sentido saltar a un panel sin contenido.
+  // Click hace scroll al panel SVE si tiene algo que mostrar (clase
+  // 'on'). Desde la Fase 3, además lo expande — así el resumen de la
+  // PulseBar y el detalle del panel quedan conectados en un solo clic.
   document.getElementById('pulseBar').addEventListener('click', () => {
     const svePanel = document.getElementById('svePanel');
     if (svePanel.classList.contains('on')) {
+      svePanel.classList.add('expanded');
       svePanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   });
+
+  // ── SVE — barra de resumen colapsable (Fase 3 del rediseño) ──
+  document.getElementById('sveSummaryToggle').addEventListener('click', () =>
+    document.getElementById('svePanel').classList.toggle('expanded'));
 
   // ── Datos de referencia (Fase 2 del rediseño) ──
   // Panel único con pestañas Catálogo/Caché — reemplaza los dos
