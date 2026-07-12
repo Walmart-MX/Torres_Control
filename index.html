@@ -555,6 +555,23 @@ input, textarea { font-family: inherit; }
 .cat-status.ok  { color: var(--green); }
 .cat-status.err { color: var(--red); }
 
+/* ── Pestañas del panel "Datos de referencia" (Fase 2 del rediseño) ── */
+.ref-tabs {
+  display: flex; gap: 4px; margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.ref-tab {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  padding: 8px 6px; font-size: 11px; font-weight: 600; color: var(--text3);
+  cursor: pointer; transition: all .15s; font-family: inherit;
+}
+.ref-tab:hover  { color: var(--text2); }
+.ref-tab.active { color: var(--text); border-bottom-color: var(--blue); }
+.ref-tab .cat-badge-count { margin-left: 0; }
+.ref-tab-panel { display: none; }
+.ref-tab-panel.active { display: block; }
+
 /* ── MODAL ── */
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(0,10,30,.7);
@@ -948,58 +965,66 @@ input, textarea { font-family: inherit; }
         </div>
       </div>
 
-      <!-- Catalog -->
-      <div class="cat-panel" id="catPanel">
-        <div class="cat-toggle" id="catToggle">
-          <span style="font-size:15px">🪪</span>
+      <!-- Datos de referencia — Fase 2 del rediseño "Centro de
+           Operaciones". Fusiona Catálogo de operadores y Caché de
+           facturas en un solo panel con pestañas internas: antes eran
+           dos acordeones separados con el mismo peso visual pese a
+           ser ambos datos de apoyo de consulta ocasional (ver
+           documento de rediseño, Fase 2). NINGÚN ID interno cambió —
+           catOpInput/catLicInput/btnCatAdd/catImportFile/catTbody/
+           catBadge/catSt y cacheHistBadge/cacheHistList/
+           btnCacheHistClear siguen exactamente igual, solo se movieron
+           de contenedor. renderCatalog()/renderCacheHistory() en
+           ui.js no necesitan ningún cambio. -->
+      <div class="cat-panel" id="refPanel">
+        <div class="cat-toggle" id="refToggle">
+          <span style="font-size:15px">📚</span>
           <div>
-            <div style="font-size:13px;font-weight:600;color:var(--text)">Catálogo de operadores</div>
-            <div style="font-size:11px;color:var(--text3)">Operador → Licencia · embebido</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text)">Datos de referencia</div>
+            <div style="font-size:11px;color:var(--text3)">Catálogo de operadores · Caché de facturas</div>
           </div>
-          <span class="cat-badge-count" id="catBadge">0 operadores</span>
-          <span class="cat-chev">▾</span>
+          <span class="cat-chev" style="margin-left:auto">▾</span>
         </div>
         <div class="cat-body">
-          <div class="cat-add-row">
-            <input class="cat-input" id="catOpInput" placeholder="Nombre operador (como aparece en PDF)" style="flex:2;min-width:160px">
-            <input class="cat-input" id="catLicInput" placeholder="Licencia" style="flex:1;min-width:90px">
-            <button class="btn btn-success btn-sm" id="btnCatAdd">+ Agregar</button>
-          <div class="cat-actions">
-  <div class="btn btn-ghost btn-sm cat-import-btn">
-    📥 Importar
-    <input type="file" id="catImportFile" accept=".xlsx,.xls">
-  </div>
-</div>
+          <div class="ref-tabs" id="refTabs">
+            <button class="ref-tab active" data-tab="catalog">
+              🪪 Catálogo <span class="cat-badge-count" id="catBadge">0 operadores</span>
+            </button>
+            <button class="ref-tab" data-tab="cache">
+              🗄️ Caché <span class="cat-badge-count" id="cacheHistBadge">—</span>
+            </button>
           </div>
-          <div class="cat-table-wrap">
-            <table class="cat-table">
-              <thead><tr><th>Operador</th><th>Licencia</th><th></th></tr></thead>
-              <tbody id="catTbody"></tbody>
-            </table>
-          </div>
-          <div class="cat-status" id="catSt"></div>
-        </div>
-      </div>
 
-      <!-- Historial de Caché — diagnóstico del fact_cache -->
-      <div class="cat-panel" id="cacheHistPanel">
-        <div class="cat-toggle" id="cacheHistToggle">
-          <span style="font-size:15px">🗄️</span>
-          <div>
-            <div style="font-size:13px;font-weight:600;color:var(--text)">Historial de caché</div>
-            <div style="font-size:11px;color:var(--text3)">Facturas guardadas por día · diagnóstico</div>
+          <div class="ref-tab-panel active" data-tab-panel="catalog">
+            <div class="cat-add-row">
+              <input class="cat-input" id="catOpInput" placeholder="Nombre operador (como aparece en PDF)" style="flex:2;min-width:160px">
+              <input class="cat-input" id="catLicInput" placeholder="Licencia" style="flex:1;min-width:90px">
+              <button class="btn btn-success btn-sm" id="btnCatAdd">+ Agregar</button>
+              <div class="cat-actions">
+                <div class="btn btn-ghost btn-sm cat-import-btn">
+                  📥 Importar
+                  <input type="file" id="catImportFile" accept=".xlsx,.xls">
+                </div>
+              </div>
+            </div>
+            <div class="cat-table-wrap">
+              <table class="cat-table">
+                <thead><tr><th>Operador</th><th>Licencia</th><th></th></tr></thead>
+                <tbody id="catTbody"></tbody>
+              </table>
+            </div>
+            <div class="cat-status" id="catSt"></div>
           </div>
-          <span class="cat-badge-count" id="cacheHistBadge">—</span>
-          <span class="cat-chev">▾</span>
-        </div>
-        <div class="cat-body">
-          <div style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.5">
-            Cargar el mismo día <strong>actualiza</strong> las facturas existentes y agrega
-            las nuevas — nunca borra los datos de otros días.
-          </div>
-          <div id="cacheHistList"></div>
-          <div style="margin-top:10px;text-align:right">
-            <button class="btn btn-danger-outline btn-sm" id="btnCacheHistClear">🗑 Limpiar caché histórico</button>
+
+          <div class="ref-tab-panel" data-tab-panel="cache">
+            <div style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.5">
+              Cargar el mismo día <strong>actualiza</strong> las facturas existentes y agrega
+              las nuevas — nunca borra los datos de otros días.
+            </div>
+            <div id="cacheHistList"></div>
+            <div style="margin-top:10px;text-align:right">
+              <button class="btn btn-danger-outline btn-sm" id="btnCacheHistClear">🗑 Limpiar caché histórico</button>
+            </div>
           </div>
         </div>
       </div>
