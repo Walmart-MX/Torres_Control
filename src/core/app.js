@@ -33,6 +33,14 @@
  * ui/pulse-bar.js — todavía no filtra ni prioriza nada, eso llega con
  * el Feed de Atención en la Fase 3).
  *
+ * CAMBIO Fase 2 del rediseño (Datos de referencia): Catálogo de
+ * operadores y Caché de facturas eran dos acordeones independientes
+ * (catToggle/cacheHistToggle) — se fusionan en un solo panel
+ * (refToggle) con pestañas internas (refTabs). Los IDs internos de
+ * cada sección (catOpInput, catTbody, cacheHistList, etc.) no
+ * cambiaron, así que ningún otro listener de este archivo ni de
+ * ui.js/events.js/catalog.js/fact-cache.js necesitó modificarse.
+ *
  * Dependencias: todos los módulos de la aplicación.
  */
 import { State } from './state.js';
@@ -113,12 +121,26 @@ export async function init() {
     }
   });
 
+  // ── Datos de referencia (Fase 2 del rediseño) ──
+  // Panel único con pestañas Catálogo/Caché — reemplaza los dos
+  // acordeones separados (catToggle/cacheHistToggle) que existían
+  // antes. Un solo listener de apertura + un listener delegado de
+  // cambio de pestaña (mismo patrón de delegación ya usado en
+  // sveAlerts/catTbody/routePicker más abajo).
+  document.getElementById('refToggle').addEventListener('click', () =>
+    document.getElementById('refPanel').classList.toggle('open'));
+  document.getElementById('refTabs').addEventListener('click', e => {
+    const tabBtn = e.target.closest('.ref-tab');
+    if (!tabBtn) return;
+    const tab = tabBtn.dataset.tab;
+    document.querySelectorAll('.ref-tab').forEach(b => b.classList.toggle('active', b === tabBtn));
+    document.querySelectorAll('.ref-tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tabPanel === tab));
+  });
+
   // ── Catalog ──
   // NOTA Camino B / Fase 1: el botón "💾 Guardar" (btnCatSave) se eliminó
   // de index.html — ya no existe un paso manual de persistencia. Cada
   // alta/baja/importación escribe en Supabase al instante (ver Events).
-  document.getElementById('catToggle').addEventListener('click', () =>
-    document.getElementById('catPanel').classList.toggle('open'));
   document.getElementById('btnCatAdd').addEventListener('click',     () => Events.addCatalogEntry());
   document.getElementById('catLicInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') Events.addCatalogEntry();
@@ -136,8 +158,6 @@ export async function init() {
   });
 
   // ── Historial de caché ──
-  document.getElementById('cacheHistToggle').addEventListener('click', () =>
-    document.getElementById('cacheHistPanel').classList.toggle('open'));
   document.getElementById('btnCacheHistClear').addEventListener('click', async () => {
     if (!confirm('¿Eliminar todo el caché histórico de facturas? Esta acción no se puede deshacer.')) return;
     await FactCache.clear();
