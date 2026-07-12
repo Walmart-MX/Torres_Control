@@ -47,6 +47,16 @@
  * hacer scroll. La lógica de qué se muestra en el resumen y cuándo se
  * auto-expande vive en ui.js → renderSVE(), no aquí.
  *
+ * CAMBIO Fase 5 del rediseño (ModeSurface / operationalMode): se
+ * agregan dos llamadas a UI.applyMode() — una tras el estado visual
+ * inicial del pipeline (aplica 'arranque' en el primer paint) y otra
+ * tras resolver la sesión de hoy vía DispatchHistory.getTodaySession()
+ * (que ahora también se guarda en State.todaySession, necesaria para
+ * que el modo 'cerrado' se calcule correctamente). El resto de los
+ * puntos donde el modo se recalcula viven en events.js (triggerMerge,
+ * refreshTodayBanner) y edit-system.js (saveAndRevalidate) — ver sus
+ * propias cabeceras.
+ *
  * Dependencias: todos los módulos de la aplicación.
  */
 import { State } from './state.js';
@@ -238,6 +248,7 @@ export async function init() {
   UI.setPipeStep(1, 'active', 'En espera');
   UI.setActionsEnabled(false);
   UI.updateHealthRail();
+  UI.applyMode();
 
   // ── Init catalog — Supabase (Camino B, Fase 1) ──
   UI.setCatStatus('Cargando catálogo…', 'ok');
@@ -247,7 +258,9 @@ export async function init() {
 
   // ── Aviso de día ya procesado (Camino B, Fase 3) ──
   const todaySession = await DispatchHistory.getTodaySession();
+  State.todaySession = todaySession;
   UI.renderTodayBanner(todaySession);
+  UI.applyMode();
 
   // ── First-run modal ──
   setTimeout(() => {
