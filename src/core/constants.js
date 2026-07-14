@@ -116,3 +116,19 @@ export const COL_MAP = {
 export function getMapped(row, col) {
   return (COL_MAP[col] ? COL_MAP[col](row) : row[col]) ?? '';
 }
+/**
+ * Columnas cuyo valor debe preservarse como texto literal de la celda
+ * de origen (RUTEO NUEVO) — NUNCA como objeto Date. Se agrega tras
+ * detectar que las columnas de hora (ENRAMPE, RETIRO, SOLICITUD DE
+ * ENRAMPE) llegaban desfasadas por zona horaria al exportar, y que
+ * TEMP. ENRAMPE / TEMP. DESENRAMPE no tenían ninguna protección
+ * contra el mismo problema. FECHA se incluye aquí también — reemplaza
+ * el enfoque anterior de reconstruir un Date con Date.UTC().
+ * Usada por processors/excel.js (para saber qué columnas copiar tal
+ * cual) y features/export.js (para saber qué columnas NO deben pasar
+ * por ninguna lógica de Date al exportar).
+ */
+export const RAW_TEXT_DATE_COLS = new Set([
+  'FECHA', 'TEMP. ENRAMPE', 'TEMP. DESENRAMPE', 'SOLICITUD DE ENRAMPE',
+  'ENRAMPE', 'RETIRO'
+]);
