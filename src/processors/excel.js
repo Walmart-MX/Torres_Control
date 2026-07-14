@@ -15,6 +15,26 @@
  * los lee correctamente. Se aplica a ambas hojas por robustez — cualquier
  * columna de fecha en cualquiera de las dos sufre el mismo bug de SheetJS.
  *
+ * FIX (fidelidad de FECHA — julio 2026): el fix anterior resolvía el
+ * desfase de un día, pero FECHA seguía viajando como objeto Date —
+ * reconstruido 3 veces en total entre excel.js, la vista previa (ui.js
+ * → fmtDate) y export.js. Cada reconstrucción es una oportunidad de
+ * fuga: redondeo de punto flotante en el número serial de Excel,
+ * supuestos de zona horaria, y en el caso de `new Date(string)` en
+ * export.js, ambigüedad real DD/MM vs MM/DD para días ≤ 12.
+ *
+ * Causa raíz: FECHA no necesita ser interpretada como fecha en ningún
+ * punto del pipeline — solo necesita copiarse. Por eso, además de
+ * `raw` (con cellDates:true, usado para TODAS las demás columnas de
+ * fecha/hora que sí lo requieren: ENRAMPE, RETIRO, SOLICITUD DE
+ * ENRAMPE, TEMP. ENRAMPE/DESENRAMPE), se hace una segunda pasada
+ * `raw:false` sobre la MISMA hoja — que le pide a SheetJS el texto ya
+ * formateado de la celda (su propiedad `.w`, el mismo cálculo de
+ * calendario que usa Excel para mostrarla, sin aritmética de zona
+ * horaria de por medio) — y se usa ESE texto, tal cual, como el valor
+ * de FECHA. Cero Date, cero parsing, cero reconstrucción en el resto
+ * del pipeline para esta columna específica (ver también export.js).
+ *
  * Dependencias:
  *   - XLSX (SheetJS, cargado globalmente desde el CDN en index.html)
  *   - SHEET_RUTEO, SHEET_FACTURAS (core/constants.js) — nombres alternativos
@@ -46,6 +66,21 @@ function _fixExcelDateRow(row) {
 }
 
 /**
+ * Sobreescribe row.FECHA con el texto exacto que Excel muestra para esa
+ * celda (sin pasar por Date). Recorta un posible sufijo de hora si la
+ * celda de origen trae fecha+hora pegadas — operación de texto pura,
+ * no interpreta ni reformatea la fecha en sí.
+ * @private
+ */
+function _applyRawFecha(rows, rawTextRows) {
+  rows.forEach((row, i) => {
+    const srcText = rawTextRows[i] ? rawTextRows[i]['FECHA'] : undefined;
+    if (srcText === undefined || srcText === '') return;
+    row['FECHA'] = String(srcText).replace(/\s+\d{1,2}:\d{2}(:\d{2})?\s*$/, '').trim();
+  });
+}
+
+/**
  * Lee el archivo Excel y extrae:
  *   - rows: array de rows de la hoja RUTEO NUEVO (o la primera hoja si no
  *     se encuentra un nombre coincidente)
@@ -70,6 +105,12 @@ export async function processXLS(file) {
   ) || wb.SheetNames[0];
   const wsRuteo = wb.Sheets[ruteoName];
   const raw     = XLSX.utils.sheet_to_json(wsRuteo, { defval: '' }).map(_fixExcelDateRow);
+
+  // Segunda pasada, SOLO para FECHA — ver nota de cabecera "FIX (fidelidad
+  // de FECHA)". Misma hoja, mismo orden de filas que `raw`, alineado por
+  // índice.
+  const rawTextRows = XLSX.utils.sheet_to_json(wsRuteo, { defval: '', raw: false });
+  _applyRawFecha(raw, rawTextRows);
 
   const factName = wb.SheetNames.find(n =>
     SHEET_FACTURAS.some(s => n.toUpperCase().includes(s.toUpperCase()))
