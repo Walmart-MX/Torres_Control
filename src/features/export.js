@@ -87,18 +87,24 @@ function buildWorkbook(rows, format) {
     if (val === '' || val === null || val === undefined) return '';
     // src/features/export.js — dentro de buildWorkbook()
 
-  if (DATE_COLS.has(col)) {
-      const d = val instanceof Date ? val : new Date(val);
-      // FIX: d ya trae año/mes/día correctos por getters LOCALES (gracias
-      // al fix de excel.js), pero SheetJS serializa fechas usando el
-      // instante absoluto (getTime()), ANCLADO EN UTC — la misma
-      // convención que usa al leerlas. Reconstruir con el constructor
-      // LOCAL de Date (como antes) deja el instante fuera de esa
-      // convención y puede desalinear el día al reexportar, según la
-      // zona horaria. Se reconstruye con Date.UTC() para anclar el
-      // instante exactamente a medianoche UTC del día correcto.
-      return isNaN(d.getTime()) ? val : new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-    }
+if (DATE_COLS.has(col)) {
+  // FIX (fidelidad de FECHA — julio 2026): si el valor ya es el texto
+  // original tal cual vino de la celda de Excel (ver la segunda pasada
+  // raw:false en excel.js), se escribe SIN pasar por el constructor
+  // Date. Evita: (a) redondeo de número serial, (b) reinterpretación de
+  // zona horaria, (c) el riesgo de ambigüedad DD/MM vs MM/DD que tiene
+  // `new Date(string)` para días ≤ 12. Es la causa raíz que se corrige
+  // aquí — antes esta rama SIEMPRE reconstruía un Date, incluso cuando
+  // el valor de origen ya era perfecto.
+  if (typeof val === 'string') return val;
+
+  // Compatibilidad retroactiva: si val llega como Date (dato en memoria
+  // de una sesión anterior a este fix, u otra columna futura en
+  // DATE_COLS que sí necesite tratarse como fecha real), se conserva el
+  // comportamiento anterior sin cambios.
+  const d = val instanceof Date ? val : new Date(val);
+  return isNaN(d.getTime()) ? val : new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+}
     if (DATETIME_COLS.has(col)) {
       if (val instanceof Date && !isNaN(val.getTime())) return val;
       const d = parseDateTime(String(val));
