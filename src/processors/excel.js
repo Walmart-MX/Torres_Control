@@ -15,31 +15,36 @@
  * los lee correctamente. Se aplica a ambas hojas por robustez — cualquier
  * columna de fecha en cualquiera de las dos sufre el mismo bug de SheetJS.
  *
- * FIX (fidelidad de fecha/hora — julio 2026): el fix anterior resolvía
- * el desfase de un día para FECHA, pero dejaba dos problemas activos:
- *   1. ENRAMPE / RETIRO / SOLICITUD DE ENRAMPE seguían viajando como
- *      Date hasta el export, y export.js no las anclaba en UTC antes
- *      de escribirlas (a diferencia de FECHA) — SheetJS serializa
- *      cualquier Date usando sus componentes UTC, así que en una zona
- *      con offset negativo (UTC-6) el archivo final salía adelantado
- *      exactamente ese offset (ej. 23:45 → 05:45 del día siguiente).
- *   2. TEMP. ENRAMPE / TEMP. DESENRAMPE no tenían NINGUNA protección
- *      — ni la de FECHA ni ninguna otra — así que sufrían el mismo
- *      desfase sin que hubiera indicio alguno en el código.
+ * FIX (fidelidad de fecha/hora — julio 2026, v2):
+ *   Intento previo: para FECHA/ENRAMPE/RETIRO/SOLICITUD DE ENRAMPE/
+ *   TEMP. ENRAMPE/TEMP. DESENRAMPE se leía el texto ya formateado por
+ *   SheetJS (`.w`, con `raw:false`). Resultó INSUFICIENTE: `.w` no es
+ *   una copia neutral de la celda — SheetJS lo genera aplicando el
+ *   código de formato numérico de la celda de origen (ej. "m/d/yy
+ *   h:mm") con su propia librería de formato (SSF), que interpreta ese
+ *   patrón literalmente y SIN CONOCIMIENTO de la configuración regional
+ *   con la que el usuario ve el archivo en su Excel. Resultado: una
+ *   celda que el usuario ve como "02/07/2026 00:38" en su Excel (con
+ *   configuración regional es-MX) se leía como "7/2/26 0:38" — el
+ *   mismo tipo de ambigüedad de formato que se buscaba eliminar, solo
+ *   que trasladada a SheetJS en vez de a `new Date()`.
  *
- * Causa raíz real: ninguna de estas columnas necesita interpretarse
- * como fecha en ningún punto del pipeline — solo necesitan copiarse.
- * Por eso, para las columnas listadas en RAW_TEXT_DATE_COLS
- * (core/constants.js), se hace una segunda lectura de la misma hoja
- * con `raw:false` — que le pide a SheetJS el texto ya formateado de la
- * celda (su propiedad `.w`, el mismo cálculo que usa Excel para
- * mostrarla, sin aritmética de zona horaria de por medio) — y ESE
- * texto, tal cual, reemplaza el valor Date que _fixExcelDateRow había
- * construido. Cero Date, cero parsing, cero reconstrucción para estas
- * columnas en el resto del pipeline (ver también export.js). El resto
- * de columnas de fecha/hora que no vienen de RUTEO NUEVO (CITA, HR.
- * DESPACHO, SALIDA DE CASETA — provienen de PDF/paste, no de esta
- * hoja) no se tocan.
+ *   Causa raíz real: cualquier acercamiento basado en TEXTO formateado
+ *   (sea por Excel, por SheetJS, o por Date) hereda la ambigüedad del
+ *   formato de origen. La única fuente sin ambigüedad es el número
+ *   serial de Excel — un valor puro (días desde 1899-12-30 + fracción
+ *   de día), sin zona horaria ni locale de por medio. Solución:
+ *   _serialToParts()/_fmtSerial() calculan los componentes de
+ *   calendario directamente desde ese número con aritmética simple
+ *   (vía Date.UTC, pero SOLO se leen sus getters UTC — nunca locales,
+ *   nunca se serializa ese Date a ningún lado) y se formatean siempre
+ *   como DD/MM/YYYY [HH:mm], sin importar el formato de la celda de
+ *   origen ni la configuración regional del navegador.
+ *
+ *   Para obtener el serial puro se necesita una lectura del workbook
+ *   con `cellDates:false` — la lectura principal (`raw`, usada para el
+ *   resto de columnas) usa `cellDates:true` a propósito, así que se
+ *   hace una segunda lectura independiente solo para esto.
  *
  * Dependencias:
  *   - XLSX (SheetJS, cargado globalmente desde el CDN en index.html)
@@ -72,34 +77,80 @@ function _fixExcelDateRow(row) {
 }
 
 /**
- * Nombres de columna EN LA HOJA DE ORIGEN (no los nombres de export.js
- * de RAW_TEXT_DATE_COLS — esos son los del archivo final; aquí son los
- * headers reales de RUTEO NUEVO, ver COL_MAP en core/constants.js para
- * el mapeo entre ambos). FECHA es la única que además se recorta a
- * solo fecha (regla de negocio: la primera columna del archivo final
- * es fecha, no fecha+hora) — las demás se preservan completas,
- * incluyendo su hora.
+ * Descompone un número serial de Excel en sus componentes de calendario
+ * puros. 25569 = offset estándar de días entre la época de Excel
+ * (1899-12-30) y la época de JS (1970-01-01) — misma constante que ya
+ * usa utils/format.js → formatFactDate() para números seriales.
+ * Se usa Date.UTC() únicamente como calculadora de calendario (para no
+ * reimplementar reglas de años bisiestos a mano) — el objeto Date
+ * resultante NUNCA se serializa ni se le leen getters locales, solo
+ * los UTC, que son deterministas sin importar la zona horaria del
+ * navegador.
  * @private
  */
-const RAW_TEXT_SOURCE_COLS = ['FECHA', 'T.E', 'T.R', 'SOLICITUD', 'ENRAMPE', 'RETIRO'];
+function _serialToParts(serial) {
+  const ms = Math.round((serial - 25569) * 86400 * 1000);
+  const d  = new Date(ms);
+  return {
+    y: d.getUTCFullYear(), mo: d.getUTCMonth() + 1, day: d.getUTCDate(),
+    h: d.getUTCHours(), mi: d.getUTCMinutes(),
+    // Tolerancia de medio segundo — distingue una celda que sí trae
+    // hora de una que es fecha pura (fracción de día ~0).
+    hasTime: (serial % 1) > (0.5 / 86400)
+  };
+}
 
 /**
- * Sobreescribe, para cada columna en RAW_TEXT_SOURCE_COLS, el valor de
- * `rows[i]` con el texto exacto que Excel muestra para esa celda (sin
- * pasar por Date). Ver nota de cabecera del módulo.
+ * Formatea un serial de Excel como "DD/MM/YYYY" o "DD/MM/YYYY HH:mm"
+ * — SIEMPRE en este formato, sin depender del formato de la celda de
+ * origen ni de ninguna configuración regional. Ver nota de cabecera.
  * @private
  */
-function _applyRawSourceDates(rows, rawTextRows) {
+function _fmtSerial(serial, withTime) {
+  const p   = _serialToParts(serial);
+  const pad = n => String(n).padStart(2, '0');
+  const datePart = `${pad(p.day)}/${pad(p.mo)}/${p.y}`;
+  return (withTime && p.hasTime) ? `${datePart} ${pad(p.h)}:${pad(p.mi)}` : datePart;
+}
+
+/**
+ * Columnas de RUTEO NUEVO cuyo valor final debe ser texto
+ * DD/MM/YYYY[ HH:mm] calculado desde el serial puro — nunca texto
+ * `.w` de SheetJS, nunca un objeto Date. `withTime:false` solo aplica
+ * a FECHA (regla de negocio: la primera columna del archivo final es
+ * fecha, no fecha+hora).
+ * @private
+ */
+const RAW_SERIAL_SOURCE_COLS = {
+  'FECHA':     false,
+  'T.E':       true,
+  'T.R':       true,
+  'SOLICITUD': true,
+  'ENRAMPE':   true,
+  'RETIRO':    true,
+};
+
+/**
+ * Sobreescribe, para cada columna de RAW_SERIAL_SOURCE_COLS, el valor
+ * de `rows[i]` con el texto calculado desde el serial puro de la celda
+ * correspondiente en `rawNumRows` (lectura con cellDates:false). Si la
+ * celda no es numérica (texto suelto, vacío), se conserva tal cual sin
+ * interpretarla — nunca se fuerza una conversión sobre un valor que no
+ * es un serial real.
+ * @private
+ */
+function _applyRawSourceDates(rows, rawNumRows) {
   rows.forEach((row, i) => {
-    const src = rawTextRows[i];
+    const src = rawNumRows[i];
     if (!src) return;
-    RAW_TEXT_SOURCE_COLS.forEach(key => {
-      const text = src[key];
-      if (text === undefined || text === '') return;
-      row[key] = key === 'FECHA'
-        ? String(text).replace(/\s+\d{1,2}:\d{2}(:\d{2})?\s*$/, '').trim()
-        : String(text).trim();
-    });
+    for (const [key, withTime] of Object.entries(RAW_SERIAL_SOURCE_COLS)) {
+      const v = src[key];
+      if (typeof v === 'number' && v > 0) {
+        row[key] = _fmtSerial(v, withTime);
+      } else if (v !== undefined && v !== '') {
+        row[key] = String(v).trim();
+      }
+    }
   });
 }
 
@@ -129,11 +180,14 @@ export async function processXLS(file) {
   const wsRuteo = wb.Sheets[ruteoName];
   const raw     = XLSX.utils.sheet_to_json(wsRuteo, { defval: '' }).map(_fixExcelDateRow);
 
-  // Segunda pasada, SOLO para las columnas de RAW_TEXT_SOURCE_COLS — ver
-  // nota de cabecera "FIX (fidelidad de fecha/hora)". Misma hoja, mismo
-  // orden de filas que `raw`, alineado por índice.
-  const rawTextRows = XLSX.utils.sheet_to_json(wsRuteo, { defval: '', raw: false });
-  _applyRawSourceDates(raw, rawTextRows);
+  // Segunda lectura, independiente, SOLO para obtener los seriales
+  // numéricos puros de RAW_SERIAL_SOURCE_COLS — ver nota de cabecera
+  // "FIX (fidelidad de fecha/hora — v2)". cellDates:false conserva el
+  // número tal cual, sin que SheetJS lo convierta a Date ni a texto.
+  const wbNum      = XLSX.read(buf, { type: 'array', cellDates: false });
+  const wsRuteoNum = wbNum.Sheets[ruteoName];
+  const rawNumRows = XLSX.utils.sheet_to_json(wsRuteoNum, { defval: '' });
+  _applyRawSourceDates(raw, rawNumRows);
 
   const factName = wb.SheetNames.find(n =>
     SHEET_FACTURAS.some(s => n.toUpperCase().includes(s.toUpperCase()))
