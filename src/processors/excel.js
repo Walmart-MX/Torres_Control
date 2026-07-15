@@ -15,25 +15,31 @@
  * los lee correctamente. Se aplica a ambas hojas por robustez — cualquier
  * columna de fecha en cualquiera de las dos sufre el mismo bug de SheetJS.
  *
- * FIX (fidelidad de FECHA — julio 2026): el fix anterior resolvía el
- * desfase de un día, pero FECHA seguía viajando como objeto Date —
- * reconstruido 3 veces en total entre excel.js, la vista previa (ui.js
- * → fmtDate) y export.js. Cada reconstrucción es una oportunidad de
- * fuga: redondeo de punto flotante en el número serial de Excel,
- * supuestos de zona horaria, y en el caso de `new Date(string)` en
- * export.js, ambigüedad real DD/MM vs MM/DD para días ≤ 12.
+ * FIX (fidelidad de fecha/hora — julio 2026): el fix anterior resolvía
+ * el desfase de un día para FECHA, pero dejaba dos problemas activos:
+ *   1. ENRAMPE / RETIRO / SOLICITUD DE ENRAMPE seguían viajando como
+ *      Date hasta el export, y export.js no las anclaba en UTC antes
+ *      de escribirlas (a diferencia de FECHA) — SheetJS serializa
+ *      cualquier Date usando sus componentes UTC, así que en una zona
+ *      con offset negativo (UTC-6) el archivo final salía adelantado
+ *      exactamente ese offset (ej. 23:45 → 05:45 del día siguiente).
+ *   2. TEMP. ENRAMPE / TEMP. DESENRAMPE no tenían NINGUNA protección
+ *      — ni la de FECHA ni ninguna otra — así que sufrían el mismo
+ *      desfase sin que hubiera indicio alguno en el código.
  *
- * Causa raíz: FECHA no necesita ser interpretada como fecha en ningún
- * punto del pipeline — solo necesita copiarse. Por eso, además de
- * `raw` (con cellDates:true, usado para TODAS las demás columnas de
- * fecha/hora que sí lo requieren: ENRAMPE, RETIRO, SOLICITUD DE
- * ENRAMPE, TEMP. ENRAMPE/DESENRAMPE), se hace una segunda pasada
- * `raw:false` sobre la MISMA hoja — que le pide a SheetJS el texto ya
- * formateado de la celda (su propiedad `.w`, el mismo cálculo de
- * calendario que usa Excel para mostrarla, sin aritmética de zona
- * horaria de por medio) — y se usa ESE texto, tal cual, como el valor
- * de FECHA. Cero Date, cero parsing, cero reconstrucción en el resto
- * del pipeline para esta columna específica (ver también export.js).
+ * Causa raíz real: ninguna de estas columnas necesita interpretarse
+ * como fecha en ningún punto del pipeline — solo necesitan copiarse.
+ * Por eso, para las columnas listadas en RAW_TEXT_DATE_COLS
+ * (core/constants.js), se hace una segunda lectura de la misma hoja
+ * con `raw:false` — que le pide a SheetJS el texto ya formateado de la
+ * celda (su propiedad `.w`, el mismo cálculo que usa Excel para
+ * mostrarla, sin aritmética de zona horaria de por medio) — y ESE
+ * texto, tal cual, reemplaza el valor Date que _fixExcelDateRow había
+ * construido. Cero Date, cero parsing, cero reconstrucción para estas
+ * columnas en el resto del pipeline (ver también export.js). El resto
+ * de columnas de fecha/hora que no vienen de RUTEO NUEVO (CITA, HR.
+ * DESPACHO, SALIDA DE CASETA — provienen de PDF/paste, no de esta
+ * hoja) no se tocan.
  *
  * Dependencias:
  *   - XLSX (SheetJS, cargado globalmente desde el CDN en index.html)
@@ -66,17 +72,34 @@ function _fixExcelDateRow(row) {
 }
 
 /**
- * Sobreescribe row.FECHA con el texto exacto que Excel muestra para esa
- * celda (sin pasar por Date). Recorta un posible sufijo de hora si la
- * celda de origen trae fecha+hora pegadas — operación de texto pura,
- * no interpreta ni reformatea la fecha en sí.
+ * Nombres de columna EN LA HOJA DE ORIGEN (no los nombres de export.js
+ * de RAW_TEXT_DATE_COLS — esos son los del archivo final; aquí son los
+ * headers reales de RUTEO NUEVO, ver COL_MAP en core/constants.js para
+ * el mapeo entre ambos). FECHA es la única que además se recorta a
+ * solo fecha (regla de negocio: la primera columna del archivo final
+ * es fecha, no fecha+hora) — las demás se preservan completas,
+ * incluyendo su hora.
  * @private
  */
-function _applyRawFecha(rows, rawTextRows) {
+const RAW_TEXT_SOURCE_COLS = ['FECHA', 'T.E', 'T.R', 'SOLICITUD', 'ENRAMPE', 'RETIRO'];
+
+/**
+ * Sobreescribe, para cada columna en RAW_TEXT_SOURCE_COLS, el valor de
+ * `rows[i]` con el texto exacto que Excel muestra para esa celda (sin
+ * pasar por Date). Ver nota de cabecera del módulo.
+ * @private
+ */
+function _applyRawSourceDates(rows, rawTextRows) {
   rows.forEach((row, i) => {
-    const srcText = rawTextRows[i] ? rawTextRows[i]['FECHA'] : undefined;
-    if (srcText === undefined || srcText === '') return;
-    row['FECHA'] = String(srcText).replace(/\s+\d{1,2}:\d{2}(:\d{2})?\s*$/, '').trim();
+    const src = rawTextRows[i];
+    if (!src) return;
+    RAW_TEXT_SOURCE_COLS.forEach(key => {
+      const text = src[key];
+      if (text === undefined || text === '') return;
+      row[key] = key === 'FECHA'
+        ? String(text).replace(/\s+\d{1,2}:\d{2}(:\d{2})?\s*$/, '').trim()
+        : String(text).trim();
+    });
   });
 }
 
@@ -106,11 +129,11 @@ export async function processXLS(file) {
   const wsRuteo = wb.Sheets[ruteoName];
   const raw     = XLSX.utils.sheet_to_json(wsRuteo, { defval: '' }).map(_fixExcelDateRow);
 
-  // Segunda pasada, SOLO para FECHA — ver nota de cabecera "FIX (fidelidad
-  // de FECHA)". Misma hoja, mismo orden de filas que `raw`, alineado por
-  // índice.
+  // Segunda pasada, SOLO para las columnas de RAW_TEXT_SOURCE_COLS — ver
+  // nota de cabecera "FIX (fidelidad de fecha/hora)". Misma hoja, mismo
+  // orden de filas que `raw`, alineado por índice.
   const rawTextRows = XLSX.utils.sheet_to_json(wsRuteo, { defval: '', raw: false });
-  _applyRawFecha(raw, rawTextRows);
+  _applyRawSourceDates(raw, rawTextRows);
 
   const factName = wb.SheetNames.find(n =>
     SHEET_FACTURAS.some(s => n.toUpperCase().includes(s.toUpperCase()))
