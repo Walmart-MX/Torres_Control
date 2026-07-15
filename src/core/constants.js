@@ -117,18 +117,22 @@ export function getMapped(row, col) {
   return (COL_MAP[col] ? COL_MAP[col](row) : row[col]) ?? '';
 }
 /**
- * Columnas cuyo valor debe preservarse como texto literal de la celda
- * de origen (RUTEO NUEVO) — NUNCA como objeto Date. Se agrega tras
- * detectar que las columnas de hora (ENRAMPE, RETIRO, SOLICITUD DE
- * ENRAMPE) llegaban desfasadas por zona horaria al exportar, y que
- * TEMP. ENRAMPE / TEMP. DESENRAMPE no tenían ninguna protección
- * contra el mismo problema. FECHA se incluye aquí también — reemplaza
- * el enfoque anterior de reconstruir un Date con Date.UTC().
- * Usada por processors/excel.js (para saber qué columnas copiar tal
- * cual) y features/export.js (para saber qué columnas NO deben pasar
- * por ninguna lógica de Date al exportar).
+ * Columnas cuyo valor debe preservarse como texto literal — NUNCA como
+ * objeto Date. FECHA / TEMP. ENRAMPE / TEMP. DESENRAMPE / SOLICITUD DE
+ * ENRAMPE / ENRAMPE / RETIRO vienen de RUTEO NUEVO (ver processors/
+ * excel.js). HORA DE FACTURACION viene de la hoja CONCENTRADO FACTURAS
+ * (misma función excel.js → processXLS, vía formatFactDate en
+ * utils/format.js) y se agrega aquí tras detectar el mismo patrón de
+ * bug: aunque el texto se extrajera correctamente, al no estar en esta
+ * lista, features/export.js lo reconstruía como Date vía parseDateTime()
+ * antes de escribirlo — y SheetJS serializa cualquier Date usando sus
+ * componentes UTC, introduciendo el mismo desfase de zona horaria que
+ * ya se había corregido para las demás columnas. Usada por
+ * processors/excel.js (indirectamente, vía formatFactDate) y
+ * features/export.js (para saber qué columnas NO deben pasar por
+ * ninguna lógica de Date al exportar).
  */
 export const RAW_TEXT_DATE_COLS = new Set([
   'FECHA', 'TEMP. ENRAMPE', 'TEMP. DESENRAMPE', 'SOLICITUD DE ENRAMPE',
-  'ENRAMPE', 'RETIRO'
+  'ENRAMPE', 'RETIRO', 'HORA DE FACTURACION'
 ]);
