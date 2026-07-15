@@ -32,8 +32,7 @@ import { COL_RUTA, COL_DETTE_E, COL_DETTE_F, COL_FACT, MAX_MARCH } from '../core
 import { FactCache } from '../features/fact-cache.js';
 import { normOp } from '../utils/format.js';
 import { getFiscalWeek } from '../core/fiscal-calendar.js';
-import { dayNameEs } from '../utils/date.js';
-
+import { resolveExcelDate, dayNameEs } from '../utils/date.js';
 /**
  * Resuelve row['FECHA'] a un objeto Date válido.
  *
@@ -89,10 +88,11 @@ export function runMerge() {
     const _rowId = ruta + '||' + (detteF || String(State.merged.length));
     const nr = { ...row, _rowId, _matched: !!pdfRow, _factMatched: !!factRow, _despMatched: !!despRow };
 
-    // ── SW (calendario fiscal Walmart) + DIA — ambas derivadas de
-    // row['FECHA'], nunca del reloj del equipo (ver nota de cabecera
-    // del módulo y análisis de la Mejora 2/3).
-    const fechaRef = _resolveFecha(row);
+// ── SW (calendario fiscal Walmart) + DIA — ambas derivadas de
+    // row['FECHA'], nunca del reloj del equipo. resolveExcelDate()
+    // (utils/date.js) es la única fuente de verdad para interpretar
+    // row['FECHA'] sin ambigüedad de formato — ver su cabecera.
+    const fechaRef = resolveExcelDate(row['FECHA']);
     let sw = '', dia = '';
     if (fechaRef) {
       dia = dayNameEs(fechaRef);
