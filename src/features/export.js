@@ -24,14 +24,14 @@
  *
  * Dependencias:
  *   - State (core/state.js) — leído solo como default de `rows`
- *   - BASE_ORDER, INT_COLS, DATE_COLS, DATETIME_COLS,
+ *   - BASE_ORDER, INT_COLS, DATE_COLS, DATETIME_COLS, RAW_TEXT_DATE_COLS,
  *     COLS_PDF, COLS_DESP, COLS_FILL, getMapped (core/constants.js)
  *   - parseDateTime (utils/date.js)
  *   - XLSX (SheetJS, global del CDN en index.html)
  */
 import { State } from '../core/state.js';
 import {
-  BASE_ORDER, INT_COLS, DATE_COLS, DATETIME_COLS,
+  BASE_ORDER, INT_COLS, DATE_COLS, DATETIME_COLS, RAW_TEXT_DATE_COLS,
   COLS_PDF, COLS_DESP, COLS_FILL, getMapped
 } from '../core/constants.js';
 import { parseDateTime } from '../utils/date.js';
@@ -85,32 +85,40 @@ function buildWorkbook(rows, format) {
   const dataRows = rows.map(row => format.columns.map(col => {
     let val = getMapped(row, col);
     if (val === '' || val === null || val === undefined) return '';
-    // src/features/export.js — dentro de buildWorkbook()
 
-if (DATE_COLS.has(col)) {
-  // FIX (fidelidad de FECHA — julio 2026): si el valor ya es el texto
-  // original tal cual vino de la celda de Excel (ver la segunda pasada
-  // raw:false en excel.js), se escribe SIN pasar por el constructor
-  // Date. Evita: (a) redondeo de número serial, (b) reinterpretación de
-  // zona horaria, (c) el riesgo de ambigüedad DD/MM vs MM/DD que tiene
-  // `new Date(string)` para días ≤ 12. Es la causa raíz que se corrige
-  // aquí — antes esta rama SIEMPRE reconstruía un Date, incluso cuando
-  // el valor de origen ya era perfecto.
-  if (typeof val === 'string') return val;
+    // FIX (fidelidad de fecha/hora — julio 2026): estas columnas vienen
+    // directo de RUTEO NUEVO y deben preservarse como texto literal —
+    // ver nota de cabecera de processors/excel.js. Se resuelve ANTES que
+    // DATE_COLS/DATETIME_COLS a propósito: aunque FECHA/ENRAMPE/RETIRO/
+    // etc. también pertenecen a esos otros conjuntos, esta rama gana
+    // siempre que el valor ya sea texto, evitando por completo la
+    // reconstrucción de Date (y con ella, cualquier desfase de zona
+    // horaria). El caso Date solo puede darse con sesiones históricas
+    // guardadas antes de este fix (dispatch-history) — se conserva ahí
+    // el comportamiento anterior únicamente para esos datos viejos.
+    if (RAW_TEXT_DATE_COLS.has(col)) {
+      if (typeof val === 'string') return val;
+      if (val instanceof Date && !isNaN(val.getTime())) {
+        return DATE_COLS.has(col)
+          ? new Date(Date.UTC(val.getFullYear(), val.getMonth(), val.getDate()))
+          : new Date(Date.UTC(val.getFullYear(), val.getMonth(), val.getDate(),
+                               val.getHours(), val.getMinutes(), val.getSeconds() || 0));
+      }
+      return val;
+    }
 
-  // Compatibilidad retroactiva: si val llega como Date (dato en memoria
-  // de una sesión anterior a este fix, u otra columna futura en
-  // DATE_COLS que sí necesite tratarse como fecha real), se conserva el
-  // comportamiento anterior sin cambios.
-  const d = val instanceof Date ? val : new Date(val);
-  return isNaN(d.getTime()) ? val : new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-}
+    if (DATE_COLS.has(col)) {
+      const d = val instanceof Date ? val : new Date(val);
+      return isNaN(d.getTime()) ? val : new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    }
+
     if (DATETIME_COLS.has(col)) {
       if (val instanceof Date && !isNaN(val.getTime())) return val;
       const d = parseDateTime(String(val));
       return d ? d : val;
     }
-if (INT_COLS.has(col)) {
+
+    if (INT_COLS.has(col)) {
       // FIX (auditoría post-Camino B / #6 rutas partidas): RUTA puede
       // contener valores no puramente numéricos ("4102-2"). Antes se le
       // quitaban los caracteres no numéricos antes de convertir a
@@ -122,6 +130,7 @@ if (INT_COLS.has(col)) {
       const n = parseInt(String(val).replace(/[^\d]/g,''), 10);
       return isNaN(n) ? val : n;
     }
+
     return val;
   }));
 
@@ -174,14 +183,14 @@ if (INT_COLS.has(col)) {
  * Genera y descarga el Excel de un procesamiento.
  *
  * @param {Array<object>} [rows=State.merged] — dataset a exportar. Se
- *   permite pasar un array arbitrario (ej. filas reconstruidas de una
- *   sesión histórica) para reutilizar esta misma función al re-descargar
- *   desde el Historial de Procesamientos.
+ *    permite pasar un array arbitrario (ej. filas reconstruidas de una
+ *    sesión histórica) para reutilizar esta misma función al re-descargar
+ *    desde el Historial de Procesamientos.
  * @param {string} [formatId='despacho'] — clave en EXPORT_FORMATS
  * @param {string} [dateLabel] — fecha a usar en el nombre del archivo;
- *   por defecto la fecha de hoy. Al re-descargar una sesión histórica,
- *   pásale session.session_date para que el archivo refleje esa fecha
- *   y no la de hoy.
+ *    por defecto la fecha de hoy. Al re-descargar una sesión histórica,
+ *    pásale session.session_date para que el archivo refleje esa fecha
+ *    y no la de hoy.
  */
 export function exportXLSX(rows = State.merged, formatId = 'despacho', dateLabel = null) {
   const format = EXPORT_FORMATS[formatId];
