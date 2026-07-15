@@ -31,10 +31,10 @@
  */
 import { State } from '../core/state.js';
 import {
-  BASE_ORDER, INT_COLS, DATE_COLS, DATETIME_COLS, RAW_TEXT_DATE_COLS,
+  BASE_ORDER, INT_COLS, DATE_COLS, DATETIME_COLS,
   COLS_PDF, COLS_DESP, COLS_FILL, getMapped
 } from '../core/constants.js';
-import { parseDateTime } from '../utils/date.js';
+import { parseDateTime, resolveExcelDate } from '../utils/date.js';
 
 const HDR_COLORS = { PDF:'005F4B', DESP:'3B2278', FILL:'7A3B00', DEFAULT:'1A2A4A' };
 
@@ -107,9 +107,19 @@ function buildWorkbook(rows, format) {
       return val;
     }
 
-    if (DATE_COLS.has(col)) {
-      const d = val instanceof Date ? val : new Date(val);
-      return isNaN(d.getTime()) ? val : new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  if (DATE_COLS.has(col)) {
+      // FIX: antes se usaba `val instanceof Date ? val : new Date(val)`,
+      // que para celdas de texto (ej. "02/07/2026") delegaba en el
+      // parser nativo MM/DD/YYYY y podía exportar el día/mes
+      // invertidos. resolveExcelDate() (utils/date.js) es ahora la
+      // única fuente de verdad para esta conversión — mismo resolver
+      // que usa merge.js para SW/DIA, evita una segunda
+      // implementación del mismo parseo.
+      const d = resolveExcelDate(val);
+      // Se conserva la reconstrucción vía Date.UTC() — necesaria
+      // porque SheetJS serializa fechas ancladas en UTC (ver nota
+      // original de este bloque).
+      return d ? new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())) : val;
     }
 
     if (DATETIME_COLS.has(col)) {
