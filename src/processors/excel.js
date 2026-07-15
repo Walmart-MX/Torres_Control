@@ -15,43 +15,40 @@
  * los lee correctamente. Se aplica a ambas hojas por robustez — cualquier
  * columna de fecha en cualquiera de las dos sufre el mismo bug de SheetJS.
  *
- * FIX (fidelidad de fecha/hora — julio 2026, v2):
- *   Intento previo: para FECHA/ENRAMPE/RETIRO/SOLICITUD DE ENRAMPE/
- *   TEMP. ENRAMPE/TEMP. DESENRAMPE se leía el texto ya formateado por
- *   SheetJS (`.w`, con `raw:false`). Resultó INSUFICIENTE: `.w` no es
- *   una copia neutral de la celda — SheetJS lo genera aplicando el
- *   código de formato numérico de la celda de origen (ej. "m/d/yy
- *   h:mm") con su propia librería de formato (SSF), que interpreta ese
- *   patrón literalmente y SIN CONOCIMIENTO de la configuración regional
- *   con la que el usuario ve el archivo en su Excel. Resultado: una
- *   celda que el usuario ve como "02/07/2026 00:38" en su Excel (con
- *   configuración regional es-MX) se leía como "7/2/26 0:38" — el
- *   mismo tipo de ambigüedad de formato que se buscaba eliminar, solo
- *   que trasladada a SheetJS en vez de a `new Date()`.
+ * FIX (fidelidad de fecha/hora — julio 2026, v2): para las columnas de
+ * RUTEO NUEVO (FECHA, TEMP. ENRAMPE/DESENRAMPE, SOLICITUD DE ENRAMPE,
+ * ENRAMPE, RETIRO) se abandonó por completo el objeto Date — ver
+ * _serialToParts()/_fmtSerial() abajo. Se lee el número serial PURO de
+ * la celda (segunda lectura del workbook con cellDates:false) y se
+ * calculan los componentes de calendario con aritmética simple. Cero
+ * Date, cero getters UTC/locales, cero ambigüedad de zona horaria.
  *
- *   Causa raíz real: cualquier acercamiento basado en TEXTO formateado
- *   (sea por Excel, por SheetJS, o por Date) hereda la ambigüedad del
- *   formato de origen. La única fuente sin ambigüedad es el número
- *   serial de Excel — un valor puro (días desde 1899-12-30 + fracción
- *   de día), sin zona horaria ni locale de por medio. Solución:
- *   _serialToParts()/_fmtSerial() calculan los componentes de
- *   calendario directamente desde ese número con aritmética simple
- *   (vía Date.UTC, pero SOLO se leen sus getters UTC — nunca locales,
- *   nunca se serializa ese Date a ningún lado) y se formatean siempre
- *   como DD/MM/YYYY [HH:mm], sin importar el formato de la celda de
- *   origen ni la configuración regional del navegador.
+ * FIX (fidelidad de HORA DE FACTURACION — julio 2026, v3):
+ *   La corrección v2 NO se había extendido a la hoja CONCENTRADO
+ *   FACTURAS — esa columna seguía dependiendo de _fixExcelDateRow()
+ *   (Date reconstruido) + formatFactDate() (lectura con getters
+ *   locales), la misma cadena de conversiones Date que causaba el bug
+ *   original en ENRAMPE/RETIRO antes de migrarlas a serial puro. El
+ *   síntoma reportado (+6h exactas, el offset de México) es la firma
+ *   típica de un Date leído con el getter que no corresponde en algún
+ *   punto de esa cadena.
  *
- *   Para obtener el serial puro se necesita una lectura del workbook
- *   con `cellDates:false` — la lectura principal (`raw`, usada para el
- *   resto de columnas) usa `cellDates:true` a propósito, así que se
- *   hace una segunda lectura independiente solo para esto.
+ *   Causa raíz: cualquier ruta que pase por un objeto Date (aunque sea
+ *   "corregido") sigue expuesta a este tipo de desfase. La única
+ *   fuente sin ambigüedad es el número serial de Excel. Se aplica
+ *   ahora la MISMA técnica que ya funciona para RUTEO NUEVO: leer el
+ *   serial puro de la celda de fecha de facturación (misma lectura
+ *   cellDates:false, extendida a la hoja de facturas) y formatearlo
+ *   con _fmtSerial() — sin tocar formatFactDate()/Date en absoluto
+ *   para el caso numérico. formatFactDate() se conserva como fallback
+ *   únicamente para el caso (raro) de que la celda no sea numérica.
  *
  * Dependencias:
  *   - XLSX (SheetJS, cargado globalmente desde el CDN en index.html)
  *   - SHEET_RUTEO, SHEET_FACTURAS (core/constants.js) — nombres alternativos
  *     de hoja que se buscan por coincidencia parcial, insensible a mayúsculas
- *   - formatFactDate (utils/format.js) — normaliza el valor de la celda de
- *     fecha de facturación (puede venir como Date, número serial o string)
+ *   - formatFactDate (utils/format.js) — fallback para celdas de fecha
+ *     de facturación que no llegan como número serial (texto suelto)
  */
 import { SHEET_RUTEO, SHEET_FACTURAS } from '../core/constants.js';
 import { formatFactDate } from '../utils/format.js';
@@ -79,13 +76,11 @@ function _fixExcelDateRow(row) {
 /**
  * Descompone un número serial de Excel en sus componentes de calendario
  * puros. 25569 = offset estándar de días entre la época de Excel
- * (1899-12-30) y la época de JS (1970-01-01) — misma constante que ya
- * usa utils/format.js → formatFactDate() para números seriales.
- * Se usa Date.UTC() únicamente como calculadora de calendario (para no
- * reimplementar reglas de años bisiestos a mano) — el objeto Date
- * resultante NUNCA se serializa ni se le leen getters locales, solo
- * los UTC, que son deterministas sin importar la zona horaria del
- * navegador.
+ * (1899-12-30) y la época de JS (1970-01-01). Se usa Date.UTC()
+ * únicamente como calculadora de calendario (para no reimplementar
+ * reglas de años bisiestos a mano) — el objeto Date resultante NUNCA
+ * se serializa ni se le leen getters locales, solo los UTC, que son
+ * deterministas sin importar la zona horaria del navegador.
  * @private
  */
 function _serialToParts(serial) {
@@ -94,8 +89,6 @@ function _serialToParts(serial) {
   return {
     y: d.getUTCFullYear(), mo: d.getUTCMonth() + 1, day: d.getUTCDate(),
     h: d.getUTCHours(), mi: d.getUTCMinutes(),
-    // Tolerancia de medio segundo — distingue una celda que sí trae
-    // hora de una que es fecha pura (fracción de día ~0).
     hasTime: (serial % 1) > (0.5 / 86400)
   };
 }
@@ -180,10 +173,10 @@ export async function processXLS(file) {
   const wsRuteo = wb.Sheets[ruteoName];
   const raw     = XLSX.utils.sheet_to_json(wsRuteo, { defval: '' }).map(_fixExcelDateRow);
 
-  // Segunda lectura, independiente, SOLO para obtener los seriales
-  // numéricos puros de RAW_SERIAL_SOURCE_COLS — ver nota de cabecera
-  // "FIX (fidelidad de fecha/hora — v2)". cellDates:false conserva el
-  // número tal cual, sin que SheetJS lo convierta a Date ni a texto.
+  // Segunda lectura, independiente, con cellDates:false — se reutiliza
+  // para AMBAS hojas (RUTEO NUEVO y CONCENTRADO FACTURAS) para obtener
+  // seriales numéricos puros, sin que SheetJS los convierta a Date ni
+  // a texto formateado. Ver nota de cabecera "FIX v2" y "FIX v3".
   const wbNum      = XLSX.read(buf, { type: 'array', cellDates: false });
   const wsRuteoNum = wbNum.Sheets[ruteoName];
   const rawNumRows = XLSX.utils.sheet_to_json(wsRuteoNum, { defval: '' });
@@ -202,15 +195,28 @@ export async function processXLS(file) {
     const colInv  = keys.find(k => /INVOICE|FACTURA|FOLIO/i.test(k));
     const colLoad = keys.find(k => /LOAD|GLS/i.test(k));
     const colFin  = keys.find(k => /FINAL|HORA|FACTURACION|TS/i.test(k));
+
+    // FIX v3: seriales puros de la MISMA hoja de facturas, vía wbNum
+    // (cellDates:false) — para calcular colFin sin pasar por Date.
+    const wsFactNum  = wbNum.Sheets[factName];
+    const rawFactNum = wsFactNum ? XLSX.utils.sheet_to_json(wsFactNum, { defval: '' }) : [];
+
     if (colInv) {
-      for (const r of rawFact) {
+      rawFact.forEach((r, i) => {
         const inv = String(r[colInv] || '').trim();
-        if (!inv) continue;
+        if (!inv) return;
+        const rawVal = rawFactNum[i] ? rawFactNum[i][colFin] : undefined;
+        let horaFact = '';
+        if (colFin) {
+          horaFact = (typeof rawVal === 'number' && rawVal > 0)
+            ? _fmtSerial(rawVal, true)          // serial puro — ruta robusta
+            : formatFactDate(r[colFin]);        // fallback — celda no numérica
+        }
         newFactData.set(inv, {
-          gls:      colLoad ? String(r[colLoad] || '').trim() : '',
-          horaFact: colFin  ? formatFactDate(r[colFin])        : ''
+          gls: colLoad ? String(r[colLoad] || '').trim() : '',
+          horaFact
         });
-      }
+      });
       factSheetLabel = `${newFactData.size} facturas (${factName})`;
     } else {
       factSheetLabel = 'hoja facturas sin columna INVOICE';
