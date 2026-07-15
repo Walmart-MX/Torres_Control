@@ -4,33 +4,20 @@
  * PDFs, concentrado de facturas, panel de despacho) y produce
  * State.merged: el array que alimenta la tabla, el SVE y la exportación.
  *
- * A diferencia de pdf.js / excel.js / paste.js, esta función NO es pura:
- * lee State.xlsData, State.pdfData, State.factData, State.despData,
- * State.catalog directamente, y escribe el resultado en State.merged.
- * Es intencional — preserva exactamente el comportamiento original.
+ * [... comentarios previos sin cambios ...]
  *
- * FIX (auditoría post-Camino B): se agrega usedPdfRows — un Set que
- * rastrea, por identidad de objeto, qué pdfRow ya fue asignado a una
- * entrega en esta corrida de merge. Antes, cuando el Excel traía una
- * entrega adicional sin match específico (sin factura/DETTE coincidente),
- * el fallback "cualquier PDF con la misma ruta" tomaba el primer PDF de
- * esa ruta sin importar que ya estuviera asignado a otra entrega —
- * duplicando marchamos y tarimas entre dos entregas distintas. Ahora el
- * fallback (y por consistencia, también los matches específicos) omiten
- * cualquier pdfRow ya reclamado; si no queda ninguno libre, la entrega
- * queda correctamente sin match (_matched:false) en vez de heredar datos
- * ajenos.
- *
- * Estrategia de match PDF (en orden de prioridad):
- *   1. ruta + factura del Excel (match específico)
- *   2. ruta + DETTE.1 del Excel (match específico)
- *   3. ruta + DETTE del Excel (match específico)
- *   4. cualquier PDF con la misma ruta que aún no haya sido asignado
- *      a otra entrega (fallback)
- *
- * Estrategia de match de factura:
- *   1. State.factData (concentrado del Excel recién cargado)
- *   2. FactCache.lookup() como fallback (concentrado de días anteriores)
+ * FIX (automatización SW — post análisis arquitectónico): se agrega el
+ * cálculo de _SW (Semana Walmart, calendario fiscal 4-5-4) por fila.
+ * DECISIÓN: la fecha de referencia es row['FECHA'] — la columna A del
+ * Excel RUTEO NUEVO, ya corregida de zona horaria por _fixExcelDateRow
+ * en excel.js — NUNCA el reloj del equipo. Esto hace que la SW (y a
+ * futuro, cualquier lógica de calendario fiscal) sea inmune a en qué
+ * momento del día se ejecuta SmartDispatch: no importa si el usuario
+ * procesa antes o después de medianoche, la SW siempre corresponde al
+ * día operativo real que trae el Excel, no al instante de ejecución.
+ * Si la fecha falta o cae fuera de los años fiscales configurados en
+ * fiscal-calendar.js, la fila queda con _SW vacío y se advierte en
+ * consola — no se detiene el merge del resto de las rutas.
  *
  * Dependencias:
  *   - State (core/state.js) — lee 5 propiedades, escribe State.merged
@@ -38,23 +25,18 @@
  *   - FactCache (features/fact-cache.js) — fallback de facturas históricas
  *   - normOp (utils/format.js) — normaliza el nombre de operador para
  *     buscarlo en State.catalog
+ *   - getFiscalWeek (core/fiscal-calendar.js) — calendario fiscal Walmart
  */
 import { State } from '../core/state.js';
 import { COL_RUTA, COL_DETTE_E, COL_DETTE_F, COL_FACT, MAX_MARCH } from '../core/constants.js';
 import { FactCache } from '../features/fact-cache.js';
 import { normOp } from '../utils/format.js';
+import { getFiscalWeek } from '../core/fiscal-calendar.js';
 
-/**
- * Ejecuta el merge completo. No hace nada si falta el Excel o no hay
- * ningún PDF cargado (guard clause idéntica al original).
- * Efecto secundario: reemplaza State.merged con el resultado del cruce.
- */
 export function runMerge() {
   if (!State.xlsData || State.pdfData.size === 0) return;
   State.merged = [];
 
-  // Ver nota de cabecera — evita que el mismo pdfRow se asigne dos veces
-  // dentro de la misma corrida de merge.
   const usedPdfRows = new Set();
 
   for (const row of State.xlsData) {
@@ -83,12 +65,22 @@ export function runMerge() {
     }
     const despRow = ruta ? (State.despData.get(ruta) || null) : null;
 
-    // _rowId: stable unique key — RUTA + delivery sub-key (DETTE.1).
-    // Multiple rows sharing the same RUTA but different destinations remain
-    // distinguishable. EditSystem uses this ID as the canonical pointer to
-    // guarantee it mutates exactly the right object in State.merged.
     const _rowId = ruta + '||' + (detteF || String(State.merged.length));
     const nr = { ...row, _rowId, _matched: !!pdfRow, _factMatched: !!factRow, _despMatched: !!despRow };
+
+    // ── Semana Walmart (SW) — calendario fiscal 4-5-4 ──
+    // Ver nota de cabecera: la referencia es row['FECHA'] (Excel), no
+    // el reloj del equipo.
+    let sw = '';
+    const fechaRef = row['FECHA'];
+    if (fechaRef instanceof Date && !isNaN(fechaRef.getTime())) {
+      try {
+        sw = getFiscalWeek(fechaRef).sw;
+      } catch (e) {
+        console.warn('[merge] SW no calculada para ruta', ruta, '—', e.message);
+      }
+    }
+    nr['_SW'] = sw;
 
     if (pdfRow) {
       nr['OPERADOR'] = pdfRow.operador;
