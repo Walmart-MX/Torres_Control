@@ -228,3 +228,90 @@ export function dayNameEs(date) {
   if (!(date instanceof Date) || isNaN(date.getTime())) return '';
   return DIAS_ES[date.getDay()];
 }
+
+/**
+ * Resuelve cualquier representación de row['FECHA'] a un objeto Date
+ * válido en hora LOCAL, sin ambigüedad de formato.
+ *
+ * FIX (root cause — bug DIA/SW/FECHA incorrectos para celdas de texto):
+ *   row['FECHA'] no siempre llega como Date. Cuando la celda del Excel
+ *   origen no tiene formato de fecha aplicado (columna capturada como
+ *   texto, común en hojas mantenidas manualmente), SheetJS la entrega
+ *   como STRING — ej. "02/07/2026". El código anterior, en ese caso,
+ *   delegaba en el parser nativo `new Date(string)`, que asume
+ *   convención estadounidense MM/DD/YYYY — interpretando "02/07/2026"
+ *   como 7 de FEBRERO en vez de 2 de JULIO. Esta función NUNCA delega
+ *   en new Date(string) para texto: parsea explícitamente DD/MM/YYYY,
+ *   la convención que usa el resto de esta app (ver parseDateTime,
+ *   normalizeAppointment más abajo en este mismo archivo).
+ *
+ *   También cubre el caso de número serial de Excel crudo (celda sin
+ *   NINGÚN formato, ni siquiera texto — cellDates:true de SheetJS no
+ *   la convierte). Mismo cálculo de offset que formatFactDate() en
+ *   utils/format.js, pero reconstruido a componentes LOCALES (mismo
+ *   patrón que excel.js → _fixExcelDateRow) en vez de dejarlo anclado
+ *   en UTC.
+ *
+ * Única fuente de verdad — usada por processors/merge.js (cálculo de
+ * SW/DIA) y features/export.js (columna FECHA del Excel exportado).
+ * Si en el futuro aparece un tercer lugar que necesite resolver
+ * row['FECHA'], debe importar esta función, no reimplementar el parseo.
+ *
+ * @param {Date|number|string} raw
+ * @returns {Date|null} — null si no se pudo resolver de forma inequívoca
+ */
+export function resolveExcelDate(raw) {
+  if (!raw && raw !== 0) return null;
+
+  // Caso 1: ya es un Date válido (celda con formato de fecha, ya
+  // corregida de zona horaria por excel.js → _fixExcelDateRow).
+  if (raw instanceof Date) {
+    return isNaN(raw.getTime()) ? null : raw;
+  }
+
+  // Caso 2: número serial de Excel crudo (celda sin formato de fecha
+  // — ni date ni texto — cellDates:true no la convirtió).
+  if (typeof raw === 'number') {
+    const utcMs   = Math.round((raw - 25569) * 86400 * 1000);
+    const utcDate = new Date(utcMs);
+    if (isNaN(utcDate.getTime())) return null;
+    return new Date(utcDate.getUTCFullYear(), utcDate.getUTCMonth(), utcDate.getUTCDate());
+  }
+
+  // Caso 3: texto — SIEMPRE se asume DD/MM/YYYY. Jamás se delega en
+  // el parser nativo new Date(string) — ver nota de cabecera.
+  const s = String(raw).trim();
+  const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+  if (m) {
+    let [, dd, mm, yyyy] = m;
+    if (yyyy.length === 2) yyyy = '20' + yyyy;
+    const d = new Date(+yyyy, +mm - 1, +dd);
+    // Validación defensiva: si día/mes no forman una fecha real
+    // (ej. "32/13/2026"), el constructor Date "normaliza" corriéndose
+    // de mes en vez de fallar — se detecta comparando contra los
+    // componentes originales.
+    if (d.getFullYear() === +yyyy && d.getMonth() === +mm - 1 && d.getDate() === +dd) {
+      return d;
+    }
+  }
+  return null;
+}
+
+// ─── Nombres de días en español (calendario Gregoriano estándar) ──────────
+// No confundir con la Semana Walmart (SW) — DIA es el día calendario
+// normal de la fecha de la ruta, sin relación con el calendario fiscal
+// 4-5-4. Por eso vive aquí y no en core/fiscal-calendar.js.
+
+const DIAS_ES = ['DOMINGO', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO'];
+
+/**
+ * Devuelve el nombre del día de la semana en español, mayúsculas,
+ * a partir de un objeto Date. Usado para automatizar la columna DIA
+ * del Excel exportado (antes captura manual).
+ * @param {Date} date
+ * @returns {string} — ej. 'LUNES', o '' si date no es válido
+ */
+export function dayNameEs(date) {
+  if (!(date instanceof Date) || isNaN(date.getTime())) return '';
+  return DIAS_ES[date.getDay()];
+}
