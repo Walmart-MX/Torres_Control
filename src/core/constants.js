@@ -74,7 +74,8 @@ export const DESP_ALIASES = {
  */
 export const COL_MAP = {
   'FECHA':                r => r['FECHA']       ?? '',
-  'SW':                   r => r['_SW']         ?? '',   // ← NUEVO — calendario fiscal Walmart (ver merge.js)
+  'DIA':                  r => r['_DIA']        ?? '',   // ← NUEVO
+  'SW':                   r => r['_SW']         ?? '',   // ← ya agregado en el paso anterior
   'ENTREGA':              r => r['SETEO']        ?? '',
   // ... resto sin cambios ...
   'ENT1':                 r => r['ENT1']         ?? '',
