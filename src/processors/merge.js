@@ -32,6 +32,27 @@ import { COL_RUTA, COL_DETTE_E, COL_DETTE_F, COL_FACT, MAX_MARCH } from '../core
 import { FactCache } from '../features/fact-cache.js';
 import { normOp } from '../utils/format.js';
 import { getFiscalWeek } from '../core/fiscal-calendar.js';
+import { dayNameEs } from '../utils/date.js';
+
+/**
+ * Resuelve row['FECHA'] a un objeto Date válido.
+ *
+ * FIX (root cause del bug donde SW/DIA quedaban vacíos): la primera
+ * versión de este cálculo exigía `row['FECHA'] instanceof Date`, pero
+ * export.js ya asume —desde antes de este cambio— que esa misma
+ * columna puede no llegar como Date estricto (ver su propio fallback
+ * `val instanceof Date ? val : new Date(val)` en el bloque DATE_COLS
+ * de buildWorkbook). El chequeo estricto era más restrictivo que el
+ * resto del sistema y fallaba en silencio. Se alinea aquí con el mismo
+ * patrón de tolerancia ya probado en export.js para esta columna.
+ * @private
+ */
+function _resolveFecha(row) {
+  const raw = row['FECHA'];
+  if (!raw && raw !== 0) return null;
+  const d = raw instanceof Date ? raw : new Date(raw);
+  return isNaN(d.getTime()) ? null : d;
+}
 
 export function runMerge() {
   if (!State.xlsData || State.pdfData.size === 0) return;
@@ -68,19 +89,23 @@ export function runMerge() {
     const _rowId = ruta + '||' + (detteF || String(State.merged.length));
     const nr = { ...row, _rowId, _matched: !!pdfRow, _factMatched: !!factRow, _despMatched: !!despRow };
 
-    // ── Semana Walmart (SW) — calendario fiscal 4-5-4 ──
-    // Ver nota de cabecera: la referencia es row['FECHA'] (Excel), no
-    // el reloj del equipo.
-    let sw = '';
-    const fechaRef = row['FECHA'];
-    if (fechaRef instanceof Date && !isNaN(fechaRef.getTime())) {
+    // ── SW (calendario fiscal Walmart) + DIA — ambas derivadas de
+    // row['FECHA'], nunca del reloj del equipo (ver nota de cabecera
+    // del módulo y análisis de la Mejora 2/3).
+    const fechaRef = _resolveFecha(row);
+    let sw = '', dia = '';
+    if (fechaRef) {
+      dia = dayNameEs(fechaRef);
       try {
         sw = getFiscalWeek(fechaRef).sw;
       } catch (e) {
         console.warn('[merge] SW no calculada para ruta', ruta, '—', e.message);
       }
+    } else {
+      console.warn('[merge] FECHA no resoluble para ruta', ruta, '— SW y DIA quedarán vacíos.');
     }
-    nr['_SW'] = sw;
+    nr['_SW']  = sw;
+    nr['_DIA'] = dia;
 
     if (pdfRow) {
       nr['OPERADOR'] = pdfRow.operador;
