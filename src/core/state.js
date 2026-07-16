@@ -18,6 +18,15 @@ export const State = {
   despData: new Map(),   // RUTA → { hrDesp, caseta, wtms, idIda }
   merged:   [],          // Final merged rows (output of tryMerge)
   catalog:  new Map(),   // normalizedName → licencia
+  // Catálogos maestros (Camino C) — reemplazan RUTEO NUEVO manual de
+  // FORMATO/TIENDA/ESTADO (Ventana de Recibo) y LINEA/PLACAS/CAPACIDAD
+  // (Pool Real). Empiezan vacíos hasta que se importen desde el panel
+  // "Catálogos" (Fase 3, pendiente) — el motor de enriquecimiento
+  // no-opea con seguridad mientras tanto.
+  catalogs:     { ventanaRecibo: [], poolReal: [] },
+  catalogMeta:  {},   // catalogId → { row_count, updated_at, updated_by }
+  catalogIndices: null,   // Map — reconstruido en cada runMerge()
+  catalogDuplicates: [],  // llaves duplicadas detectadas — leído por sve.js
 
   // Session
   user: localStorage.getItem('sd_user') || '',
