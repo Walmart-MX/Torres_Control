@@ -296,22 +296,3 @@ export function resolveExcelDate(raw) {
   }
   return null;
 }
-
-// ─── Nombres de días en español (calendario Gregoriano estándar) ──────────
-// No confundir con la Semana Walmart (SW) — DIA es el día calendario
-// normal de la fecha de la ruta, sin relación con el calendario fiscal
-// 4-5-4. Por eso vive aquí y no en core/fiscal-calendar.js.
-
-const DIAS_ES = ['DOMINGO', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO'];
-
-/**
- * Devuelve el nombre del día de la semana en español, mayúsculas,
- * a partir de un objeto Date. Usado para automatizar la columna DIA
- * del Excel exportado (antes captura manual).
- * @param {Date} date
- * @returns {string} — ej. 'LUNES', o '' si date no es válido
- */
-export function dayNameEs(date) {
-  if (!(date instanceof Date) || isNaN(date.getTime())) return '';
-  return DIAS_ES[date.getDay()];
-}
