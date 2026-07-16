@@ -40,7 +40,7 @@ export const SVE_INFO = 'INFORMATIVA';
 export const SVE_ICONS = {
   'dup_march':'🔖','dup_tarimas':'📦','missing_ruta':'🔴','missing':'🟠',
   'no_march':'🔴','zero_tar':'📐','high_tar':'📐','no_pdf':'🟡',
-  'no_fac':'ℹ️','bad_march':'ℹ️','integrity':'🔗'
+  'no_fac':'ℹ️','bad_march':'ℹ️','integrity':'🔗','no_ventana':'📇','no_pool':'🚚','cat_dup':'🗂️','time_anomaly':'⏱️'
 };
 
 /**
@@ -275,7 +275,70 @@ export function runSVE(rows) {
       vals.size>1?`×${vals.size}`:'',
       [...rowIds]);
   });
+// L: Ventana de Recibo — DETTE no encontrado (consolidado por ruta)
+  const noVentanaByRuta = new Map();
+  matched.forEach(r => {
+    const miss = (r._enrichMisses || []).find(m => m.catalog === 'ventanaRecibo');
+    if (!miss) return;
+    const ruta = String(getMapped(r,'RUTA')||'').trim();
+    if (!noVentanaByRuta.has(ruta)) noVentanaByRuta.set(ruta, { cnt: 0, rowIds: new Set() });
+    const e = noVentanaByRuta.get(ruta);
+    e.cnt++;
+    if (r._rowId) e.rowIds.add(r._rowId);
+  });
+  noVentanaByRuta.forEach(({ cnt, rowIds }, ruta) => rawAdd(SVE_WARN,'no_ventana', ruta,'FORMATO / TIENDA / ESTADO',
+    `Ruta ${ruta}: DETTE no encontrado en el catálogo Ventana de Recibo.`,
+    'Verifica el DETTE en RUTEO NUEVO o actualiza el catálogo.',
+    cnt>1?`×${cnt}`:'',
+    [...rowIds]));
 
+  // M: Pool Real — ECO/REMOLQUE no encontrado (consolidado por ruta)
+  const noPoolByRuta = new Map();
+  matched.forEach(r => {
+    const misses = (r._enrichMisses || []).filter(m => m.catalog === 'poolReal');
+    if (!misses.length) return;
+    const ruta = String(getMapped(r,'RUTA')||'').trim();
+    if (!noPoolByRuta.has(ruta)) noPoolByRuta.set(ruta, { fields: new Set(), rowIds: new Set() });
+    const e = noPoolByRuta.get(ruta);
+    misses.forEach(m => e.fields.add(m.index));
+    if (r._rowId) e.rowIds.add(r._rowId);
+  });
+  noPoolByRuta.forEach(({ fields, rowIds }, ruta) => {
+    const fl = [...fields].join(', ');
+    rawAdd(SVE_WARN,'no_pool', ruta, fl,
+      `Ruta ${ruta}: ${fl} no encontrado en el catálogo Pool Real.`,
+      'Verifica TRACTOR/REMOLQUE (UNIDAD) en RUTEO NUEVO o actualiza el catálogo.',
+      '', [...rowIds]);
+  });
+
+  // N: Catálogos — llaves duplicadas dentro del propio catálogo (una vez por corrida)
+  (State.catalogDuplicates || []).forEach(d => {
+    rawAdd(SVE_WARN,'cat_dup','', d.index,
+      `Catálogo ${d.catalog === 'ventanaRecibo' ? 'Ventana de Recibo' : 'Pool Real'}: valor duplicado "${d.value}" en ${d.index}.`,
+      'Revisa el catálogo — puede causar cruces incorrectos.',
+      d.value);
+  });
+
+  // O: Anomalías del motor de tiempos — orden invertido / duración anormal
+  const timeIssuesByRuta = new Map();
+  matched.forEach(r => {
+    const anomalies = r._timeAnomalies || [];
+    if (!anomalies.length) return;
+    const ruta = String(getMapped(r,'RUTA')||'').trim();
+    if (!timeIssuesByRuta.has(ruta)) timeIssuesByRuta.set(ruta, { invertido: 0, anormal: 0, rowIds: new Set() });
+    const e = timeIssuesByRuta.get(ruta);
+    anomalies.forEach(a => { if (a.reason === 'orden_invertido') e.invertido++; else e.anormal++; });
+    if (r._rowId) e.rowIds.add(r._rowId);
+  });
+  timeIssuesByRuta.forEach(({ invertido, anormal, rowIds }, ruta) => {
+    const parts = [];
+    if (invertido) parts.push(`${invertido} con orden invertido`);
+    if (anormal)   parts.push(`${anormal} con duración anormal`);
+    rawAdd(SVE_INFO,'time_anomaly', ruta, 'TIEMPOS',
+      `Ruta ${ruta}: ${parts.join(' · ')} en los cálculos de tiempo.`,
+      'Revisa las fechas capturadas de enrampe/retiro/despacho/caseta.',
+      '', [...rowIds]);
+  });
   // K: Integridad UI vs memoria
   const screenCnt = parseInt(document.getElementById('bdgXLS').textContent || '0', 10);
   if (screenCnt && screenCnt !== rows.length)
