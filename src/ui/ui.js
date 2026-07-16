@@ -518,6 +518,22 @@ export const UI = {
     el.className   = 'cat-status' + (cls ? ' ' + cls : '');
     el.textContent = msg;
   },
+  // ── Catálogos Maestros (Camino C, Fase 3) ──
+  renderCatalogMasterStatus(catalogId) {
+    const elId = catalogId === 'ventanaRecibo' ? 'mcVentanaStatus' : 'mcPoolStatus';
+    const el   = document.getElementById(elId);
+    if (!el) return;
+    const meta = State.catalogMeta[catalogId];
+    if (!meta) { el.textContent = '⚠️ Nunca cargado'; return; }
+    const date = new Date(meta.updated_at).toLocaleString('es-MX', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+    el.textContent = `✅ ${meta.row_count} registros · ${date}${meta.updated_by ? ' · ' + meta.updated_by : ''}`;
+  },
+  setMasterCatStatus(msg, cls) {
+    const el = document.getElementById('mcStatus');
+    if (!el) return;
+    el.className   = 'cat-status' + (cls ? ' ' + cls : '');
+    el.textContent = msg;
+  },
 
   // ── Cache History ──
   // Panel de diagnóstico del FactCache — reutiliza las clases visuales
