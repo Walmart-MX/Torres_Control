@@ -117,7 +117,7 @@ input, textarea { font-family: inherit; }
 }
 [data-theme="dark"] .topbar { background: #030810; border-bottom: 1px solid var(--border); }
 .tb-logo { display: flex; align-items: center; gap: 9px; text-decoration: none; }
-.tb-logo-mark {
+.tb-logo-mark {         
   width: 30px; height: 30px; background: var(--amber); border-radius: 7px;
   display: flex; align-items: center; justify-content: center; font-size: 16px;
   flex-shrink: 0;
@@ -1119,7 +1119,46 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
           </div>
         </div>
       </div>
+<!-- Catálogos Maestros (Camino C, Fase 3) — Ventana de Recibo y
+           Pool Real. Import/reemplazo únicamente; el enriquecimiento
+           en sí corre solo en cada merge (ver merge.js). Mismo patrón
+           visual que el import de operadores (cat-import-btn). -->
+      <div class="cat-panel" id="masterCatPanel">
+        <div class="cat-toggle" id="masterCatToggle">
+          <span style="font-size:15px">🗃️</span>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--text)">Catálogos Maestros</div>
+            <div style="font-size:11px;color:var(--text3)">Ventana de Recibo · Pool Real</div>
+          </div>
+          <span class="cat-chev" style="margin-left:auto">▾</span>
+        </div>
+        <div class="cat-body">
 
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+            <div style="flex:1">
+              <div style="font-size:12px;font-weight:600;color:var(--text)">Ventana de Recibo</div>
+              <div style="font-size:10px;color:var(--text3)" id="mcVentanaStatus">Cargando…</div>
+            </div>
+            <div class="btn btn-ghost btn-sm cat-import-btn">
+              📥 Importar / Reemplazar
+              <input type="file" id="mcVentanaFile" accept=".xlsx,.xls">
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 0">
+            <div style="flex:1">
+              <div style="font-size:12px;font-weight:600;color:var(--text)">Pool Real</div>
+              <div style="font-size:10px;color:var(--text3)" id="mcPoolStatus">Cargando…</div>
+            </div>
+            <div class="btn btn-ghost btn-sm cat-import-btn">
+              📥 Importar / Reemplazar
+              <input type="file" id="mcPoolFile" accept=".xlsx,.xls">
+            </div>
+          </div>
+
+          <div class="cat-status" id="mcStatus"></div>
+        </div>
+      </div>
     </div><!-- /sidebar -->
 
     <!-- RIGHT: Results panel -->
