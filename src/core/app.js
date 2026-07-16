@@ -68,6 +68,7 @@ import { RoutePicker } from '../editing/route-picker.js';
 import { FactCache } from '../features/fact-cache.js';
 import { initCatalog } from '../features/catalog.js';
 import { DispatchHistory } from '../features/dispatch-history.js';
+import { CatalogStore } from '../features/catalogs/catalog-store.js';
 
 /**
  * Inicializa la aplicación completa.
@@ -251,10 +252,21 @@ export async function init() {
   UI.applyMode();
 
   // ── Init catalog — Supabase (Camino B, Fase 1) ──
-  UI.setCatStatus('Cargando catálogo…', 'ok');
-  const catResult = await initCatalog();
-  UI.renderCatalog();
-  UI.setCatStatus(catResult.msg, catResult.ok ? 'ok' : 'err');
+UI.setCatStatus('Cargando catálogo…', 'ok');
+
+const catResult = await initCatalog();
+
+UI.renderCatalog();
+UI.setCatStatus(catResult.msg, catResult.ok ? 'ok' : 'err');
+
+// ───────────────────────────────────────────────────────────────
+// Init catálogos maestros (Camino C, Fase 1-2)
+// Se cargan silenciosamente. Todavía no existe UI para ellos
+// (llegará en Fase 3). El motor de enriquecimiento los utilizará
+// automáticamente cuando tengan información y hará no-op cuando
+// estén vacíos.
+// ───────────────────────────────────────────────────────────────
+await CatalogStore.loadAll();
 
   // ── Aviso de día ya procesado (Camino B, Fase 3) ──
   const todaySession = await DispatchHistory.getTodaySession();
