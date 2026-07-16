@@ -65,6 +65,7 @@ import { runSVE } from '../features/validation/sve.js';
 import { exportXLSX } from '../features/export.js';
 import { addOperator, deleteOperator, importOperators } from '../features/catalog.js';
 import { DispatchHistory } from '../features/dispatch-history.js';
+import { CatalogStore } from '../features/catalogs/catalog-store.js';
 
 export const Events = {
 
@@ -77,7 +78,24 @@ export const Events = {
     zone.addEventListener('drop',      e => { e.preventDefault(); zone.classList.remove('drag'); handler([...e.dataTransfer.files]); });
     input.addEventListener('change',   ()=> { handler([...input.files]); input.value = ''; });
   },
+// ── Catálogos Maestros (Camino C, Fase 3) ──
+  async importMasterCatalog(catalogId, file) {
+    if (!file) return;
+    UI.setMasterCatStatus('Importando…', 'ok');
+    try {
+      const buf  = await file.arrayBuffer();
+      const wb   = XLSX.read(buf, { type: 'array' });
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
 
+      const result = await CatalogStore.replaceCatalog(catalogId, rows, State.user);
+      UI.renderCatalogMasterStatus(catalogId);
+      UI.setMasterCatStatus(`✓ ${result.count} registros cargados`, 'ok');
+      if (State.merged.length) Events.triggerMerge();
+    } catch (e) {
+      UI.setMasterCatStatus('Error: ' + e.message, 'err');
+    }
+  },
   // ── PDF handler ──
   async handlePDFs(files) {
     files = files.filter(f => f.type === 'application/pdf');
