@@ -31,8 +31,15 @@
  */
 import { State } from '../core/state.js';
 import {
-  BASE_ORDER, INT_COLS, DATE_COLS, DATETIME_COLS,
-  COLS_PDF, COLS_DESP, COLS_FILL, getMapped
+  BASE_ORDER,
+  INT_COLS,
+  DATE_COLS,
+  DATETIME_COLS,
+  RAW_TEXT_DATE_COLS,
+  COLS_PDF,
+  COLS_DESP,
+  COLS_FILL,
+  getMapped
 } from '../core/constants.js';
 import { parseDateTime, resolveExcelDate } from '../utils/date.js';
 
