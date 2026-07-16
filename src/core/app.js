@@ -158,6 +158,15 @@ export async function init() {
     document.querySelectorAll('.ref-tab').forEach(b => b.classList.toggle('active', b === tabBtn));
     document.querySelectorAll('.ref-tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tabPanel === tab));
   });
+  // ── Catálogos Maestros (Camino C, Fase 3) ──
+  document.getElementById('masterCatToggle').addEventListener('click', () =>
+    document.getElementById('masterCatPanel').classList.toggle('open'));
+  document.getElementById('mcVentanaFile').addEventListener('change', function() {
+    Events.importMasterCatalog('ventanaRecibo', this.files[0]); this.value = '';
+  });
+  document.getElementById('mcPoolFile').addEventListener('change', function() {
+    Events.importMasterCatalog('poolReal', this.files[0]); this.value = '';
+  });
 
   // ── Catalog ──
   // NOTA Camino B / Fase 1: el botón "💾 Guardar" (btnCatSave) se eliminó
@@ -266,7 +275,10 @@ UI.setCatStatus(catResult.msg, catResult.ok ? 'ok' : 'err');
 // automáticamente cuando tengan información y hará no-op cuando
 // estén vacíos.
 // ───────────────────────────────────────────────────────────────
-await CatalogStore.loadAll();
+// ── Init catálogos maestros (Camino C) ──
+  await CatalogStore.loadAll();
+  UI.renderCatalogMasterStatus('ventanaRecibo');
+  UI.renderCatalogMasterStatus('poolReal');
 
   // ── Aviso de día ya procesado (Camino B, Fase 3) ──
   const todaySession = await DispatchHistory.getTodaySession();
