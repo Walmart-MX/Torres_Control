@@ -14,6 +14,17 @@
  * usuario los vea y decida, en vez de que el import los descarte en
  * silencio.
  *
+ * FIX (diagnóstico post-carga manual — jul-2026): loadAll() ahora
+ * deja rastro explícito en consola de cuántas filas trajo cada tabla.
+ * Motivo: si alguien carga las tablas directo en Supabase (CSV import
+ * o SQL) en vez de usar el botón "Importar/Reemplazar", catalog_meta
+ * nunca se escribe — eso es esperado. Pero si además el SELECT trae 0
+ * filas sin ningún error visible, la causa casi siempre es Row Level
+ * Security activado sin policy de lectura sobre la tabla nueva (RLS se
+ * activa automáticamente al crear una tabla desde el Table Editor de
+ * Supabase). Antes esto fallaba en silencio total — ahora queda un log
+ * inequívoco para diagnosticarlo sin adivinar.
+ *
  * Dependencias:
  *   - State (core/state.js) — escribe State.catalogs / State.catalogMeta
  *   - sb (core/supabase-client.js)
@@ -47,7 +58,7 @@ export const CatalogStore = {
     for (const catalog of Object.values(CATALOGS)) {
       const { data, error } = await sb.from(catalog.table).select('*');
       if (error) {
-        console.error(`[CatalogStore] Error cargando ${catalog.label}:`, error.message);
+        console.error(`[CatalogStore] Error cargando ${catalog.label} (${catalog.table}):`, error.message);
         State.catalogs[catalog.id] = [];
         continue;
       }
@@ -56,6 +67,18 @@ export const CatalogStore = {
         for (const [canon, def] of Object.entries(catalog.columns)) out[canon] = row[def.db] || '';
         return out;
       });
+
+      // Diagnóstico explícito — ver nota de cabecera "FIX". Si aquí sale
+      // 0 filas sin error arriba, es casi siempre RLS sin policy de
+      // SELECT sobre esta tabla, no un problema del código de la app.
+      if (data.length === 0) {
+        console.warn(`[CatalogStore] ${catalog.label} (${catalog.table}) trajo 0 filas. ` +
+          `Si cargaste datos directo en Supabase y esperabas encontrarlos, revisa Row Level ` +
+          `Security en esa tabla — necesita una policy de SELECT para el rol anon.`);
+      } else {
+        console.log(`[CatalogStore] ${catalog.label}: ${data.length} filas cargadas.`,
+          'Ejemplo:', State.catalogs[catalog.id][0]);
+      }
     }
 
     const { data: metaRows, error: metaError } = await sb.from(META_TABLE).select('*');
