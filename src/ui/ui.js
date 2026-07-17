@@ -519,14 +519,30 @@ export const UI = {
     el.textContent = msg;
   },
   // ── Catálogos Maestros (Camino C, Fase 3) ──
+// ── Catálogos Maestros (Camino C, Fase 3) ──
+  // FIX: antes dependía únicamente de State.catalogMeta, que solo se
+  // escribe cuando el import pasa por el botón "Importar/Reemplazar".
+  // Si los datos se cargaron directo en Supabase (CSV/SQL manual),
+  // catalog_meta queda vacío legítimamente y el badge mentía diciendo
+  // "Nunca cargado" aunque State.catalogs[catalogId] SÍ tuviera filas.
+  // Ahora usa el conteo real de State.catalogs como fallback, así el
+  // badge siempre refleja lo que la app puede usar de verdad para
+  // enriquecer, sin importar cómo llegaron los datos ahí.
   renderCatalogMasterStatus(catalogId) {
     const elId = catalogId === 'ventanaRecibo' ? 'mcVentanaStatus' : 'mcPoolStatus';
     const el   = document.getElementById(elId);
     if (!el) return;
-    const meta = State.catalogMeta[catalogId];
-    if (!meta) { el.textContent = '⚠️ Nunca cargado'; return; }
-    const date = new Date(meta.updated_at).toLocaleString('es-MX', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
-    el.textContent = `✅ ${meta.row_count} registros · ${date}${meta.updated_by ? ' · ' + meta.updated_by : ''}`;
+    const meta       = State.catalogMeta[catalogId];
+    const loadedRows = (State.catalogs[catalogId] || []).length;
+
+    if (meta) {
+      const date = new Date(meta.updated_at).toLocaleString('es-MX', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+      el.textContent = `✅ ${meta.row_count} registros · ${date}${meta.updated_by ? ' · ' + meta.updated_by : ''}`;
+    } else if (loadedRows > 0) {
+      el.textContent = `✅ ${loadedRows} registros (cargados directo en Supabase — sin fecha de actualización)`;
+    } else {
+      el.textContent = '⚠️ Nunca cargado';
+    }
   },
   setMasterCatStatus(msg, cls) {
     const el = document.getElementById('mcStatus');
