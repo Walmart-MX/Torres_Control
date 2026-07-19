@@ -10,14 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-/* ═══════════════════════════════════════════════════════
-   DESIGN TOKENS
-   Palette: deep navy / signal amber / slate grays
-   Signal language: navy=brand, amber=action/warn, 
-   green=success, red=critical, blue=info
-═══════════════════════════════════════════════════════ */
 :root {
-  /* Brand */
   --navy:       #00204A;
   --navy-dk:    #001530;
   --navy-md:    #0A3060;
@@ -25,24 +18,16 @@
   --amber-dk:   #D97706;
   --amber-lt:   #FEF3C7;
   --amber-bd:   #FCD34D;
-
-  /* Surfaces */
   --bg:         #F1F4F9;
   --surface:    #FFFFFF;
   --surface2:   #F7F9FC;
   --surface3:   #EEF2F8;
-
-  /* Borders */
   --border:     #E2E8F2;
   --border2:    #CBD5E8;
-
-  /* Text */
   --text:       #0F172A;
   --text2:      #334155;
   --text3:      #64748B;
   --text4:      #94A3B8;
-
-  /* Semantics */
   --green:      #059669;
   --green-bg:   #ECFDF5;
   --green-bd:   #6EE7B7;
@@ -58,14 +43,10 @@
   --purple:     #7C3AED;
   --purple-bg:  #F5F3FF;
   --purple-bd:  #C4B5FD;
-
-  /* Shadows */
   --shadow-xs:  0 1px 2px rgba(0,20,60,.06);
   --shadow-sm:  0 1px 4px rgba(0,20,60,.08), 0 0 1px rgba(0,20,60,.04);
   --shadow-md:  0 4px 16px rgba(0,20,60,.10), 0 1px 4px rgba(0,20,60,.06);
   --shadow-lg:  0 12px 40px rgba(0,20,60,.14), 0 2px 8px rgba(0,20,60,.08);
-
-  /* Geometry */
   --r:          8px;
   --r-lg:       12px;
   --r-xl:       16px;
@@ -94,7 +75,6 @@
   --shadow-lg:  0 12px 40px rgba(0,0,0,.6);
 }
 
-/* ── RESET ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   background: var(--bg);
@@ -108,7 +88,6 @@ body {
 button { font-family: inherit; cursor: pointer; }
 input, textarea { font-family: inherit; }
 
-/* ── TOPBAR ── */
 .topbar {
   position: fixed; top: 0; left: 0; right: 0; height: 54px;
   background: var(--navy);
@@ -128,10 +107,6 @@ input, textarea { font-family: inherit; }
 .tb-context { font-size: 11px; color: rgba(255,255,255,.4); letter-spacing: .01em; }
 .tb-spacer { flex: 1; }
 
-/* Pulse Bar — Fase 1 del rediseño "Centro de Operaciones".
-   Reemplaza al antiguo Health Rail (4 pills) — ver
-   src/ui/pulse-bar.js para la lógica de render. Única fuente de
-   verdad de "¿cómo va el día?" en el topbar. */
 .pulse-bar {
   display: flex; flex-direction: column; justify-content: center; gap: 3px;
   background: rgba(255,255,255,.07);
@@ -161,7 +136,6 @@ input, textarea { font-family: inherit; }
 .pulse-bar.crit .pulse-text { color: #FCA5A5; }
 .pulse-bar.warn .pulse-text { color: var(--amber-bd); }
 
-/* Topbar responsive */
 @media (max-width: 1200px) {
   .pulse-bar { min-width: 200px; }
   .tb-context { display: none; }
@@ -170,7 +144,6 @@ input, textarea { font-family: inherit; }
   .pulse-bar { display: none; }
 }
 
-/* User chip */
 .tb-user {
   display: flex; align-items: center; gap: 7px;
   background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.12);
@@ -187,12 +160,9 @@ input, textarea { font-family: inherit; }
 }
 .tb-theme-btn:hover { background: rgba(255,255,255,.18); }
 
-/* ── LAYOUT ── */
 .app-shell { padding-top: 54px; min-height: 100vh; }
 .page { max-width: 1440px; margin: 0 auto; padding: 16px 20px 40px; }
 
-/* ── PIPELINE STRIP ── */
-/* The three-step pipeline is the single source of workflow state */
 .pipeline {
   display: grid; grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr;
   gap: 0; margin-bottom: 20px;
@@ -246,7 +216,6 @@ input, textarea { font-family: inherit; }
   border-left: 1px solid var(--border); border-right: 1px solid var(--border);
 }
 
-/* ── MAIN GRID ── */
 .main-grid {
   display: grid;
   grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);
@@ -260,7 +229,6 @@ input, textarea { font-family: inherit; }
   .main-grid { grid-template-columns: 1fr; }
 }
 
-/* ── CARDS ── */
 .card {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--r-lg); box-shadow: var(--shadow-sm);
@@ -277,10 +245,8 @@ input, textarea { font-family: inherit; }
 .card-body { padding: 14px 16px; }
 .card-body-sm { padding: 10px 16px; }
 
-/* ── LEFT SIDEBAR — Input panel ── */
 .sidebar { grid-column: 1; display: flex; flex-direction: column; gap: 12px; }
 
-/* ── DROP ZONES ── */
 .dz {
   border: 2px dashed var(--border2); border-radius: var(--r);
   padding: 20px 14px; text-align: center;
@@ -305,22 +271,6 @@ input, textarea { font-family: inherit; }
 }
 .dz.done .dz-badge { background: var(--green-bg); color: var(--green); border-color: var(--green-bd); }
 
-/* ── ModeSurface (Fase 5 del rediseño "Centro de Operaciones") ──
-   Todo el comportamiento visual por modo vive aquí, en CSS puro,
-   reaccionando al atributo data-mode que UI.applyMode() pone en
-   <body> (ver ui/ui.js). Cero JS por elemento — un solo atributo,
-   un solo lugar que decide qué significa cada modo visualmente.
-
-   En 'correccion'/'listo'/'cerrado' ya hay datos cargados — las
-   tarjetas de PDF y Excel dejan de necesitar su tamaño completo y
-   ceden ese espacio vertical a la tabla, que es donde vive el 80%
-   del tiempo del usuario una vez que empezó a trabajar. El drag&drop
-   y el clic para recargar (ej. "+ Más PDFs") no cambian: el
-   <input type="file"> sigue cubriendo toda el área de la tarjeta,
-   solo se ve más chica. La tarjeta de "Datos de despacho" (paste)
-   queda fuera de este colapso a propósito — a diferencia de PDF/Excel,
-   pegar el status puede pasar en cualquier momento del flujo, no solo
-   al arranque. */
 body[data-mode="correccion"] #dropPDF,
 body[data-mode="listo"]      #dropPDF,
 body[data-mode="cerrado"]    #dropPDF,
@@ -330,13 +280,8 @@ body[data-mode="cerrado"]    #dropXLS,
 body[data-mode="correccion"] #dropWTMS,
 body[data-mode="listo"]      #dropWTMS,
 body[data-mode="cerrado"]    #dropWTMS {
-  padding: 10px 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  text-align: left;
+  padding: 10px 14px; display: flex; align-items: center; gap: 10px; text-align: left;
 }
-
 body[data-mode="correccion"] #dropPDF .dz-ico,
 body[data-mode="listo"]      #dropPDF .dz-ico,
 body[data-mode="cerrado"]    #dropPDF .dz-ico,
@@ -346,10 +291,8 @@ body[data-mode="cerrado"]    #dropXLS .dz-ico,
 body[data-mode="correccion"] #dropWTMS .dz-ico,
 body[data-mode="listo"]      #dropWTMS .dz-ico,
 body[data-mode="cerrado"]    #dropWTMS .dz-ico {
-  font-size: 16px;
-  margin-bottom: 0;
+  font-size: 16px; margin-bottom: 0;
 }
-
 body[data-mode="correccion"] #dropPDF .dz-sub,
 body[data-mode="listo"]      #dropPDF .dz-sub,
 body[data-mode="cerrado"]    #dropPDF .dz-sub,
@@ -361,7 +304,6 @@ body[data-mode="listo"]      #dropWTMS .dz-sub,
 body[data-mode="cerrado"]    #dropWTMS .dz-sub {
   display: none;
 }
-
 body[data-mode="correccion"] #dropPDF .dz-badge,
 body[data-mode="listo"]      #dropPDF .dz-badge,
 body[data-mode="cerrado"]    #dropPDF .dz-badge,
@@ -371,14 +313,22 @@ body[data-mode="cerrado"]    #dropXLS .dz-badge,
 body[data-mode="correccion"] #dropWTMS .dz-badge,
 body[data-mode="listo"]      #dropWTMS .dz-badge,
 body[data-mode="cerrado"]    #dropWTMS .dz-badge {
-  margin-top: 0;
-  margin-left: auto;
-  flex-shrink: 0;
+  margin-top: 0; margin-left: auto; flex-shrink: 0;
 }
-/* Modo 'listo': la interfaz señala la acción de cierre, no solo la
-   habilita — el botón principal de exportar recibe un pulso sutil.
-   Se retira automáticamente en cuanto el modo cambia (crítico nuevo,
-   reinicio, etc.) porque el selector deja de aplicar. */
+body[data-mode="correccion"] #cardDespacho .paste-instructions,
+body[data-mode="listo"]      #cardDespacho .paste-instructions,
+body[data-mode="cerrado"]    #cardDespacho .paste-instructions,
+body[data-mode="correccion"] #cardDespacho .paste-preview,
+body[data-mode="listo"]      #cardDespacho .paste-preview,
+body[data-mode="cerrado"]    #cardDespacho .paste-preview {
+  display: none;
+}
+body[data-mode="correccion"] #cardDespacho .paste-ta,
+body[data-mode="listo"]      #cardDespacho .paste-ta,
+body[data-mode="cerrado"]    #cardDespacho .paste-ta {
+  min-height: 32px; height: 32px; font-size: 10px; padding: 5px 10px; resize: none;
+}
+
 @keyframes sd-ready-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,.45); }
   50%      { box-shadow: 0 0 0 6px rgba(245,158,11,0); }
@@ -387,7 +337,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
   animation: sd-ready-pulse 1.8s ease-in-out infinite;
 }
 
-/* ── PASTE PANEL ── */
 .paste-cols {
   display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px;
 }
@@ -420,7 +369,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
 .paste-preview th { background: var(--surface2); color: var(--purple); padding: 5px 10px; text-align: left; position: sticky; top: 0; border-bottom: 1px solid var(--border); }
 .paste-preview td { padding: 4px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 
-/* ── BUTTONS ── */
 .btn {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 12px; font-weight: 600; border: none; border-radius: var(--r);
@@ -440,11 +388,9 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
 .btn-sm { padding: 5px 11px; font-size: 11px; }
 .btn-xs { padding: 3px 8px; font-size: 10px; }
 
-/* ── RIGHT PANEL ── */
 .right-panel { grid-column: 2; display: flex; flex-direction: column; gap: 14px; }
 @media (max-width: 960px) { .right-panel { grid-column: 1; } }
 
-/* ── PROGRESS BAR ── */
 .prog-bar { display: none; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--navy); }
 .prog-bar.on { display: block; }
 .prog-bar-top { display: flex; justify-content: space-between; margin-bottom: 5px; }
@@ -453,7 +399,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
 .prog-track { height: 4px; background: rgba(255,255,255,.15); border-radius: 4px; overflow: hidden; }
 .prog-fill  { height: 100%; width: 0; background: var(--amber); border-radius: 4px; transition: width .2s; }
 
-/* ── ERR LOG ── */
 .err-log { display: none; }
 .err-log.on { display: block; }
 .err-log-inner {
@@ -463,7 +408,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
   color: var(--red); max-height: 60px; overflow-y: auto; line-height: 1.7;
 }
 
-/* ── TABLE ── */
 .legend-row {
   display: none; align-items: center; gap: 12px;
   padding: 8px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap;
@@ -498,7 +442,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
 .c-fill { color: var(--blue); font-weight: 500; }
 .no-data { color: var(--border2); font-style: italic; font-size: 10px; }
 
-/* ── EMPTY STATE ── */
 .empty-state {
   text-align: center; padding: 52px 24px;
 }
@@ -506,7 +449,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
 .empty-title { font-size: 14px; font-weight: 700; color: var(--text2); margin-bottom: 6px; }
 .empty-desc  { font-size: 12px; color: var(--text3); line-height: 1.6; max-width: 300px; margin: 0 auto; }
 
-/* ── ACTION BAR ── */
 .action-bar {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
@@ -521,19 +463,11 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
 .count-badge.warn strong { color: var(--orange); }
 .count-badge.info strong { color: var(--purple); }
 
-/* ── SVE (Smart Validation Engine) ── */
 .sve-panel { display: none; }
 .sve-panel.on { display: block; }
 
-/* Contadores ocultos — Fase 1 del rediseño. El shield/ring/contadores
-   visuales del header SVE se retiraron (la PulseBar del topbar ya
-   resume esto), PERO sveCrit/sveWarn/sveInfo/svePass SIGUEN en el DOM
-   porque events.js (handleForceExport) y warn-modal.js
-   (show/exportAnyway) leen su textContent directamente. No se tocan
-   esos módulos en esta fase — ver Fase 1, riesgo #3. */
 .sve-counters-hidden { display: none; }
 
-/* ── Barra de resumen colapsable (Fase 3 del rediseño) ── */
 .sve-summary-toggle {
   display: flex; align-items: center; gap: 10px;
   padding: 12px 18px; cursor: pointer; user-select: none;
@@ -550,7 +484,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
 .sve-body { display: none; border-top: 1px solid var(--border); }
 .sve-panel.expanded .sve-body { display: block; }
 
-/* Alert groups */
 .sve-group { border-top: 1px solid var(--border); }
 .sve-group-hdr {
   display: flex; align-items: center; gap: 10px; padding: 10px 18px;
@@ -595,7 +528,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
   font-size: 11px;
 }
 
-/* Export gate */
 .export-gate {
   display: none; padding: 12px 18px;
   align-items: center; gap: 12px; flex-wrap: wrap;
@@ -609,7 +541,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
 .export-gate.forced .gate-msg strong { color: var(--orange); }
 .gate-msg span { font-size: 11px; color: var(--text2); }
 
-/* ── CATALOG ── */
 .cat-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
 .cat-toggle {
   display: flex; align-items: center; gap: 10px; padding: 13px 16px;
@@ -654,7 +585,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
 .cat-status.ok  { color: var(--green); }
 .cat-status.err { color: var(--red); }
 
-/* ── Pestañas del panel "Datos de referencia" (Fase 2 del rediseño) ── */
 .ref-tabs {
   display: flex; gap: 4px; margin-bottom: 12px;
   border-bottom: 1px solid var(--border);
@@ -671,7 +601,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
 .ref-tab-panel { display: none; }
 .ref-tab-panel.active { display: block; }
 
-/* ── MODAL ── */
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(0,10,30,.7);
   backdrop-filter: blur(6px); z-index: 200;
@@ -716,7 +645,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
 .modal-btn:hover { background: var(--navy-md); }
 .modal-skip { display: block; text-align: center; margin-top: 10px; font-size: 11px; color: var(--text3); background: none; border: none; cursor: pointer; text-decoration: underline; }
 
-/* ── INLINE EDIT SYSTEM ── */
 .row-highlight {
   outline: 2px solid var(--amber) !important;
   background: var(--amber-lt) !important;
@@ -727,16 +655,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
   50%      { background: #FEF08A; }
 }
 
-/* Edit drawer — Fase 4 del rediseño "Centro de Operaciones": pasa de
-   deslizarse desde abajo (cubriendo toda la tabla) a deslizarse desde
-   la derecha como un Inspector lateral — la tabla nunca se tapa por
-   completo, el usuario conserva contexto de en qué fila estaba.
-   CERO cambio de IDs (editDrawer, editDrawerRuta, editChangeBadge,
-   editFieldsGrid, btnEditSave, btnEditCancel) — editing/edit-system.js
-   y core/app.js no necesitaron modificarse, solo el CSS y la
-   distribución interna del HTML (los botones de acción se mueven del
-   header al footer, usando .edit-drawer-ftr que ya existía en este
-   stylesheet sin uso). */
 .edit-drawer {
   position: fixed; top: 54px; right: 0; bottom: 0; z-index: 150;
   width: 420px; max-width: 92vw;
@@ -787,7 +705,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
 }
 .btn-locate:hover { background: var(--amber-lt); color: var(--amber-dk); border-color: var(--amber-bd); }
 
-/* ── SECTION LABEL ── */
 .sec-label {
   font-family: 'JetBrains Mono', monospace; font-size: 9px; font-weight: 700;
   letter-spacing: .14em; text-transform: uppercase; color: var(--text4);
@@ -795,17 +712,14 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
 }
 .sec-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
-/* ── FULLWIDTH BOTTOM SECTION ── */
 .full-section { grid-column: 1 / -1; }
 
-/* ── EXPORT GATE — warn-only state ── */
 .export-gate.warn-only {
   background: var(--amber-lt);
   border-top-color: var(--amber-bd);
 }
 .export-gate.warn-only .gate-msg strong { color: var(--amber-dk); }
 
-/* ── WARN CONFIRM MODAL ── */
 .warn-modal-overlay {
   position: fixed; inset: 0; background: rgba(0,10,30,.55);
   backdrop-filter: blur(4px); z-index: 300;
@@ -831,7 +745,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
 .warn-modal-actions { display: flex; gap: 10px; }
 .warn-modal-actions .btn { flex: 1; justify-content: center; }
 
-/* ── ROUTE PICKER (multi-match selector for duplicate marchamo / ruta) ── */
 .route-picker-overlay {
   position: fixed; inset: 0; background: rgba(0,10,30,.55);
   backdrop-filter: blur(4px); z-index: 300;
@@ -875,7 +788,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
   font-family: inherit;
 }
 .route-picker-cancel:hover { background: var(--surface2); color: var(--text); }
-   /* ── TODAY BANNER — aviso de día operativo ya procesado ── */
 .today-banner {
   display: flex; align-items: center; gap: 14px;
   background: var(--green-bg); border: 1px solid var(--green-bd);
@@ -888,7 +800,19 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
 .today-banner-text strong { display: block; font-size: 13px; color: var(--green); margin-bottom: 2px; }
 .today-banner-actions { display: flex; gap: 8px; flex-shrink: 0; }
 
-/* ── HISTORY MODAL — historial de procesamientos ── */
+.source-gate {
+  display: flex; align-items: flex-start; gap: 14px;
+  background: var(--red-bg); border: 1px solid var(--red-bd);
+  border-radius: var(--r-lg); padding: 14px 18px; margin-bottom: 16px;
+  box-shadow: var(--shadow-sm);
+}
+.source-gate.hidden { display: none; }
+.source-gate-icon { font-size: 22px; flex-shrink: 0; }
+.source-gate-text { flex: 1; min-width: 200px; font-size: 12px; color: var(--text2); }
+.source-gate-text strong { display: block; font-size: 13px; color: var(--red); margin-bottom: 4px; }
+.source-gate-list { margin: 6px 0 0 18px; padding: 0; color: var(--red); font-weight: 600; }
+.source-gate-list li { margin-bottom: 2px; }
+
 .history-modal-box {
   width: 760px; max-width: 100%; max-height: 82vh;
   overflow-y: auto; display: flex; flex-direction: column;
@@ -899,7 +823,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
 </head>
 <body>
 
-<!-- ── MODAL: Nombre + Tema ── -->
 <div class="modal-overlay hidden" id="nameModal">
   <div class="modal-box">
     <div class="modal-logo">
@@ -926,7 +849,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
   </div>
 </div>
 
-<!-- ── TOPBAR ── -->
 <header class="topbar">
   <div class="tb-logo">
     <div class="tb-logo-mark">🚛</div>
@@ -936,12 +858,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
   <span class="tb-context">CeDis VHSA · Perecederos</span>
   <div class="tb-spacer"></div>
 
-  <!-- Pulse Bar — Fase 1 del rediseño "Centro de Operaciones".
-       Reemplaza al Health Rail anterior (4 pills separadas). Única
-       fuente de verdad de la salud del día. Ver src/ui/pulse-bar.js.
-       Alcance de esta fase: informativa + click-to-scroll al panel
-       SVE — todavía no filtra ni prioriza (eso llega con el Feed de
-       Atención en la Fase 3). -->
   <div class="pulse-bar idle" id="pulseBar" title="Ver incidencias">
     <div class="pulse-track"><div class="pulse-fill" id="pulseFill"></div></div>
     <span class="pulse-text" id="pulseText">En espera</span>
@@ -955,11 +871,19 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
   <button class="tb-theme-btn" id="btnTheme" title="Cambiar tema">🌙</button>
 </header>
 
-<!-- ── APP ── -->
 <div class="app-shell">
 <div class="page">
 
-  <!-- Aviso: día operativo ya procesado (Camino B, Fase 3) -->
+  <div class="source-gate hidden" id="sourceGate">
+    <div class="source-gate-icon">⛔</div>
+    <div class="source-gate-text">
+      <strong>No es posible continuar.</strong>
+      Faltan las siguientes fuentes obligatorias:
+      <ul class="source-gate-list" id="sourceGateList"></ul>
+      Completa todas las fuentes antes de generar el archivo final.
+    </div>
+  </div>
+
   <div class="today-banner hidden" id="todayBanner">
     <div class="today-banner-icon">✅</div>
     <div class="today-banner-text">
@@ -972,7 +896,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
     </div>
   </div>
 
-  <!-- Pipeline status -->
   <div class="pipeline" id="pipeline">
     <div class="pipe-step active" id="pipeStep1">
       <div class="pipe-num" id="pipeNum1">1</div>
@@ -992,23 +915,29 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
       <span class="pipe-stat" id="pipeStat2">En espera</span>
     </div>
     <div class="pipe-arrow">›</div>
-    <div class="pipe-step optional" id="pipeStep3">
-      <div class="pipe-num" id="pipeNum3">·</div>
+    <div class="pipe-step" id="pipeStep3">
+      <div class="pipe-num" id="pipeNum3">3</div>
       <div class="pipe-info">
-        <div class="pipe-title">Datos de despacho</div>
-        <div class="pipe-desc">Opcional · pega desde Excel</div>
+        <div class="pipe-title">Status de despacho</div>
+        <div class="pipe-desc">RUTA + ID'S MASTER (obligatorio)</div>
       </div>
-      <span class="pipe-stat" id="pipeStat3">Opcional</span>
+      <span class="pipe-stat" id="pipeStat3">En espera</span>
+    </div>
+    <div class="pipe-arrow">›</div>
+    <div class="pipe-step" id="pipeStep4">
+      <div class="pipe-num" id="pipeNum4">4</div>
+      <div class="pipe-info">
+        <div class="pipe-title">Reporte WTMS</div>
+        <div class="pipe-desc">CSV · ID de la carga</div>
+      </div>
+      <span class="pipe-stat" id="pipeStat4">En espera</span>
     </div>
   </div>
 
-  <!-- Main two-column layout -->
   <div class="main-grid">
 
-    <!-- LEFT: Input sidebar -->
     <div class="sidebar">
 
-      <!-- Step 1: PDFs -->
       <div class="card">
         <div class="card-hdr">
           <span class="card-hdr-icon">📄</span>
@@ -1028,7 +957,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
         </div>
       </div>
 
-      <!-- Step 2: Excel -->
       <div class="card">
         <div class="card-hdr">
           <span class="card-hdr-icon">📊</span>
@@ -1048,24 +976,25 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
         </div>
       </div>
 
-      <!-- Step 3: Despacho paste -->
-      <div class="card">
+      <div class="card" id="cardDespacho">
         <div class="card-hdr">
           <span class="card-hdr-icon">📋</span>
           <div>
-            <div class="card-hdr-title">Datos de despacho</div>
-            <div class="card-hdr-desc">Opcional — pega desde Excel</div>
+            <div class="card-hdr-title">Status de despacho</div>
+            <div class="card-hdr-desc">Obligatorio — pega desde Excel</div>
           </div>
         </div>
         <div class="card-body">
-          <div class="paste-cols">
-            <span class="pcol pcol-key">RUTA</span>
-            <span class="pcol pcol-val">CASETA</span>
-            <span class="pcol pcol-val">WTMS</span>
-            <span class="pcol pcol-val">ID'S MASTER</span>
+          <div class="paste-instructions">
+            <div class="paste-cols">
+              <span class="pcol pcol-key">RUTA</span>
+              <span class="pcol pcol-key">ID'S MASTER</span>
+              <span class="pcol pcol-val">CASETA</span>
+              <span class="pcol pcol-val">WTMS</span>
+            </div>
           </div>
           <textarea class="paste-ta" id="pasteArea"
-            placeholder="Ctrl+C en Excel → Ctrl+V aquí&#10;Columnas: RUTA · SALIDA CASETA · USUARIO WTMS · ID'S MASTER"></textarea>
+            placeholder="Ctrl+C en Excel → Ctrl+V aquí&#10;Obligatorias: RUTA · ID'S MASTER — Opcionales: SALIDA CASETA · USUARIO WTMS"></textarea>
           <div class="paste-actions">
             <button class="btn btn-primary btn-sm" id="btnParse">▶ Procesar</button>
             <button class="btn btn-ghost btn-sm" id="btnPasteClear">✕ Limpiar</button>
@@ -1077,17 +1006,25 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
         </div>
       </div>
 
-      <!-- Datos de referencia — Fase 2 del rediseño "Centro de
-           Operaciones". Fusiona Catálogo de operadores y Caché de
-           facturas en un solo panel con pestañas internas: antes eran
-           dos acordeones separados con el mismo peso visual pese a
-           ser ambos datos de apoyo de consulta ocasional (ver
-           documento de rediseño, Fase 2). NINGÚN ID interno cambió —
-           catOpInput/catLicInput/btnCatAdd/catImportFile/catTbody/
-           catBadge/catSt y cacheHistBadge/cacheHistList/
-           btnCacheHistClear siguen exactamente igual, solo se movieron
-           de contenedor. renderCatalog()/renderCacheHistory() en
-           ui.js no necesitan ningún cambio. -->
+      <div class="card">
+        <div class="card-hdr">
+          <span class="card-hdr-icon">🛰️</span>
+          <div>
+            <div class="card-hdr-title">Reporte WTMS</div>
+            <div class="card-hdr-desc">Obligatorio — CSV exportado de WTMS</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="dz" id="dropWTMS">
+            <input type="file" id="fileWTMS" accept=".csv">
+            <span class="dz-ico">🛰️</span>
+            <div class="dz-text"><strong>Arrastra el Reporte WTMS</strong> o haz clic</div>
+            <div class="dz-sub">Solo se usan: ID de la carga · Carte Porte · Siguiente Carga</div>
+            <div class="dz-badge" id="wtmsBadge">● 0 cargas</div>
+          </div>
+        </div>
+      </div>
+
       <div class="cat-panel" id="refPanel">
         <div class="cat-toggle" id="refToggle">
           <span style="font-size:15px">📚</span>
@@ -1140,10 +1077,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
           </div>
         </div>
       </div>
-<!-- Catálogos Maestros (Camino C, Fase 3) — Ventana de Recibo y
-           Pool Real. Import/reemplazo únicamente; el enriquecimiento
-           en sí corre solo en cada merge (ver merge.js). Mismo patrón
-           visual que el import de operadores (cat-import-btn). -->
       <div class="cat-panel" id="masterCatPanel">
         <div class="cat-toggle" id="masterCatToggle">
           <span style="font-size:15px">🗃️</span>
@@ -1180,12 +1113,10 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
           <div class="cat-status" id="mcStatus"></div>
         </div>
       </div>
-    </div><!-- /sidebar -->
+    </div>
 
-    <!-- RIGHT: Results panel -->
     <div class="right-panel">
 
-      <!-- Action bar -->
       <div class="action-bar">
         <button class="btn btn-amber" id="btnExport" disabled>⬇ Descargar Excel</button>
         <button class="btn btn-ghost" id="btnAddPDF" disabled>+ Más PDFs</button>
@@ -1199,13 +1130,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
         <span class="count-badge info">Despacho <strong id="bdgDesp">0</strong></span>
       </div>
 
-      <!-- SVE Panel — Fase 3 del rediseño "Centro de Operaciones":
-           el panel deja de mostrar siempre su contenido completo.
-           sveSummaryToggle es la única parte visible por defecto (un
-           semáforo de una línea); sveBody (grupos de incidencias +
-           gate de exportación) se expande con un clic o
-           automáticamente si hay errores críticos. Ver renderSVE() en
-           ui/ui.js para la lógica de mensaje y expansión. -->
       <div class="card sve-panel" id="svePanel">
         <div class="sve-counters-hidden" aria-hidden="true">
           <span id="sveCrit">0</span><span id="sveWarn">0</span><span id="sveInfo">0</span><span id="svePass">0</span>
@@ -1229,12 +1153,11 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
         </div>
       </div>
 
-      <!-- Preview table -->
       <div class="card">
         <div class="card-hdr">
           <div>
             <div class="card-hdr-title">Vista previa del despacho</div>
-            <div class="card-hdr-desc" id="previewDesc">Carga los PDFs y el Excel macro para comenzar</div>
+            <div class="card-hdr-desc" id="previewDesc">Carga las 4 fuentes obligatorias para comenzar</div>
           </div>
           <div class="card-hdr-right">
             <button class="btn btn-amber btn-sm" id="btnExport2" disabled>⬇ Descargar</button>
@@ -1253,17 +1176,17 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
           <div class="leg"><div class="leg-dot" style="background:var(--amber)"></div>RUTA</div>
           <div class="leg"><div class="leg-dot" style="background:var(--blue)"></div>Ruteo</div>
           <div class="leg"><div class="leg-dot" style="background:var(--green)"></div>PDF</div>
-          <div class="leg"><div class="leg-dot" style="background:var(--purple)"></div>Despacho</div>
+          <div class="leg"><div class="leg-dot" style="background:var(--purple)"></div>Despacho / WTMS</div>
         </div>
         <div class="table-wrap">
           <table class="data-table">
             <thead><tr id="thead"></tr></thead>
             <tbody id="tbody">
-              <tr><td colspan="20">
+              <tr><td colspan="24">
                 <div class="empty-state">
                   <div class="empty-ico">📂</div>
                   <div class="empty-title">Sin datos aún</div>
-                  <div class="empty-desc">Carga los PDFs y el Excel macro para comenzar el despacho</div>
+                  <div class="empty-desc">Carga las 4 fuentes obligatorias para comenzar el despacho</div>
                 </div>
               </td></tr>
             </tbody>
@@ -1271,12 +1194,11 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
         </div>
       </div>
 
-    </div><!-- /right-panel -->
-  </div><!-- /main-grid -->
-</div><!-- /page -->
-</div><!-- /app-shell -->
+    </div>
+  </div>
+</div>
+</div>
 
-<!-- ── WARN CONFIRM MODAL ── -->
 <div class="warn-modal-overlay hidden" id="warnModalOverlay">
   <div class="warn-modal-box">
     <div class="warn-modal-icon">⚠️</div>
@@ -1289,7 +1211,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
   </div>
 </div>
 
-<!-- ── ROUTE PICKER ── -->
 <div class="route-picker-overlay hidden" id="routePickerOverlay">
   <div class="route-picker-box">
     <div class="route-picker-title" id="rpTitle">Selecciona la ruta a corregir</div>
@@ -1299,7 +1220,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
     <button class="route-picker-cancel" id="rpCancel">Cancelar</button>
   </div>
 </div>
-<!-- ── HISTORIAL DE PROCESAMIENTOS ── -->
 <div class="modal-overlay hidden" id="historyModalOverlay">
   <div class="modal-box history-modal-box">
     <div class="history-modal-hdr">
@@ -1328,7 +1248,6 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
   </div>
 </div>
 
-<!-- ── EDIT DRAWER — Inspector lateral (Fase 4 del rediseño) ── -->
 <div class="edit-drawer" id="editDrawer">
   <div class="edit-drawer-hdr">
     <div class="edit-drawer-title">Editar registro</div>
@@ -1349,15 +1268,9 @@ body[data-mode="listo"] #btnExport:not(:disabled) {
 <script type="module">
 import { init } from './src/core/app.js';
 
-// pdfjsLib worker — debe configurarse antes de que cualquier módulo
-// llame a pdfjsLib.getDocument(). El import de app.js resuelve todos
-// los módulos antes de ejecutar este código, así que la configuración
-// llega a tiempo.
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-// Boot — el catálogo de operadores se carga desde Supabase (Camino B,
-// Fase 1). Ver src/core/app.js → init() → initCatalog().
 init();
 </script>
 </body>
