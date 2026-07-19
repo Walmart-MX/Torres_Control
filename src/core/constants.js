@@ -9,6 +9,26 @@
  * State desde state.js. Si state.js alguna vez necesita importar algo
  * de aquí, hay que romper ese ciclo extrayendo COL_MAP a un tercer
  * archivo — por ahora no es necesario.
+ *
+ * CAMBIO (integración Reporte WTMS — 4ª fuente obligatoria, jul-2026):
+ *   - Se agrega WTMS_ALIASES, alias de detección de columnas del CSV
+ *     del Reporte WTMS (ver processors/wtms.js).
+ *   - COL_MAP gana dos entradas nuevas: 'ID RETORNO' y 'CARTA PORTE'.
+ *     Antes NO tenían regla especial — caían al valor crudo de la fila
+ *     de RUTEO NUEVO (row['ID RETORNO'] / row['CARTA PORTE']), que en
+ *     la práctica casi siempre venía vacío porque esas columnas no se
+ *     capturaban ahí. Ahora se resuelven SIEMPRE desde los campos que
+ *     arma merge.js a partir del cruce con el WTMS (nr['_ID_RETORNO'],
+ *     nr['_CARTA_PORTE']) — ver processors/merge.js para la lógica de
+ *     match/incidencia. Sobreescritura intencional, confirmada con
+ *     EduarDo: el resultado del WTMS gana siempre.
+ *   - 'ID RETORNO' y 'CARTA PORTE' se agregan también a COLS_DESP
+ *     (mismo grupo que ID IDA/USUARIO WTMS — datos que vienen de una
+ *     fuente externa vinculada al Status de despacho) y a PREVIEW_COLS,
+ *     para que se vean en la tabla de vista previa. Antes no aparecían
+ *     ahí — es un cambio visual menor pero deliberado: antes eran
+ *     columnas "muertas" (casi siempre vacías), ahora tienen datos
+ *     reales que vale la pena mostrar.
  */
 import { State } from './state.js';
 
@@ -42,13 +62,13 @@ export const COLS_FILL = new Set(['FECHA','DET','ENTREGA','ENT1','RUTA','CAJAS',
   'CORTINA','TRACTOR ','REMOLQUE','TEMP. ENRAMPE','TEMP. DESENRAMPE',
   'SOLICITUD DE ENRAMPE','ENRAMPE','RETIRO']);
 export const COLS_DESP = new Set(['GLS DE EMB.','HORA DE FACTURACION',
-  'ID IDA','HR. DESPACHO','SALIDA DE CASETA ','USUARIO WTMS']);
+  'ID IDA','HR. DESPACHO','SALIDA DE CASETA ','USUARIO WTMS','ID RETORNO','CARTA PORTE']);
 
 export const PREVIEW_COLS = [
   'FECHA','ENTREGA','ENT1','RUTA','DET','OPERADOR','LIC.',
   'TARIMAS','MARCHAMO 1','FAC.',
   'GLS DE EMB.','HORA DE FACTURACION',
-  'ID IDA','HR. DESPACHO','SALIDA DE CASETA ','USUARIO WTMS',
+  'ID IDA','ID RETORNO','CARTA PORTE','HR. DESPACHO','SALIDA DE CASETA ','USUARIO WTMS',
   'CAJAS','CORTINA','TRACTOR ','ENRAMPE','RETIRO','CITA'
 ];
 
@@ -68,16 +88,27 @@ export const DESP_ALIASES = {
 };
 
 /**
+ * Alias regex para detectar columnas del Reporte WTMS (CSV) — ver
+ * processors/wtms.js. Se aplican sobre el encabezado ya normalizado
+ * con stripAccents()+trim(), por eso no necesitan cubrir variantes
+ * acentuadas aquí.
+ */
+export const WTMS_ALIASES = {
+  idCarga:        /^id\s*de\s*la\s*carga$/i,
+  cartePorte:     /^carte\s*porte$/i,
+  siguienteCarga: /^siguiente\s*carga$/i
+};
+
+/**
  * Resolver de columnas — sustituye la cadena de 30 if/else original.
  * Cada función recibe el row del merge y devuelve el valor a mostrar/exportar
  * para esa columna del Excel final.
  */
 export const COL_MAP = {
   'FECHA':                r => r['FECHA']       ?? '',
-  'DIA':                  r => r['_DIA']        ?? '',   // ← NUEVO
-  'SW':                   r => r['_SW']         ?? '',   // ← ya agregado en el paso anterior
+  'DIA':                  r => r['_DIA']        ?? '',
+  'SW':                   r => r['_SW']         ?? '',
   'ENTREGA':              r => r['SETEO']        ?? '',
-  // ... resto sin cambios ...
   'ENT1':                 r => r['ENT1']         ?? '',
   'RUTA':                 r => r['RUTA']         ?? '',
   'DET':                  r => r['DETTE']        ?? '',
@@ -107,6 +138,12 @@ export const COL_MAP = {
   'HORA DE FACTURACION':  r => r['_HORA_FACT']   ?? '',
   'HR. DESPACHO':         r => r['_HR_DESP'] || r['_HR_DESP_PDF'] || '',
   'USUARIO WTMS':         r => r['_WTMS']        ?? '',
+  // ── NUEVO — Reporte WTMS (4ª fuente obligatoria) ──
+  // Ver processors/merge.js para la lógica de cruce ID'S MASTER ==
+  // ID de la carga, y la nota de cabecera de este archivo para la
+  // decisión de sobreescritura.
+  'ID RETORNO':           r => r['_ID_RETORNO']  ?? '',
+  'CARTA PORTE':          r => r['_CARTA_PORTE'] ?? '',
 };
 
 /**
@@ -119,22 +156,7 @@ export const COL_MAP = {
 export function getMapped(row, col) {
   return (COL_MAP[col] ? COL_MAP[col](row) : row[col]) ?? '';
 }
-/**
- * Columnas cuyo valor debe preservarse como texto literal — NUNCA como
- * objeto Date. FECHA / TEMP. ENRAMPE / TEMP. DESENRAMPE / SOLICITUD DE
- * ENRAMPE / ENRAMPE / RETIRO vienen de RUTEO NUEVO (ver processors/
- * excel.js). HORA DE FACTURACION viene de la hoja CONCENTRADO FACTURAS
- * (misma función excel.js → processXLS, vía formatFactDate en
- * utils/format.js) y se agrega aquí tras detectar el mismo patrón de
- * bug: aunque el texto se extrajera correctamente, al no estar en esta
- * lista, features/export.js lo reconstruía como Date vía parseDateTime()
- * antes de escribirlo — y SheetJS serializa cualquier Date usando sus
- * componentes UTC, introduciendo el mismo desfase de zona horaria que
- * ya se había corregido para las demás columnas. Usada por
- * processors/excel.js (indirectamente, vía formatFactDate) y
- * features/export.js (para saber qué columnas NO deben pasar por
- * ninguna lógica de Date al exportar).
- */
+
 export const RAW_TEXT_DATE_COLS = new Set([
   'FECHA', 'TEMP. ENRAMPE', 'TEMP. DESENRAMPE', 'SOLICITUD DE ENRAMPE',
   'ENRAMPE', 'RETIRO', 'HORA DE FACTURACION'
