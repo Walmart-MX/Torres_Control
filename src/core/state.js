@@ -2,13 +2,23 @@
  * core/state.js
  * Estado global de SmartDispatch — única fuente de verdad.
  *
- * Este objeto es mutado directamente por varios módulos (processors,
- * Events, EditSystem). Es intencional: la arquitectura actual no usa
- * un patrón estricto de inmutabilidad. Documentar quién escribe cada
- * propiedad es responsabilidad de quien la modifica.
+ * CAMBIO (integración Reporte WTMS — 4ª fuente obligatoria, jul-2026):
+ *   Se agrega wtmsData — catálogo TEMPORAL de la corrida actual
+ *   (Map idCarga → {carteporte, siguienteCarga}), poblado por
+ *   Events.handleWTMS() vía processors/wtms.js. A diferencia de
+ *   operators/fact_cache/catalogs (Camino B/C), NO se persiste en
+ *   Supabase ni se carga al iniciar la app — se recarga en cada
+ *   procesamiento, como pidió EduarDo explícitamente. Se reinicia
+ *   junto con pdfData/xlsData/despData en UI.resetAll().
  *
- * No tiene dependencias de otros módulos propios — solo lee localStorage,
- * que está disponible globalmente en el navegador.
+ *   operationalMode → el check de 'arranque' ahora también considera
+ *   despData.size y wtmsData.size (antes solo xlsData/pdfData). Es un
+ *   ajuste necesario, no cosmético: con las 4 fuentes obligatorias, si
+ *   el usuario carga primero el Status o el WTMS (en vez de PDF/Excel),
+ *   la app debía seguir mostrando 'arranque' incorrectamente aunque ya
+ *   hubiera algo cargado — ahora cualquier fuente cargada mueve el modo
+ *   a 'triage' (esperando las demás), consistente con el resto de la
+ *   lógica de fuentes obligatorias (ver Events.checkSources()).
  */
 export const State = {
   // Data stores
@@ -16,17 +26,13 @@ export const State = {
   xlsData:  null,        // Array of rows from RUTEO NUEVO
   factData: new Map(),   // invoice# → { gls, horaFact }
   despData: new Map(),   // RUTA → { hrDesp, caseta, wtms, idIda }
-  merged:   [],          // Final merged rows (output of tryMerge)
-  catalog:  new Map(),   // normalizedName → licencia
-  // Catálogos maestros (Camino C) — reemplazan RUTEO NUEVO manual de
-  // FORMATO/TIENDA/ESTADO (Ventana de Recibo) y LINEA/PLACAS/CAPACIDAD
-  // (Pool Real). Empiezan vacíos hasta que se importen desde el panel
-  // "Catálogos" (Fase 3, pendiente) — el motor de enriquecimiento
-  // no-opea con seguridad mientras tanto.
+  wtmsData: new Map(),   // idCarga (ID'S MASTER) → { carteporte, siguienteCarga } — catálogo temporal, no persiste
+  merged:   [],
+  catalog:  new Map(),
   catalogs:     { ventanaRecibo: [], poolReal: [] },
-  catalogMeta:  {},   // catalogId → { row_count, updated_at, updated_by }
-  catalogIndices: null,   // Map — reconstruido en cada runMerge()
-  catalogDuplicates: [],  // llaves duplicadas detectadas — leído por sve.js
+  catalogMeta:  {},
+  catalogIndices: null,
+  catalogDuplicates: [],
 
   // Session
   user: localStorage.getItem('sd_user') || '',
@@ -38,32 +44,11 @@ export const State = {
   sveLastQuality: 100,
   sveAuditLog: [],
 
-  // Inline edits — patches applied to merged rows this session
-  // Each entry: { rowIndex, field, oldVal, newVal, ts }
   edits: [],
 
-  // Fact cache — persistent multi-day concentrado storage
-  // Loaded from Supabase on init (Camino B Fase 2), written on each XLS load
-  factCache: new Map(), // invoice# → { gls, horaFact, date, savedAt, source }
-
-  // Log de operaciones de FactCache.persist() — usado por el panel
-  // "Historial de caché" para mostrar estado ✅/⚠️/❌ por fecha.
-  // Cargado desde fact_cache_log (Supabase) al iniciar, actualizado de
-  // forma optimista por FactCache._logResult() en cada persist().
+  factCache: new Map(),
   factCacheLog: [],
-
-  // cacheUpdating: true mientras FactCache.persist() está en curso — usado
-  // por el panel "Historial de caché" para mostrar el indicador 🔄.
-  // Hoy es casi instantáneo (localStorage es síncrono); queda listo para
-  // cuando fact_cache migre a Supabase en Camino B Fase 2 (escritura async).
   cacheUpdating: false,
-
-  // Sesión completada del día operativo de hoy (Camino B Fase 3),
-  // sincronizada por Events.refreshTodayBanner() y por el bootstrap de
-  // core/app.js — antes solo se pasaba directo a UI.renderTodayBanner()
-  // sin guardarse en State. Se agrega aquí (Fase 5 del rediseño) porque
-  // operationalMode necesita leerla de forma síncrona para calcular el
-  // modo 'cerrado' sin depender de una llamada async adicional.
   todaySession: null,
 
   // Computed helpers
@@ -74,26 +59,18 @@ export const State = {
 
   /**
    * operationalMode — Fase 5 del rediseño "Centro de Operaciones".
-   * Getter puro, sin efectos secundarios: infiere en qué momento del
-   * día operativo está el usuario a partir de datos que YA existen en
-   * State — no depende de ninguna selección manual.
-   *
-   *   'cerrado'    — ya se exportó una sesión hoy y no hay datos
-   *                  cargados en memoria (recién se abrió la app, o se
-   *                  reinició, después de haber cerrado el día)
-   *   'arranque'   — nada cargado todavía (ni Excel ni PDFs)
+   *   'cerrado'    — ya se exportó una sesión hoy y no hay datos en memoria
+   *   'arranque'   — nada cargado todavía (ninguna de las 4 fuentes)
    *   'triage'     — hay al menos una fuente cargada pero el merge
-   *                  todavía no produjo resultados (State.merged vacío)
+   *                  todavía no produjo resultados — incluye el caso
+   *                  de fuentes obligatorias incompletas, porque en
+   *                  ese caso runMerge() nunca se ejecuta.
    *   'correccion' — hay resultados y quedan críticos o advertencias
    *   'listo'      — hay resultados y cero críticos/advertencias
-   *
-   * El orden de los checks importa: 'cerrado' se evalúa primero porque
-   * es más informativo que 'arranque' cuando ambas condiciones podrían
-   * describir la pantalla (nada cargado, pero el día ya se cerró).
    */
   get operationalMode() {
     if (this.todaySession && !this.merged.length) return 'cerrado';
-    if (!this.xlsData && this.pdfData.size === 0) return 'arranque';
+    if (!this.xlsData && this.pdfData.size === 0 && this.despData.size === 0 && this.wtmsData.size === 0) return 'arranque';
     if (!this.merged.length) return 'triage';
     if (this.sveHasCritical || this.sveHasWarnings) return 'correccion';
     return 'listo';
