@@ -18,20 +18,25 @@
  *   Ambas se alimentan de flags que arma processors/merge.js
  *   (_wtmsMatched / _wtmsAmbiguous) — sve.js no vuelve a tocar
  *   State.wtmsData directamente, mismo principio que ya seguían las
- *   reglas L/M con los catálogos maestros.
+ *   reglas L/M con los catálogos maestros (leen _enrichMisses, no
+ *   los índices crudos).
  *
- * CAMBIO DE INTERFAZ respecto al código original (Fase 6, "Opción B"):
+ * CAMBIO DE INTERFAZ respecto al código original (decisión de Fase 6
+ * de la modularización, "Opción B" — inversión de control):
  *   runSVE(rows) NO toca UI. Devuelve:
  *     - null                                            si no hay rows
  *     - { issues, quality, nCrit, nWarn, nInfo, nPass }  si hay rows
  *   El caller (Events.triggerMerge) decide qué hacer con
  *   UI.resetSVE()/UI.renderSVE() según el resultado.
  *
- * Nota de acoplamiento preexistente (regla K): lee
- * document.getElementById('bdgXLS') directamente. Se preserva del original.
+ * Nota de acoplamiento preexistente (regla K): esta función lee
+ * document.getElementById('bdgXLS') directamente para comparar el
+ * conteo mostrado en pantalla contra State.merged. Se preserva tal
+ * cual del original.
  *
  * Dependencias:
- *   - State (core/state.js)
+ *   - State (core/state.js) — lee rows vía parámetro, escribe
+ *     State.sveHasCritical / sveHasWarnings / sveLastQuality
  *   - getMapped (core/constants.js)
  */
 import { State } from '../../core/state.js';
@@ -50,8 +55,13 @@ export const SVE_ICONS = {
 
 /**
  * Ejecuta las reglas de validación sobre las rows del merge.
+ *
  * @param {Array<object>} rows — normalmente State.merged
- * @returns {null|{ issues, quality, nCrit, nWarn, nInfo, nPass }}
+ * @returns {null|{
+ *   issues: Array<object>,
+ *   quality: number,
+ *   nCrit: number, nWarn: number, nInfo: number, nPass: number
+ * }} — null si rows está vacío
  */
 export function runSVE(rows) {
   if (!rows || !rows.length) return null;
