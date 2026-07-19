@@ -26,10 +26,6 @@ export function pct(v, t) {
 
 /**
  * Formatea un objeto Date a string legible "YYYY-MM-DD HH:MM".
- * Se conserva sin cambios — sigue en uso por ui.js (_renderRowsBody)
- * para columnas Date que no pasan por el pipeline de texto crudo
- * (HR. DESPACHO, CITA, SALIDA DE CASETA — no vienen de RUTEO NUEVO
- * ni de CONCENTRADO FACTURAS).
  * @param {Date} d
  * @returns {string}
  */
@@ -41,16 +37,9 @@ export function fmtDate(d) {
 
 /**
  * Convierte un número serial de Excel a texto "DD/MM/YYYY" o
- * "DD/MM/YYYY HH:mm" — cálculo de calendario puro, sin objetos Date
- * con getters locales de por medio. Misma técnica que
- * processors/excel.js usa para las columnas de RUTEO NUEVO (ver su
- * nota de cabecera "FIX (fidelidad de fecha/hora — v2)"). El serial de
- * Excel no tiene zona horaria — es solo "días desde 1899-12-30" — así
- * que el cálculo se hace enteramente con getters UTC del Date
- * intermedio (usado únicamente como calculadora de calendario, nunca
- * serializado ni leído con getters locales).
+ * "DD/MM/YYYY HH:mm" — cálculo de calendario puro.
  * @param {number} serial
- * @param {boolean} [withTime=true] — incluir HH:mm si la celda trae hora
+ * @param {boolean} [withTime=true]
  * @returns {string}
  */
 export function serialToText(serial, withTime = true) {
@@ -66,22 +55,6 @@ export function serialToText(serial, withTime = true) {
 /**
  * Convierte un valor de celda Excel (Date, número serial, string)
  * a un string de fecha/hora legible "DD/MM/YYYY HH:mm".
- *
- * FIX (fidelidad de HORA DE FACTURACION — julio 2026): la rama
- * numérica antes construía un Date anclado en UTC a partir del serial
- * y lo formateaba con fmtDate() — que lee con getters LOCALES. Ese
- * desajuste UTC/local desplazaba la hora exactamente el offset de la
- * zona horaria del navegador (mismo bug de fondo que ENRAMPE/RETIRO).
- * Ahora usa serialToText(), que hace el cálculo enteramente en UTC sin
- * depender de la zona horaria del navegador.
- *
- * La rama Date se conserva con getters LOCALES a propósito: los
- * objetos Date que llegan aquí ya fueron reconstruidos por
- * _fixExcelDateRow() en excel.js (que los arma con el constructor
- * LOCAL de Date usando los componentes UTC originales) — por diseño,
- * para ESE tipo de Date específico, son los getters locales los que
- * devuelven los valores correctos, no los UTC.
- *
  * @param {Date|number|string} val
  * @returns {string}
  */
@@ -101,4 +74,19 @@ export function formatFactDate(val) {
   }
 
   return String(val).trim();
+}
+
+/**
+ * Elimina diacríticos (acentos, diéresis, etc.) de un string, dejando
+ * el carácter base. Usado para normalizar encabezados de archivos
+ * externos (ej. Reporte WTMS) antes de aplicar los regex de detección
+ * de columnas — el mismo encabezado puede llegar con o sin acentos
+ * dependiendo del export. NFD descompone cada carácter acentuado en
+ * base + marca diacrítica combinante (rango \u0300-\u036f), que luego
+ * se elimina.
+ * @param {*} s
+ * @returns {string}
+ */
+export function stripAccents(s) {
+  return String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
