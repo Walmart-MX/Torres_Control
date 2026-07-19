@@ -2,16 +2,13 @@
  * editing/route-picker.js
  * ROUTE PICKER — selector liviano que aparece cuando una alerta SVE
  * afecta a múltiples filas (ej. marchamo duplicado en dos rutas distintas).
- * Presenta las opciones al usuario y resuelve a un único _rowId antes
- * de abrir el drawer de edición.
+ * SIN CAMBIOS respecto al original — no está afectado por la
+ * integración del Reporte WTMS. Se incluye aquí tal cual para
+ * garantizar que no haya mezcla de versiones con edit-system.js.
  *
  * Dependencias:
  *   - escH (utils/dom.js)
- *   - EditSystem (editing/edit-system.js) — _pick() llama a
- *     EditSystem._openDrawer() una vez que el usuario elige una ruta.
- *     Esta dependencia es simétrica con la que EditSystem tiene hacia
- *     RoutePicker — resuelta en runtime vía _setRoutePicker() para
- *     evitar problemas de inicialización circular.
+ *   - EditSystem (editing/edit-system.js)
  */
 import { escH } from '../utils/dom.js';
 import { EditSystem } from '../editing/edit-system.js';
