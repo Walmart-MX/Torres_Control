@@ -194,7 +194,7 @@ input, textarea { font-family: inherit; }
 /* ── PIPELINE STRIP ── */
 /* The three-step pipeline is the single source of workflow state */
 .pipeline {
-  display: grid; grid-template-columns: 1fr auto 1fr auto 1fr;
+  display: grid; grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr;
   gap: 0; margin-bottom: 20px;
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--r-lg); overflow: hidden;
@@ -326,34 +326,55 @@ body[data-mode="listo"]      #dropPDF,
 body[data-mode="cerrado"]    #dropPDF,
 body[data-mode="correccion"] #dropXLS,
 body[data-mode="listo"]      #dropXLS,
-body[data-mode="cerrado"]    #dropXLS {
-  padding: 10px 14px; display: flex; align-items: center; gap: 10px; text-align: left;
+body[data-mode="cerrado"]    #dropXLS,
+body[data-mode="correccion"] #dropWTMS,
+body[data-mode="listo"]      #dropWTMS,
+body[data-mode="cerrado"]    #dropWTMS {
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
 }
+
 body[data-mode="correccion"] #dropPDF .dz-ico,
 body[data-mode="listo"]      #dropPDF .dz-ico,
 body[data-mode="cerrado"]    #dropPDF .dz-ico,
 body[data-mode="correccion"] #dropXLS .dz-ico,
 body[data-mode="listo"]      #dropXLS .dz-ico,
-body[data-mode="cerrado"]    #dropXLS .dz-ico {
-  font-size: 16px; margin-bottom: 0;
+body[data-mode="cerrado"]    #dropXLS .dz-ico,
+body[data-mode="correccion"] #dropWTMS .dz-ico,
+body[data-mode="listo"]      #dropWTMS .dz-ico,
+body[data-mode="cerrado"]    #dropWTMS .dz-ico {
+  font-size: 16px;
+  margin-bottom: 0;
 }
+
 body[data-mode="correccion"] #dropPDF .dz-sub,
 body[data-mode="listo"]      #dropPDF .dz-sub,
 body[data-mode="cerrado"]    #dropPDF .dz-sub,
 body[data-mode="correccion"] #dropXLS .dz-sub,
 body[data-mode="listo"]      #dropXLS .dz-sub,
-body[data-mode="cerrado"]    #dropXLS .dz-sub {
+body[data-mode="cerrado"]    #dropXLS .dz-sub,
+body[data-mode="correccion"] #dropWTMS .dz-sub,
+body[data-mode="listo"]      #dropWTMS .dz-sub,
+body[data-mode="cerrado"]    #dropWTMS .dz-sub {
   display: none;
 }
+
 body[data-mode="correccion"] #dropPDF .dz-badge,
 body[data-mode="listo"]      #dropPDF .dz-badge,
 body[data-mode="cerrado"]    #dropPDF .dz-badge,
 body[data-mode="correccion"] #dropXLS .dz-badge,
 body[data-mode="listo"]      #dropXLS .dz-badge,
-body[data-mode="cerrado"]    #dropXLS .dz-badge {
-  margin-top: 0; margin-left: auto; flex-shrink: 0;
+body[data-mode="cerrado"]    #dropXLS .dz-badge,
+body[data-mode="correccion"] #dropWTMS .dz-badge,
+body[data-mode="listo"]      #dropWTMS .dz-badge,
+body[data-mode="cerrado"]    #dropWTMS .dz-badge {
+  margin-top: 0;
+  margin-left: auto;
+  flex-shrink: 0;
 }
-
 /* Modo 'listo': la interfaz señala la acción de cierre, no solo la
    habilita — el botón principal de exportar recibe un pulso sutil.
    Se retira automáticamente en cuanto el modo cambia (crítico nuevo,
