@@ -95,7 +95,8 @@ export async function init() {
   // ── Drop zones ──
   Events.setupDrop('dropPDF', 'filePDF', Events.handlePDFs.bind(Events));
   Events.setupDrop('dropXLS', 'fileXLS', Events.handleXLS.bind(Events));
-
+  // NUEVO — Reporte WTMS (4ª fuente obligatoria)
+  Events.setupDrop('dropWTMS', 'fileWTMS', Events.handleWTMS.bind(Events));
   // ── Buttons ──
   document.getElementById('btnParse').addEventListener('click',      () => Events.handlePaste());
   document.getElementById('btnPasteClear').addEventListener('click', () => Events.clearPaste());
@@ -254,7 +255,11 @@ export async function init() {
   document.getElementById('btnTodayPreview').addEventListener('click', () => Events.previewTodaySession());
   document.getElementById('btnTodayRedownload').addEventListener('click', () => Events.redownloadToday());
 
-  // ── Init pipeline (visual, no depende del catálogo) ──
+// ── Init pipeline (visual, no depende del catálogo) ──
+  // CAMBIO WTMS: el pipeline pasa de 3 a 4 pasos — ninguno "optional"
+  // ya (Status y WTMS son obligatorios ahora). El gate de fuentes
+  // faltantes (UI.renderSourceGate) se muestra la primera vez que el
+  // usuario cargue cualquier fuente, vía Events.triggerMerge().
   UI.setPipeStep(1, 'active', 'En espera');
   UI.setActionsEnabled(false);
   UI.updateHealthRail();
