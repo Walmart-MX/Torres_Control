@@ -2,53 +2,10 @@
  * events/events.js
  * EVENTS — coordinador central de todos los manejadores de eventos.
  *
- * Este objeto actúa como la capa de orquestación: recibe eventos del DOM
- * (clicks, drops, cambios de input) y coordina las llamadas a los módulos
- * de procesamiento, estado y UI. No contiene lógica de negocio propia.
- *
- * CAMBIO Camino B / Fase 1: las funciones de catálogo (addCatalogEntry,
- * delOp, importCatalog) pasaron de síncronas a async — ahora persisten
- * en Supabase antes de refrescar la UI, en vez de mutar únicamente el
- * Map en memoria. El contrato con quien las invoca no cambió: siguen
- * llamándose igual, solo que ahora devuelven una Promise (el caller no
- * necesita await si no le importa esperar el resultado, ver renderCatalog
- * en ui.js, que las invoca en un onclick inline sin await).
- *
- * CAMBIO Camino B / Fase 3: toda exportación pasa ahora por
- * finalizeAndExport() — un único punto de entrada que persiste la sesión
- * en el historial permanente (dispatch_sessions/dispatch_rows en
- * Supabase) y siempre dispara la descarga local, incluso si el guardado
- * remoto falla. handleExport(), handleForceExport() y
- * WarnModal.exportAnyway() convergen ahí. También se agregan los
- * manejadores del panel "Historial de Procesamientos" y del aviso de
- * "día ya procesado" (openHistory, selectHistorySession,
- * redownloadHistorySession, previewTodaySession, redownloadToday).
- *
- * CAMBIO — Fase 5 del rediseño "Centro de Operaciones"
- * (ModeSurface / operationalMode): triggerMerge() y
- * refreshTodayBanner() ahora también llaman a UI.applyMode() después
- * de actualizar el estado — son los dos puntos de este archivo donde
- * cambia algo que State.operationalMode necesita para recalcularse
- * (merged/SVE en triggerMerge, todaySession en refreshTodayBanner).
- * refreshTodayBanner() además guarda la sesión en State.todaySession,
- * que antes solo se pasaba directo a UI.renderTodayBanner() sin
- * persistirse en el estado global.
- *
- * Dependencias:
- *   - State (core/state.js)
- *   - normOp (utils/format.js)
- *   - UI (ui/ui.js)
- *   - EditSystem, WarnModal, RoutePicker (editing/)
- *   - FactCache (features/fact-cache.js)
- *   - DispatchHistory (features/dispatch-history.js)
- *   - pdfExtract, parsePDF (processors/pdf.js)
- *   - processXLS (processors/excel.js)
- *   - processPaste (processors/paste.js)
- *   - runMerge (processors/merge.js)
- *   - runSVE (features/validation/sve.js)
- *   - exportXLSX (features/export.js)
- *   - addOperator, deleteOperator, importOperators (features/catalog.js)
- *   - XLSX (global del CDN — usado en importCatalog)
+ * CAMBIO (integración Reporte WTMS — 4ª fuente obligatoria, jul-2026):
+ *   Ninguna de las 4 fuentes es opcional. Se agrega checkSources(),
+ *   handleWTMS() y se reescribe triggerMerge() para bloquear el merge
+ *   completo si falta cualquier fuente.
  */
 import { State } from '../core/state.js';
 import { normOp } from '../utils/format.js';
@@ -60,6 +17,7 @@ import { FactCache } from '../features/fact-cache.js';
 import { pdfExtract, parsePDF } from '../processors/pdf.js';
 import { processXLS } from '../processors/excel.js';
 import { processPaste } from '../processors/paste.js';
+import { processWTMS } from '../processors/wtms.js';
 import { runMerge } from '../processors/merge.js';
 import { runSVE } from '../features/validation/sve.js';
 import { exportXLSX } from '../features/export.js';
@@ -69,7 +27,6 @@ import { CatalogStore } from '../features/catalogs/catalog-store.js';
 
 export const Events = {
 
-  // ── Drop zones ──
   setupDrop(zoneId, inputId, handler) {
     const zone  = document.getElementById(zoneId);
     const input = document.getElementById(inputId);
@@ -78,7 +35,7 @@ export const Events = {
     zone.addEventListener('drop',      e => { e.preventDefault(); zone.classList.remove('drag'); handler([...e.dataTransfer.files]); });
     input.addEventListener('change',   ()=> { handler([...input.files]); input.value = ''; });
   },
-// ── Catálogos Maestros (Camino C, Fase 3) ──
+
   async importMasterCatalog(catalogId, file) {
     if (!file) return;
     UI.setMasterCatStatus('Importando…', 'ok');
@@ -96,7 +53,7 @@ export const Events = {
       UI.setMasterCatStatus('Error: ' + e.message, 'err');
     }
   },
-  // ── PDF handler ──
+
   async handlePDFs(files) {
     files = files.filter(f => f.type === 'application/pdf');
     if (!files.length) return;
@@ -125,11 +82,9 @@ export const Events = {
     document.getElementById('pipeNum1').textContent = '✓';
 
     if (errors.length) UI.showErrors(errors);
-    UI.setActionsEnabled(true);
     Events.triggerMerge();
   },
 
-  // ── XLS handler ──
   async handleXLS(files) {
     const file = files.find(f => f.name.match(/\.xlsx?$/i));
     if (!file) return;
@@ -139,12 +94,6 @@ export const Events = {
       State.xlsData  = rows;
       State.factData = factData;
 
-      // FactCache.persist() ahora escribe en Supabase (Camino B Fase 2) —
-      // es una llamada de red real. No la esperamos antes de correr el
-      // merge: runMerge() usa State.factData como fuente primaria, el
-      // caché remoto solo es fallback de OTROS días (ya cargado en
-      // memoria desde el arranque). El estado del panel de diagnóstico
-      // se refresca cuando la escritura termina, sin bloquear la UI.
       State.cacheUpdating = true;
       UI.renderCacheHistory();
       FactCache.persist(factData).finally(() => {
@@ -159,7 +108,6 @@ export const Events = {
       document.getElementById('bdgXLS').textContent   = rows.length;
 
       UI.hideProgress();
-      UI.setActionsEnabled(true);
       Events.triggerMerge();
     } catch (e) {
       UI.hideProgress();
@@ -167,7 +115,29 @@ export const Events = {
     }
   },
 
-  // ── Paste handler ──
+  // ── Reporte WTMS handler — NUEVO (4ª fuente obligatoria) ──
+  async handleWTMS(files) {
+    const file = files.find(f => f.name.match(/\.csv$/i));
+    if (!file) { if (files.length) UI.showErrors(['El Reporte WTMS debe ser un archivo .csv']); return; }
+    UI.showProgress('Leyendo Reporte WTMS…');
+    try {
+      const raw = await file.text();
+      const { data } = processWTMS(raw);
+      State.wtmsData = data;
+
+      UI.setBadge('wtmsBadge', `✓ ${data.size} cargas`, 'done');
+      UI.setDZDone('dropWTMS', file.name);
+      UI.setPipeStep(4, 'done', `${data.size} cargas`);
+      document.getElementById('pipeNum4').textContent = '✓';
+
+      UI.hideProgress();
+      Events.triggerMerge();
+    } catch (e) {
+      UI.hideProgress();
+      UI.showErrors([e.message]);
+    }
+  },
+
   handlePaste() {
     const raw = document.getElementById('pasteArea').value.trim();
     if (!raw) { UI.setPasteSt('Pega datos primero', 'err'); return; }
@@ -192,14 +162,37 @@ export const Events = {
     State.despData = new Map();
     document.getElementById('bdgDesp').textContent = '0';
     UI.setPasteSt('', '');
-    UI.setPipeStep(3, 'optional', 'Opcional');
-    document.getElementById('pipeNum3').textContent = '·';
+    UI.setPipeStep(3, '', 'En espera');
+    document.getElementById('pipeNum3').textContent = '3';
     Events.triggerMerge();
   },
 
-  // ── Merge + SVE trigger ──
+  // ── Validación de fuentes obligatorias — NUEVO ──
+  checkSources() {
+    const missing = [];
+    if (State.pdfData.size === 0) missing.push('PDFs de cargas');
+    if (!State.xlsData || !State.xlsData.length) missing.push('Excel macro (RUTEO NUEVO)');
+    if (State.despData.size === 0) missing.push("Status de despacho (RUTA + ID'S MASTER)");
+    if (State.wtmsData.size === 0) missing.push('Reporte WTMS');
+    return { ok: missing.length === 0, missing };
+  },
+
   triggerMerge() {
-    if (!State.xlsData || State.pdfData.size === 0) return;
+    const { ok, missing } = Events.checkSources();
+
+    if (!ok) {
+      State.merged = [];
+      UI.renderSourceGate(missing);
+      UI.renderTable();
+      UI.updateStats();
+      UI.resetSVE();
+      UI.setActionsEnabled(false);
+      UI.updateHealthRail();
+      UI.applyMode();
+      return;
+    }
+
+    UI.renderSourceGate([]);
     runMerge();
     UI.renderTable();
     UI.updateStats();
@@ -216,12 +209,6 @@ export const Events = {
     }, 100);
   },
 
-  // ── Export (Camino B / Fase 3 — historial permanente) ──
-  // Tres ramas según el estado del SVE:
-  //   critical  → flash del gate, no exporta
-  //   warn-only → muestra WarnModal para confirmar (WarnModal.exportAnyway
-  //               llama Events.finalizeAndExport al confirmar)
-  //   clean     → finalizeAndExport directo
   handleExport() {
     if (State.sveHasCritical) {
       document.getElementById('svePanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -252,21 +239,11 @@ export const Events = {
     Events.finalizeAndExport({ exportType: 'despacho', action: 'forced', critErrors: nc });
   },
 
-  /**
-   * Punto único de entrada para toda exportación: persiste la sesión en
-   * el historial permanente de Supabase (dispatch_sessions/dispatch_rows)
-   * y SIEMPRE dispara la descarga local del Excel, incluso si el guardado
-   * remoto falla — un problema de red no debe impedir sacar el despacho
-   * del día. auditMeta se guarda tal cual en dispatch_sessions.meta.
-   * @param {object} auditMeta — { exportType, action, ...detalles }
-   */
   async finalizeAndExport(auditMeta = {}) {
     if (!State.merged.length) return;
     const ts   = new Date().toLocaleString('es-MX');
     const user = State.user || 'desconocido';
 
-    // Se conserva el audit log local (consola) además del historial
-    // permanente en Supabase — no son mutuamente excluyentes.
     State.sveAuditLog.push({ ts, user, action: (auditMeta.action || 'export').toUpperCase(), quality: State.sveLastQuality, ...auditMeta });
     console.info('[SVE AUDIT]', State.sveAuditLog[State.sveAuditLog.length - 1]);
 
@@ -275,7 +252,6 @@ export const Events = {
       await DispatchHistory.finalizeSession(State.merged, { ...auditMeta, ts, user });
     } catch (e) {
       console.warn('[DispatchHistory] No se pudo guardar el historial:', e.message);
-      // No bloqueamos la descarga local aunque falle el guardado remoto.
     }
     UI.setExportBusy(false);
 
@@ -290,7 +266,6 @@ export const Events = {
     UI.applyMode();
   },
 
-  // ── Historial de Procesamientos ──
   _historySessions: [],
   _currentHistorySession: null,
   _currentHistoryRows: null,
@@ -338,7 +313,6 @@ export const Events = {
     exportXLSX(rows, 'despacho', session.session_date);
   },
 
-  // ── Catalog (Camino B / Fase 1 — Supabase) ──
   async addCatalogEntry() {
     const op  = document.getElementById('catOpInput').value.trim();
     const lic = document.getElementById('catLicInput').value.trim();
