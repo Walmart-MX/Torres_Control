@@ -2,6 +2,10 @@
  * ui/ui.js
  * Objeto UI — única capa de manipulación del DOM en SmartDispatch.
  *
+ * Todos los métodos reciben datos calculados y los pintan en el DOM.
+ * Ningún método de UI debe tomar decisiones de negocio — eso es
+ * responsabilidad de Events, EditSystem o los processors.
+ *
  * CAMBIO (integración Reporte WTMS — 4ª fuente obligatoria, jul-2026):
  *   - Nuevo método renderSourceGate(missing) — pinta/oculta el banner
  *     de bloqueo "Faltan fuentes obligatorias" (#sourceGate en
@@ -10,10 +14,24 @@
  *     #dropWTMS, el badge wtmsBadge, y refleja el pipeline de 4 pasos
  *     (antes 3) — el Status de despacho deja de tener estado
  *     "optional" en el pipeline visual, ya que ahora es obligatorio.
- *   - setActionsEnabled() no cambia de firma ni de lógica interna.
- *   - renderPastePreview(): la columna de vista previa del ID master
- *     ahora se rotula "ID'S MASTER" (antes "ID IDA") — solo texto de
- *     encabezado, `idx.idIda` como clave interna no cambia.
+ *   - setActionsEnabled() no cambia de firma ni de lógica interna —
+ *     sigue siendo el único lugar que calcula el disabled real de los
+ *     botones de exportar (combinando el flag `on` que le pasan con
+ *     State.sveHasCritical). Events.triggerMerge() es ahora quien
+ *     decide CUÁNDO llamarla con true/false según checkSources().
+ *
+ * CAMBIO — Fase 1 del rediseño "Centro de Operaciones" (PulseBar):
+ *   ver notas previas conservadas en updateHealthRail()/updateStats().
+ *
+ * Dependencias:
+ *   - State (core/state.js)
+ *   - escH (utils/dom.js)
+ *   - fmtDate (utils/format.js)
+ *   - getMapped, COLS_PDF, COLS_DESP, COLS_FILL, PREVIEW_COLS (core/constants.js)
+ *   - SVE_CRIT, SVE_WARN, SVE_INFO, SVE_ICONS (features/validation/sve.js)
+ *   - PulseBar (ui/pulse-bar.js)
+ *   - Events (events/events.js) — resuelto en tiempo de ejecución vía
+ *     _setEvents(), ver nota abajo.
  */
 import { State } from '../core/state.js';
 import { escH } from '../utils/dom.js';
@@ -26,10 +44,12 @@ import { FactCache } from '../features/fact-cache.js';
 import { PulseBar } from './pulse-bar.js';
 
 let Events;
+/** Resuelve la dependencia circular UI ↔ Events — llamado una vez desde core/app.js */
 export function _setEvents(ev) { Events = ev; }
 
 export const UI = {
 
+  // ── Theme ──
   applyTheme(t) {
     document.documentElement.setAttribute('data-theme', t);
     localStorage.setItem('sd_theme', t);
@@ -41,12 +61,14 @@ export const UI = {
   },
   selectTheme(t) { UI.applyTheme(t); },
 
+  // ── User ──
   setUser(name) {
     State.user = name || '';
     localStorage.setItem('sd_user', State.user);
     document.getElementById('tbUserName').textContent = State.user || '—';
   },
 
+  // ── Modal ──
   openModal(mode) {
     mode = mode || 'settings';
     State._modalMode = mode;
@@ -73,6 +95,7 @@ export const UI = {
     }
   },
 
+  // ── Pipeline ──
   setPipeStep(n, state, stat) {
     const step = document.getElementById('pipeStep' + n);
     const num  = document.getElementById('pipeNum' + n);
@@ -85,6 +108,8 @@ export const UI = {
   },
 
   // ── Source Gate — NUEVO (fuentes obligatorias) ──
+  // Pinta/oculta el banner de bloqueo cuando falta cualquiera de las
+  // 4 fuentes (ver Events.checkSources()). missing=[] lo oculta.
   renderSourceGate(missing) {
     const el = document.getElementById('sourceGate');
     if (!el) return;
@@ -97,6 +122,7 @@ export const UI = {
       missing.map(m => `<li>${escH(m)}</li>`).join('');
   },
 
+  // ── Pulse Bar (topbar) — Fase 1 del rediseño ──
   updateHealthRail() {
     const total   = State.merged.length || 0;
     const matched = State.merged.filter(r => r._matched).length;
@@ -105,10 +131,12 @@ export const UI = {
     PulseBar.render({ total, matched, quality: State.sveLastQuality, nCrit, nWarn, mode: State.operationalMode });
   },
 
+  // ── ModeSurface — Fase 5 del rediseño "Centro de Operaciones" ──
   applyMode() {
     document.body.dataset.mode = State.operationalMode;
   },
 
+  // ── Stats strip ──
   updateStats() {
     const cacheHits = State.merged.filter(r => r._factSource === 'cache').length;
     if (cacheHits > 0) {
@@ -132,6 +160,7 @@ export const UI = {
     document.getElementById('previewDesc').textContent = `${total} rutas · ${match} con PDF · ${State.licCount} con licencia`;
   },
 
+  // ── Progress ──
   showProgress(label) {
     const bar = document.getElementById('progBar');
     bar.classList.add('on');
@@ -147,6 +176,7 @@ export const UI = {
   },
   hideProgress() { document.getElementById('progBar').classList.remove('on'); },
 
+  // ── Error log ──
   showErrors(errors) {
     const log = document.getElementById('errLog');
     log.classList.add('on');
@@ -157,6 +187,7 @@ export const UI = {
     document.getElementById('errLogInner').textContent = '';
   },
 
+  // ── DZ state ──
   setDZDone(id, label) {
     const dz = document.getElementById(id);
     dz.classList.add('done');
@@ -176,6 +207,7 @@ export const UI = {
     el.className    = 'dz-badge' + (cls ? ' ' + cls : '');
   },
 
+  // ── Paste preview ──
   renderPastePreview(preview, idx) {
     const cols = ['RUTA'];
     if (idx.caseta !== undefined) cols.push('SALIDA CASETA');
@@ -196,6 +228,7 @@ export const UI = {
     el.textContent = msg;
   },
 
+  // ── Table preview ──
   renderTable() {
     document.getElementById('thead').innerHTML = UI._previewTheadHtml();
     UI._renderRowsBody(State.merged, 'tbody');
@@ -232,6 +265,7 @@ export const UI = {
     }).join('');
   },
 
+  // ── SVE ──
   resetSVE() {
     document.getElementById('svePanel').classList.remove('on', 'expanded');
     document.getElementById('sveSummaryToggle').className = 'sve-summary-toggle';
@@ -353,6 +387,7 @@ export const UI = {
     UI.updateHealthRail();
   },
 
+  // ── Catalog ──
   renderCatalog() {
     const tbody = document.getElementById('catTbody');
     const cnt   = State.catalog.size;
@@ -376,6 +411,7 @@ export const UI = {
     el.textContent = msg;
   },
 
+  // ── Catálogos Maestros (Camino C, Fase 3) ──
   renderCatalogMasterStatus(catalogId) {
     const elId = catalogId === 'ventanaRecibo' ? 'mcVentanaStatus' : 'mcPoolStatus';
     const el   = document.getElementById(elId);
@@ -399,6 +435,7 @@ export const UI = {
     el.textContent = msg;
   },
 
+  // ── Cache History ──
   renderCacheHistory() {
     const summary  = FactCache.dateSummary();
     const badge    = document.getElementById('cacheHistBadge');
@@ -461,6 +498,7 @@ export const UI = {
     }).join('');
   },
 
+  // ── Buttons ──
   setActionsEnabled(on) {
     document.getElementById('btnExport').disabled  = !on || State.sveHasCritical;
     document.getElementById('btnExport2').disabled = !on || State.sveHasCritical;
@@ -468,6 +506,7 @@ export const UI = {
     document.getElementById('btnClear').disabled   = !on;
   },
 
+  // ── Dispatch History (Camino B / Fase 3) ──
   setExportBusy(isBusy) {
     ['btnExport', 'btnExport2'].forEach(id => {
       const btn = document.getElementById(id);
@@ -532,6 +571,11 @@ export const UI = {
   },
 
   // ── Reset everything ──
+  // CAMBIO WTMS: se agrega reset de State.wtmsData + dropzone/badge de
+  // WTMS, y el pipeline se resetea a sus 4 pasos (ninguno "optional" —
+  // Status y WTMS son obligatorios ahora). renderSourceGate([]) oculta
+  // el gate — vuelve a mostrarse cuando el usuario empiece a cargar
+  // fuentes de nuevo (ver Events.triggerMerge()).
   resetAll() {
     State.pdfData  = new Map();
     State.xlsData  = null;
