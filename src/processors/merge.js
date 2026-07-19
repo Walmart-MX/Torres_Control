@@ -5,21 +5,11 @@
  * State.merged.
  *
  * CAMBIO (integración Reporte WTMS — 4ª fuente obligatoria, jul-2026):
- *   runMerge() solo se invoca cuando Events.checkSources() confirmó que
- *   las 4 fuentes están completas (ver events/events.js).
- *
- *   Cruce: Status.ID'S MASTER (despRow.idIda) == WTMS.ID de la carga
- *   (clave del Map State.wtmsData, armado por processors/wtms.js).
- *
- *   Reglas de negocio (confirmadas con EduarDo):
- *     - Match: ID RETORNO = WTMS.Siguiente Carga, CARTA PORTE = WTMS.Carte Porte.
- *     - Sin match (había ID'S MASTER pero no se encontró): ID RETORNO='N/A',
- *       CARTA PORTE='' — incidencia ADVERTENCIA en SVE ('no_wtms').
- *     - Doble dato (coma, ej. "1234,4321"): _wtmsAmbiguous=true —
- *       incidencia CRÍTICA en SVE ('wtms_ambiguous'), bloquea
- *       exportación hasta resolución manual vía drawer de edición.
+ *   Cruce: Status.ID'S MASTER (despRow.idIda) == WTMS.ID de la carga.
+ *   Match: ID RETORNO = WTMS.Siguiente Carga, CARTA PORTE = WTMS.Carte Porte.
+ *   Sin match: ID RETORNO='N/A', CARTA PORTE=''.
+ *   Doble dato (coma): _wtmsAmbiguous=true — bloquea exportación (SVE crítico).
  */
-
 import { State } from '../core/state.js';
 import { COL_RUTA, COL_DETTE_E, COL_DETTE_F, COL_FACT, MAX_MARCH } from '../core/constants.js';
 import { FactCache } from '../features/fact-cache.js';
@@ -159,7 +149,7 @@ export function runMerge() {
       nr['_HR_DESP'] = ''; nr['_CASETA'] = ''; nr['_WTMS'] = ''; nr['_ID_IDA'] = '';
     }
 
-    // ── NUEVO — Reporte WTMS (4ª fuente obligatoria) ──
+    // ── Reporte WTMS (4ª fuente obligatoria) ──
     const idMaster  = despRow ? String(despRow.idIda || '').trim() : '';
     const wtmsMatch = idMaster ? (State.wtmsData.get(idMaster) || null) : null;
 

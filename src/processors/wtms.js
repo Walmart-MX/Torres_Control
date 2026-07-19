@@ -30,8 +30,7 @@
  * comillas (RFC4180) — NO es un split ingenuo por coma — porque un
  * valor de campo puede legítimamente contener una coma interna, que es
  * justo el caso de negocio de "doble dato" (ej. "1234,4321" en
- * Siguiente Carga) que se reporta como incidencia crítica en el SVE
- * (ver features/validation/sve.js, regla 'wtms_ambiguous').
+ * Siguiente Carga) que se reporta como incidencia crítica en el SVE.
  *
  * Dependencias:
  *   - stripAccents (utils/format.js) — tolerancia a acentos en encabezados
