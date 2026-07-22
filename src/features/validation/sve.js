@@ -1,57 +1,59 @@
 /**
  * features/validation/sve.js
- * SMART VALIDATION ENGINE v1.1 — audita State.merged tras cada merge
+ * SMART VALIDATION ENGINE v1.2 — audita State.merged tras cada merge
  * y produce un reporte de incidencias (críticas, advertencias, informativas)
  * más un score de calidad 0-100.
  *
+ * CAMBIO (integración Reporte WTMS — 4ª fuente obligatoria, jul-2026):
+ *   Dos reglas nuevas, P y Q:
+ *     P — 'no_wtms' (ADVERTENCIA): el ID'S MASTER de una ruta no
+ *         encontró coincidencia en el Reporte WTMS. No bloquea
+ *         exportación — el usuario ya ve 'N/A' en ID RETORNO y puede
+ *         decidir si eso es aceptable o requiere corrección manual.
+ *     Q — 'wtms_ambiguous' (CRÍTICA): el WTMS devolvió un valor doble
+ *         separado por coma (ej. "1234,4321") para ID RETORNO o
+ *         CARTA PORTE — bloquea exportación hasta que el usuario elija
+ *         manualmente cuál valor es correcto (ver EDITABLE_FIELDS en
+ *         editing/edit-system.js, campos '_ID_RETORNO'/'_CARTA_PORTE').
+ *   Ambas se alimentan de flags que arma processors/merge.js
+ *   (_wtmsMatched / _wtmsAmbiguous) — sve.js no vuelve a tocar
+ *   State.wtmsData directamente, mismo principio que ya seguían las
+ *   reglas L/M con los catálogos maestros (leen _enrichMisses, no
+ *   los índices crudos).
+ *
  * CAMBIO DE INTERFAZ respecto al código original (decisión de Fase 6
  * de la modularización, "Opción B" — inversión de control):
- *   Antes: runSVE(rows) llamaba a UI.resetSVE() / UI.renderSVE(...) directamente.
- *   Ahora: runSVE(rows) NO toca UI. Devuelve:
+ *   runSVE(rows) NO toca UI. Devuelve:
  *     - null                                            si no hay rows
  *     - { issues, quality, nCrit, nWarn, nInfo, nPass }  si hay rows
- *   El caller (Events.triggerMerge, todavía en index.html) es responsable
- *   de decidir qué hacer con UI.resetSVE() / UI.renderSVE() según el
- *   resultado. Esto elimina la dependencia sve.js → ui.js que habría sido
- *   necesaria de otro modo, y es el mismo cambio que se habría requerido
- *   en la Fase 9 de todas formas.
- *
- * Las 11 reglas (A-K) y el cálculo de quality score son IDÉNTICOS al
- * original — ningún cambio de lógica, solo el contrato de salida.
+ *   El caller (Events.triggerMerge) decide qué hacer con
+ *   UI.resetSVE()/UI.renderSVE() según el resultado.
  *
  * CAMBIO (contexto de localización Ruta+Entrega — jul-2026):
  *   Varias reglas consolidaban incidencias por RUTA únicamente, lo cual
  *   ocultaba a qué ENTREGA (DETTE) específica pertenecía el problema
  *   cuando una ruta tenía múltiples líneas. Se agrega un campo `dette`
- *   al objeto de incidencia (issue), poblado según corresponda por cada
- *   regla:
+ *   al objeto de incidencia (issue), poblado según corresponda:
  *     - D1 (missing — Operador/Licencia): SIGUE consolidada solo por
  *       RUTA (sin dette) — son el mismo dato para todas las entregas de
- *       la ruta, así que no tiene sentido pedirlo por entrega (decisión
- *       confirmada con EduarDo).
+ *       la ruta (decisión confirmada con EduarDo).
  *     - D2 (missing — Tarimas), A (dup_march), E (no_march) y J
- *       (bad_march): SÍ cambian su agrupación de `ruta` a `ruta+dette`,
- *       porque son datos que legítimamente varían por línea/entrega
- *       dentro de una misma ruta.
+ *       (bad_march): cambian su agrupación de `ruta` a `ruta+dette`,
+ *       porque son datos que legítimamente varían por línea/entrega.
  *   Se agrega además una regla nueva independiente para CITA vacía
- *   (D-bis) — ver su comentario específico más abajo para la
- *   justificación de por qué es una regla separada.
- *
- *   El engine de DEDUP ahora incluye `dette` en su clave — antes
- *   `rule||ruta||field` podía colapsar dos incidencias legítimas del
- *   mismo tipo/ruta/campo pertenecientes a distintas entregas en una
- *   sola. Es una corrección de un bug latente que este cambio expone.
+ *   (D-bis, rule id 'no_cita') — informativa, nunca bloquea exportación,
+ *   ver su comentario específico más abajo. Reglas P/Q (WTMS) no se
+ *   modifican — no tienen granularidad de entrega en su naturaleza.
  *
  * Nota de acoplamiento preexistente (regla K): esta función lee
  * document.getElementById('bdgXLS') directamente para comparar el
- * conteo mostrado en pantalla contra State.merged. Es un acceso a DOM
- * dentro de una función de validación — no ideal, pero se preserva tal
- * cual del original para no alterar comportamiento en esta fase.
+ * conteo mostrado en pantalla contra State.merged. Se preserva tal
+ * cual del original.
  *
  * Dependencias:
- *   - State (core/state.js) — lee rows ya vía parámetro, pero escribe
+ *   - State (core/state.js) — lee rows vía parámetro, escribe
  *     State.sveHasCritical / sveHasWarnings / sveLastQuality
- *   - getMapped (core/constants.js) — resuelve valores de columna
+ *   - getMapped (core/constants.js)
  */
 import { State } from '../../core/state.js';
 import { getMapped } from '../../core/constants.js';
@@ -64,7 +66,7 @@ export const SVE_ICONS = {
   'dup_march':'🔖','dup_tarimas':'📦','missing_ruta':'🔴','missing':'🟠',
   'no_march':'🔴','zero_tar':'📐','high_tar':'📐','no_pdf':'🟡',
   'no_fac':'ℹ️','bad_march':'ℹ️','integrity':'🔗','no_ventana':'📇','no_pool':'🚚','cat_dup':'🗂️','time_anomaly':'⏱️',
-  'no_cita':'📅'
+  'no_wtms':'🚛','wtms_ambiguous':'⚠️','no_cita':'📅'
 };
 
 /**
@@ -75,19 +77,16 @@ export const SVE_ICONS = {
  *   issues: Array<object>,
  *   quality: number,
  *   nCrit: number, nWarn: number, nInfo: number, nPass: number
- * }} — null si rows está vacío (el caller debe llamar UI.resetSVE() en ese caso)
+ * }} — null si rows está vacío
  */
 export function runSVE(rows) {
   if (!rows || !rows.length) return null;
 
   const raw = [];
   // rawAdd signature: (sev, rule, ruta, field, desc, action, extra, rowIds?, dette?)
-  // rowIds: optional array of _rowId values identifying the exact merged row(s)
-  // this issue refers to. When provided, EditSystem uses them for precise lookup
-  // instead of falling back to RUTA string matching.
-  // dette: optional — entrega (DETTE) a la que pertenece la incidencia, para que
-  // el usuario identifique exactamente qué línea de la ruta debe corregir sin
-  // tener que buscar manualmente entre todas las entregas.
+  // dette: entrega (DETTE) a la que pertenece la incidencia — NUEVO (jul-2026),
+  // para que el usuario identifique exactamente qué línea de la ruta debe
+  // corregir sin buscar manualmente entre todas las entregas.
   const rawAdd = (sev, rule, ruta, field, desc, action, extra, rowIds, dette) =>
     raw.push({ sev, rule,
                ruta:   String(ruta||'').trim(),
@@ -100,12 +99,14 @@ export function runSVE(rows) {
 
   const matched = rows.filter(r => r._matched);
 
-  // Helper: collect _rowId values for all rows matching a given RUTA
   const rowIdsByRuta = ruta =>
     rows.filter(r => String(r['RUTA']||'').trim() === ruta).map(r => r._rowId).filter(Boolean);
 
   // A: Marchamos duplicados entre rutas distintas
-  // marchMap stores: marc → { ruta, rowId, dette } — keeps the first row that claimed each marchamo
+  // CAMBIO (contexto de localización Ruta+Entrega — jul-2026): se agrega
+  // la entrega (DETTE) de ambos lados del conflicto en la descripción,
+  // para que el usuario identifique exactamente qué línea de cada ruta
+  // está en conflicto sin revisar todas las entregas.
   const marchMap = new Map();
   rows.forEach(r => {
     const ruta  = String(getMapped(r,'RUTA')||'').trim();
@@ -116,11 +117,6 @@ export function runSVE(rows) {
       if (marchMap.has(marc)) {
         const prev = marchMap.get(marc);
         if (prev.ruta !== ruta) {
-          // Two distinct rutas claim the same marchamo — expose both rowIds so
-          // the user can pick which one to correct from the route selector.
-          // Se incluye la entrega (DETTE) de ambos lados en la descripción
-          // para que el usuario identifique exactamente qué línea de cada
-          // ruta está en conflicto, sin tener que revisar todas las líneas.
           rawAdd(SVE_CRIT,'dup_march', ruta, `MARCHAMO ${m}`,
             `Marchamo ${marc} asignado a ruta ${ruta} (entrega ${dette||'—'}) y también a ruta ${prev.ruta} (entrega ${prev.dette||'—'}).`,
             'Confirma con la documentación cuál ruta lleva este marchamo.',
@@ -201,9 +197,9 @@ export function runSVE(rows) {
 
   // D2: Tarimas — a diferencia de Operador/Licencia, SÍ varía por línea:
   // cada entrega/destino dentro de una ruta puede tener un conteo de
-  // tarimas distinto. Se mantiene consolidado por RUTA + ENTREGA (DETTE)
-  // para que el usuario identifique exactamente cuál entrega tiene el
-  // dato faltante sin tener que revisar todas las líneas de la ruta.
+  // tarimas distinto. Se consolida por RUTA + ENTREGA (DETTE) para que
+  // el usuario identifique exactamente cuál entrega tiene el dato
+  // faltante sin tener que revisar todas las líneas de la ruta.
   const missingTarimasByRutaDette = new Map();
   matched.forEach(r => {
     const ruta  = String(getMapped(r,'RUTA')||'').trim();
@@ -362,7 +358,8 @@ export function runSVE(rows) {
       vals.size>1?`×${vals.size}`:'',
       [...rowIds], dette);
   });
-// L: Ventana de Recibo — DETTE no encontrado (consolidado por ruta)
+
+  // L: Ventana de Recibo — DETTE no encontrado (consolidado por ruta)
   const noVentanaByRuta = new Map();
   matched.forEach(r => {
     const miss = (r._enrichMisses || []).find(m => m.catalog === 'ventanaRecibo');
@@ -426,6 +423,41 @@ export function runSVE(rows) {
       'Revisa las fechas capturadas de enrampe/retiro/despacho/caseta.',
       '', [...rowIds]);
   });
+
+  // P: WTMS — ID'S MASTER no encontrado (consolidado por ruta) — NUEVO
+  const noWtmsByRuta = new Map();
+  matched.forEach(r => {
+    if (r._wtmsMatched === false) {
+      const ruta = String(getMapped(r,'RUTA')||'').trim();
+      if (!noWtmsByRuta.has(ruta)) noWtmsByRuta.set(ruta, { cnt: 0, rowIds: new Set() });
+      const e = noWtmsByRuta.get(ruta);
+      e.cnt++;
+      if (r._rowId) e.rowIds.add(r._rowId);
+    }
+  });
+  noWtmsByRuta.forEach(({ cnt, rowIds }, ruta) => rawAdd(SVE_WARN,'no_wtms', ruta, 'ID RETORNO',
+    `Ruta ${ruta}: ID'S MASTER no encontrado en el Reporte WTMS — ID RETORNO marcado como N/A.`,
+    "Verifica el ID'S MASTER en Status de despacho o confirma en el WTMS.",
+    cnt>1?`×${cnt}`:'',
+    [...rowIds]));
+
+  // Q: WTMS — valor doble ambiguo en ID RETORNO/CARTA PORTE — NUEVO
+  const ambigByRuta = new Map();
+  matched.forEach(r => {
+    if (r._wtmsAmbiguous) {
+      const ruta = String(getMapped(r,'RUTA')||'').trim();
+      if (!ambigByRuta.has(ruta)) ambigByRuta.set(ruta, { cnt: 0, rowIds: new Set() });
+      const e = ambigByRuta.get(ruta);
+      e.cnt++;
+      if (r._rowId) e.rowIds.add(r._rowId);
+    }
+  });
+  ambigByRuta.forEach(({ cnt, rowIds }, ruta) => rawAdd(SVE_CRIT,'wtms_ambiguous', ruta, 'ID RETORNO',
+    `Ruta ${ruta}: el WTMS devolvió múltiples valores para ID RETORNO/CARTA PORTE — requiere selección manual.`,
+    'Abre el registro y elige cuál de los dos valores es el correcto.',
+    cnt>1?`×${cnt}`:'',
+    [...rowIds]));
+
   // K: Integridad UI vs memoria
   const screenCnt = parseInt(document.getElementById('bdgXLS').textContent || '0', 10);
   if (screenCnt && screenCnt !== rows.length)
@@ -437,10 +469,9 @@ export function runSVE(rows) {
   // ── DEDUP ENGINE ──
   // Key: rule + ruta + field + dette — se agrega `dette` (jul-2026) para
   // que dos incidencias del mismo tipo/ruta/campo pertenecientes a
-  // distintas entregas NO se colapsen en una sola (bug latente antes de
-  // este cambio, expuesto al introducir agrupación por entrega en las
-  // reglas D/A/E/J). Para las reglas que no setean `dette`, el valor por
-  // defecto es '' — el comportamiento de dedup para ellas no cambia.
+  // distintas entregas NO se colapsen en una sola. Para las reglas que
+  // no setean `dette` (P/Q/etc.), el valor por defecto es '' — su
+  // comportamiento de dedup no cambia.
   const seen = new Set();
   const issues = [];
   for (const issue of raw) {
