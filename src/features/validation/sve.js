@@ -1,43 +1,45 @@
 /**
  * features/validation/sve.js
- * SMART VALIDATION ENGINE v1.2 — audita State.merged tras cada merge
+ * SMART VALIDATION ENGINE v1.1 — audita State.merged tras cada merge
  * y produce un reporte de incidencias (críticas, advertencias, informativas)
  * más un score de calidad 0-100.
  *
- * CAMBIO (integración Reporte WTMS — 4ª fuente obligatoria, jul-2026):
- *   Dos reglas nuevas, P y Q:
- *     P — 'no_wtms' (ADVERTENCIA): el ID'S MASTER de una ruta no
- *         encontró coincidencia en el Reporte WTMS. No bloquea
- *         exportación — el usuario ya ve 'N/A' en ID RETORNO y puede
- *         decidir si eso es aceptable o requiere corrección manual.
- *     Q — 'wtms_ambiguous' (CRÍTICA): el WTMS devolvió un valor doble
- *         separado por coma (ej. "1234,4321") para ID RETORNO o
- *         CARTA PORTE — bloquea exportación hasta que el usuario elija
- *         manualmente cuál valor es correcto (ver EDITABLE_FIELDS en
- *         editing/edit-system.js, campos '_ID_RETORNO'/'_CARTA_PORTE').
- *   Ambas se alimentan de flags que arma processors/merge.js
- *   (_wtmsMatched / _wtmsAmbiguous) — sve.js no vuelve a tocar
- *   State.wtmsData directamente, mismo principio que ya seguían las
- *   reglas L/M con los catálogos maestros (leen _enrichMisses, no
- *   los índices crudos).
- *
  * CAMBIO DE INTERFAZ respecto al código original (decisión de Fase 6
  * de la modularización, "Opción B" — inversión de control):
- *   runSVE(rows) NO toca UI. Devuelve:
+ *   Antes: runSVE(rows) llamaba a UI.resetSVE() / UI.renderSVE(...) directamente.
+ *   Ahora: runSVE(rows) NO toca UI. Devuelve:
  *     - null                                            si no hay rows
  *     - { issues, quality, nCrit, nWarn, nInfo, nPass }  si hay rows
- *   El caller (Events.triggerMerge) decide qué hacer con
- *   UI.resetSVE()/UI.renderSVE() según el resultado.
+ *   El caller (Events.triggerMerge, todavía en index.html) es responsable
+ *   de decidir qué hacer con UI.resetSVE() / UI.renderSVE() según el
+ *   resultado. Esto elimina la dependencia sve.js → ui.js que habría sido
+ *   necesaria de otro modo, y es el mismo cambio que se habría requerido
+ *   en la Fase 9 de todas formas.
+ *
+ * Las 11 reglas (A-K) y el cálculo de quality score son IDÉNTICOS al
+ * original — ningún cambio de lógica, solo el contrato de salida.
+ *
+ * FIX (algoritmo de match — jul-2026): se agrega la regla P
+ * ('pdf_orphan'), que reporta entregas del PDF que no encontraron
+ * contraparte por Ruta+Destino en Ruteo Nuevo tras eliminarse el
+ * fallback posicional en processors/merge.js. Ver State.pdfOrphans
+ * (core/state.js) para el detalle de qué se considera "huérfano" y
+ * por qué. Es INFORMATIVA y no lleva rowIds — no existe fila en
+ * State.merged asociada a una entrega de PDF que nunca se consumió,
+ * así que no hay nada que "Localizar y corregir" en la tabla (ver
+ * ui.js → renderSVE, que ya omite ese botón para severidad INFO).
  *
  * Nota de acoplamiento preexistente (regla K): esta función lee
  * document.getElementById('bdgXLS') directamente para comparar el
- * conteo mostrado en pantalla contra State.merged. Se preserva tal
- * cual del original.
+ * conteo mostrado en pantalla contra State.merged. Es un acceso a DOM
+ * dentro de una función de validación — no ideal, pero se preserva tal
+ * cual del original para no alterar comportamiento en esta fase.
  *
  * Dependencias:
- *   - State (core/state.js) — lee rows vía parámetro, escribe
- *     State.sveHasCritical / sveHasWarnings / sveLastQuality
- *   - getMapped (core/constants.js)
+ *   - State (core/state.js) — lee rows ya vía parámetro, pero escribe
+ *     State.sveHasCritical / sveHasWarnings / sveLastQuality; también
+ *     lee State.pdfOrphans (regla P) y State.catalogDuplicates (regla N)
+ *   - getMapped (core/constants.js) — resuelve valores de columna
  */
 import { State } from '../../core/state.js';
 import { getMapped } from '../../core/constants.js';
@@ -50,7 +52,7 @@ export const SVE_ICONS = {
   'dup_march':'🔖','dup_tarimas':'📦','missing_ruta':'🔴','missing':'🟠',
   'no_march':'🔴','zero_tar':'📐','high_tar':'📐','no_pdf':'🟡',
   'no_fac':'ℹ️','bad_march':'ℹ️','integrity':'🔗','no_ventana':'📇','no_pool':'🚚','cat_dup':'🗂️','time_anomaly':'⏱️',
-  'no_wtms':'🚛','wtms_ambiguous':'⚠️'
+  'pdf_orphan':'📦❓'
 };
 
 /**
@@ -61,12 +63,16 @@ export const SVE_ICONS = {
  *   issues: Array<object>,
  *   quality: number,
  *   nCrit: number, nWarn: number, nInfo: number, nPass: number
- * }} — null si rows está vacío
+ * }} — null si rows está vacío (el caller debe llamar UI.resetSVE() en ese caso)
  */
 export function runSVE(rows) {
   if (!rows || !rows.length) return null;
 
   const raw = [];
+  // rawAdd signature: (sev, rule, ruta, field, desc, action, extra, rowIds?)
+  // rowIds: optional array of _rowId values identifying the exact merged row(s)
+  // this issue refers to. When provided, EditSystem uses them for precise lookup
+  // instead of falling back to RUTA string matching.
   const rawAdd = (sev, rule, ruta, field, desc, action, extra, rowIds) =>
     raw.push({ sev, rule,
                ruta:   String(ruta||'').trim(),
@@ -78,10 +84,12 @@ export function runSVE(rows) {
 
   const matched = rows.filter(r => r._matched);
 
+  // Helper: collect _rowId values for all rows matching a given RUTA
   const rowIdsByRuta = ruta =>
     rows.filter(r => String(r['RUTA']||'').trim() === ruta).map(r => r._rowId).filter(Boolean);
 
   // A: Marchamos duplicados entre rutas distintas
+  // marchMap stores: marc → { ruta, rowId }  — keeps the first row that claimed each marchamo
   const marchMap = new Map();
   rows.forEach(r => {
     const ruta = String(getMapped(r,'RUTA')||'').trim();
@@ -91,6 +99,8 @@ export function runSVE(rows) {
       if (marchMap.has(marc)) {
         const prev = marchMap.get(marc);
         if (prev.ruta !== ruta) {
+          // Two distinct rutas claim the same marchamo — expose both rowIds so
+          // the user can pick which one to correct from the route selector.
           rawAdd(SVE_CRIT,'dup_march', ruta, `MARCHAMO ${m}`,
             `Marchamo ${marc} asignado a ruta ${ruta} y también a ruta ${prev.ruta}.`,
             'Confirma con la documentación cuál ruta lleva este marchamo.',
@@ -134,6 +144,7 @@ export function runSVE(rows) {
     noRutaCnt > 1 ? `×${noRutaCnt}` : '');
 
   // D: Campos obligatorios vacíos — consolidado por ruta
+  // Track per-row which fields are missing so we can store the exact rowId
   const missingByRuta = new Map();
   const REQ = [
     { field:'OPERADOR', label:'Operador', sev:SVE_CRIT },
@@ -342,39 +353,23 @@ export function runSVE(rows) {
       '', [...rowIds]);
   });
 
-  // P: WTMS — ID'S MASTER no encontrado (consolidado por ruta) — NUEVO
-  const noWtmsByRuta = new Map();
-  matched.forEach(r => {
-    if (r._wtmsMatched === false) {
-      const ruta = String(getMapped(r,'RUTA')||'').trim();
-      if (!noWtmsByRuta.has(ruta)) noWtmsByRuta.set(ruta, { cnt: 0, rowIds: new Set() });
-      const e = noWtmsByRuta.get(ruta);
-      e.cnt++;
-      if (r._rowId) e.rowIds.add(r._rowId);
-    }
+  // P: Entregas del PDF sin contraparte en Ruteo Nuevo — nuevo
+  // algoritmo de match por Ruta+Destino (jul-2026, ver
+  // processors/merge.js y State.pdfOrphans). Típicamente indica una
+  // tienda que fue cancelada después de generarse el PDF pero sigue
+  // apareciendo ahí, o un Destino del PDF que no coincidió con ningún
+  // DETTE de esa misma ruta en Ruteo Nuevo. Es INFORMATIVA y sin
+  // rowIds a propósito: no existe ninguna fila de State.merged para
+  // esta entrega (nunca se creó), así que no hay nada que "localizar"
+  // en la tabla — el botón "Localizar y corregir" ya se omite para
+  // SVE_INFO (ver ui.js → renderSVE).
+  (State.pdfOrphans || []).forEach(o => {
+    rawAdd(SVE_INFO,'pdf_orphan', o.ruta, 'DESTINO',
+      `Ruta ${o.ruta}: el PDF trae una entrega al destino ${o.destino}` +
+      `${o.factura ? ` (factura ${o.factura})` : ''} que no se encontró en Ruteo Nuevo.`,
+      'Verifica si esta tienda fue cancelada o si el DETTE en Ruteo Nuevo no coincide con el Destino del PDF.',
+      o.factura || '');
   });
-  noWtmsByRuta.forEach(({ cnt, rowIds }, ruta) => rawAdd(SVE_WARN,'no_wtms', ruta, 'ID RETORNO',
-    `Ruta ${ruta}: ID'S MASTER no encontrado en el Reporte WTMS — ID RETORNO marcado como N/A.`,
-    "Verifica el ID'S MASTER en Status de despacho o confirma en el WTMS.",
-    cnt>1?`×${cnt}`:'',
-    [...rowIds]));
-
-  // Q: WTMS — valor doble ambiguo en ID RETORNO/CARTA PORTE — NUEVO
-  const ambigByRuta = new Map();
-  matched.forEach(r => {
-    if (r._wtmsAmbiguous) {
-      const ruta = String(getMapped(r,'RUTA')||'').trim();
-      if (!ambigByRuta.has(ruta)) ambigByRuta.set(ruta, { cnt: 0, rowIds: new Set() });
-      const e = ambigByRuta.get(ruta);
-      e.cnt++;
-      if (r._rowId) e.rowIds.add(r._rowId);
-    }
-  });
-  ambigByRuta.forEach(({ cnt, rowIds }, ruta) => rawAdd(SVE_CRIT,'wtms_ambiguous', ruta, 'ID RETORNO',
-    `Ruta ${ruta}: el WTMS devolvió múltiples valores para ID RETORNO/CARTA PORTE — requiere selección manual.`,
-    'Abre el registro y elige cuál de los dos valores es el correcto.',
-    cnt>1?`×${cnt}`:'',
-    [...rowIds]));
 
   // K: Integridad UI vs memoria
   const screenCnt = parseInt(document.getElementById('bdgXLS').textContent || '0', 10);
@@ -385,6 +380,7 @@ export function runSVE(rows) {
       `UI:${screenCnt}/MEM:${rows.length}`);
 
   // ── DEDUP ENGINE ──
+  // Key: rule + ruta + field — prevents duplicates from any code path
   const seen = new Set();
   const issues = [];
   for (const issue of raw) {
