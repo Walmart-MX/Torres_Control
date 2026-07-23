@@ -38,6 +38,14 @@
  * de runMerge) y se reportan como incidencia informativa en el SVE
  * (features/validation/sve.js, regla 'pdf_orphan').
  *
+ * FIX (cruce con Reporte WTMS — jul-2026): runMerge() nunca calculaba
+ * _ID_RETORNO/_CARTA_PORTE/_wtmsMatched/_wtmsAmbiguous pese a que
+ * sve.js (reglas P/Q) y editing/edit-system.js ya asumían esos campos
+ * como parte del contrato de State.merged. Se agrega el bloque de
+ * cruce Status.ID'S MASTER == WTMS.ID de la carga inmediatamente
+ * después del bloque de despRow — ver comentario específico en el
+ * loop principal para el detalle del contrato.
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - FactCache (features/fact-cache.js)
@@ -284,6 +292,50 @@ export function runMerge() {
       nr['_CASETA'] = '';
       nr['_WTMS'] = '';
       nr['_ID_IDA'] = '';
+
+    }
+
+    // ============================================================
+    // NUEVO — Cruce con Reporte WTMS (4ª fuente obligatoria, jul-2026)
+    // Join key: Status.ID'S MASTER (despRow.idIda) == WTMS.ID de la
+    // carga (State.wtmsData, indexado en processors/wtms.js).
+    //
+    // ID RETORNO / CARTA PORTE SIEMPRE se sobreescriben desde el WTMS
+    // — nunca desde el Excel — por eso este bloque va DESPUÉS del
+    // bloque de despRow y no se mezcla con él, aunque ambos dependan
+    // del mismo despRow para obtener el ID'S MASTER.
+    //
+    // Contrato con sve.js (reglas P/Q) y editing/edit-system.js
+    // (EDITABLE_FIELDS '_ID_RETORNO'/'_CARTA_PORTE'):
+    //   _wtmsMatched   — false si el ID'S MASTER no encontró
+    //                    coincidencia en el WTMS (regla P, advertencia,
+    //                    no bloquea — ID RETORNO queda 'N/A').
+    //   _wtmsAmbiguous — true si el WTMS trae doble dato separado por
+    //                    coma (ej. "1234,4321") en Siguiente Carga o
+    //                    Carte Porte (regla Q, crítica, bloquea hasta
+    //                    resolución manual). Mismo criterio de detección
+    //                    que usa EditSystem.saveAndRevalidate() al
+    //                    revalidar tras una corrección manual.
+    // ============================================================
+    const idIdaKey = despRow ? String(despRow.idIda || '').trim() : '';
+    const wtmsRow  = idIdaKey ? (State.wtmsData.get(idIdaKey) || null) : null;
+
+    if (wtmsRow) {
+
+      const siguienteCarga = String(wtmsRow.siguienteCarga || '').trim();
+      const cartePorteVal  = String(wtmsRow.carteporte || '').trim();
+
+      nr['_ID_RETORNO']    = siguienteCarga || 'N/A';
+      nr['_CARTA_PORTE']   = cartePorteVal;
+      nr['_wtmsMatched']   = true;
+      nr['_wtmsAmbiguous'] = siguienteCarga.includes(',') || cartePorteVal.includes(',');
+
+    } else {
+
+      nr['_ID_RETORNO']    = 'N/A';
+      nr['_CARTA_PORTE']   = '';
+      nr['_wtmsMatched']   = false;
+      nr['_wtmsAmbiguous'] = false;
 
     }
 
