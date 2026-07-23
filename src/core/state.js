@@ -16,6 +16,16 @@ export const State = {
   xlsData:  null,        // Array of rows from RUTEO NUEVO
   factData: new Map(),   // invoice# → { gls, horaFact }
   despData: new Map(),   // RUTA → { hrDesp, caseta, wtms, idIda }
+  // wtmsData — 4ª fuente obligatoria (Reporte WTMS, jul-2026). Índice
+  // temporal de la corrida actual, keyed por "ID de la carga" — cruza
+  // en merge.js contra Status.ID'S MASTER. NO se persiste en Supabase
+  // (a diferencia de operators/fact_cache/catálogos maestros) — se
+  // reinicia junto con pdfData/xlsData/despData en cada UI.resetAll().
+  // Events.checkSources() lee wtmsData.size para el gate de fuentes
+  // obligatorias; sin esta inicialización, checkSources() truena al
+  // primer archivo cargado con "Cannot read properties of undefined
+  // (reading 'size')".
+  wtmsData: new Map(),
   merged:   [],          // Final merged rows (output of tryMerge)
   catalog:  new Map(),   // normalizedName → licencia
   // Catálogos maestros (Camino C) — reemplazan RUTEO NUEVO manual de
@@ -27,16 +37,6 @@ export const State = {
   catalogMeta:  {},   // catalogId → { row_count, updated_at, updated_by }
   catalogIndices: null,   // Map — reconstruido en cada runMerge()
   catalogDuplicates: [],  // llaves duplicadas detectadas — leído por sve.js
-
-  // Entregas del PDF que no encontraron contraparte por Ruta+Destino
-  // (ni por Ruta+Factura) durante el último runMerge() — ver
-  // processors/merge.js, algoritmo de match jul-2026. Cada entrada:
-  // { ruta, destino, factura }. Alimenta la regla SVE 'pdf_orphan'
-  // (features/validation/sve.js). Se recalcula por completo en cada
-  // corrida de runMerge() — no se persiste ni se guarda en el
-  // historial de Supabase (dispatch-history.js), es puramente un
-  // diagnóstico de la corrida actual en memoria.
-  pdfOrphans: [],
 
   // Session
   user: localStorage.getItem('sd_user') || '',
