@@ -6,108 +6,74 @@
  * Ningún método de UI debe tomar decisiones de negocio — eso es
  * responsabilidad de Events, EditSystem o los processors.
  *
- * CAMBIO — Fase 1 del rediseño "Centro de Operaciones" (PulseBar):
- *   updateHealthRail() y updateStats() dejaban de tener sentido tal
- *   cual estaban — pintaban a IDs (hPDF/hCov/hQual/hStatus,
- *   stMatch/stNoMatch/stLic/stDesp) que ya no existen en index.html,
- *   reemplazados por la PulseBar del topbar (ver ui/pulse-bar.js).
- *   Se CONSERVAN AMBOS NOMBRES PÚBLICOS sin cambios — todos los
- *   callers existentes (core/app.js, events.js, editing/edit-system.js,
- *   y la propia ui.js en resetAll/renderSVE) siguen llamándolos
- *   exactamente igual. Internamente:
- *     - updateHealthRail() ahora arma los datos agregados del día y
- *       delega el pintado a PulseBar.render().
- *     - updateStats() perdió los `set()` a stMatch/stNoMatch/stLic/
- *       stDesp (elementos eliminados) pero conserva intacto todo lo
- *       demás: el badge de cache-hits, los badges bdgPDF/bdgXLS/
- *       bdgMatch/bdgNoMatch/bdgDesp (siguen en la barra de acciones,
- *       fuera del alcance de esta fase) y previewDesc.
- *   renderSVE() perdió el bloque que pintaba shield/ring/subtitle
- *   (elementos eliminados de index.html) pero conserva sin cambios:
- *   los contadores sveCrit/sveWarn/sveInfo/svePass (ahora ocultos vía
- *   CSS `.sve-counters-hidden`, NO eliminados del DOM — events.js
- *   `handleForceExport()` y warn-modal.js `show()`/`exportAnyway()`
- *   siguen leyendo su textContent directamente y no se tocan en esta
- *   fase), el render de grupos de incidencias (sveAlerts) y la lógica
- *   completa del export gate. Cero cambio de comportamiento funcional.
+ * ═══════════════════════════════════════════════════════════════════
+ * CAMBIO — Rediseño Preparación / Mesa de Trabajo (mockup, jul-2026)
+ * ═══════════════════════════════════════════════════════════════════
+ * Este rediseño reemplaza dos superficies del HTML anterior:
  *
- * CAMBIO — Fase 3 del rediseño (SVE como semáforo colapsable):
- *   renderSVE() ahora también pinta una barra de resumen de una línea
- *   (sveSummaryToggle/Ico/Text) y decide si el cuerpo del panel
- *   (sveBody: grupos de incidencias + gate) queda expandido o
- *   colapsado. Regla: un crítico siempre fuerza la expansión; si no
- *   hay críticos, se conserva el estado de expansión que el usuario ya
- *   tenía (renderSVE() se re-ejecuta en cada guardado del drawer de
- *   edición, y no debe cerrarle el panel en plena revisión). resetSVE()
- *   colapsa el panel y limpia el resumen. El toggle de clic vive en
- *   core/app.js. Cero cambio en sve.js — sigue devolviendo datos puros.
+ *  1) La barra de pipeline (3-4 pasos, #pipeStep1..4) + los badges
+ *     sueltos de cada fuente (#pdfBadge/#xlsBadge/#bdgDesp) → AHORA
+ *     son 4 "up-card" en la pantalla Preparación (#dropPDF/#dropXLS/
+ *     #dropWTMS/#dropDESP), cada una actualizada por UN solo método
+ *     nuevo: setSourceStatus(key, done, statusText, subText). Los
+ *     métodos anteriores (setPipeStep, setBadge, setDZDone, resetDZ)
+ *     SE ELIMINAN — sus IDs de destino no existen en el nuevo HTML, y
+ *     dejarlos habría sido código muerto.
  *
- * CAMBIO — Fase 5 del rediseño (ModeSurface / operationalMode):
- *   updateHealthRail() ahora también lee State.operationalMode (getter
- *   puro en core/state.js) y se lo pasa a PulseBar.render() para que
- *   distinga 'arranque' de 'triage' en su mensaje idle. Se agrega
- *   applyMode() — un método de una sola línea que refleja el modo
- *   como atributo data-mode en <body>; todo el comportamiento visual
- *   por modo (colapso de las tarjetas de ingesta, énfasis del botón de
- *   exportar en modo 'listo') vive en CSS puro en index.html, no aquí.
- *   Se llama desde los mismos puntos donde ya se recalculaba el estado
- *   global — ver comentario del propio método para la lista completa.
+ *  2) La tabla de vista previa (#tbody/#thead, columnas PREVIEW_COLS
+ *     con codificación de color por fuente) → AHORA es la tabla de la
+ *     Mesa de Trabajo (#mainTbody), fiel al mockup: columnas
+ *     WORKTABLE_COLS (core/constants.js) + una columna de Estado
+ *     (pill Completa/Advertencia/Crítica/Corregida, derivada de
+ *     State.sveIssues + State.edits, no de getMapped) + búsqueda y
+ *     chips de filtro. renderTable() sigue siendo el nombre público
+ *     (mismo contrato, llamado desde events.js/edit-system.js) pero
+ *     su implementación interna cambia por completo.
  *
- * CAMBIO (contexto de localización Ruta+Entrega — jul-2026):
- *   renderSVE() ahora también muestra una etiqueta "Entrega {DETTE}"
- *   en cada tarjeta de incidencia cuando el issue trae `dette` (ver
- *   features/validation/sve.js) — mismo objetivo que route-picker.js:
- *   que el usuario ubique exactamente qué línea de la ruta debe
- *   corregir sin buscar manualmente. Además, el botón "Localizar y
- *   corregir" ahora también se muestra para las reglas informativas
- *   `no_cita` y `bad_march` — son informativas porque no bloquean la
- *   exportación, pero SÍ son accionables (el usuario puede querer
- *   capturar la cita o corregir el marchamo), a diferencia de otras
- *   reglas informativas como `no_fac`/`time_anomaly` que no lo son.
+ *     _previewTheadHtml()/_renderRowsBody() (el renderer ANTERIOR)
+ *     NO se eliminan — siguen siendo usados exclusivamente por
+ *     renderHistoryPreview() (modal de Historial), que conserva su
+ *     diseño de tabla anterior sin cambios en esta fase.
+ *
+ * Se retira además el uso de PulseBar en updateHealthRail() — su rol
+ * ("salud del día de un vistazo" en el topbar) lo cubrirá el Quality
+ * Ring de la futura pantalla "Calidad" del mockup, todavía no
+ * construida. updateHealthRail() se conserva como método (lo siguen
+ * llamando ~6 call-sites) pero por ahora es un stub documentado.
  *
  * Dependencias:
- *   - State (core/state.js) — lee estado para calcular lo que muestra,
- *     y en algunos métodos lo muta (resetAll, resetSVE, setUser)
- *   - escH (utils/dom.js) — escape HTML para inserción segura en innerHTML
- *   - fmtDate (utils/format.js) — formatea fechas en la tabla preview
- *   - getMapped, COLS_PDF, COLS_DESP, COLS_FILL,
- *     PREVIEW_COLS (core/constants.js) — para renderizar la tabla
- *   - SVE_CRIT, SVE_WARN, SVE_INFO, SVE_ICONS
- *     (features/validation/sve.js) — para renderizar el panel SVE
- *   - PulseBar (ui/pulse-bar.js) — pinta el resumen de salud del día
- *     en el topbar (Fase 1 del rediseño)
- *   - Events (events/events.js) — resuelto en tiempo de ejecución vía
- *     _setEvents(), ver nota abajo.
- *
- * FIX — dependencia circular UI ↔ Events:
- *   renderSVE() necesita llamar Events.handleForceExport() cuando el
- *   usuario confirma exportar con errores críticos, y el botón "✕" del
- *   catálogo (renderCatalog → delegación en app.js) necesita
- *   Events.delOp(). En el monolito original esto funcionaba porque
- *   Events vivía en el scope global del IIFE. Al modularizar, ui.js
- *   nunca importó Events — quedó roto silenciosamente (los clics no
- *   hacían nada, sin lanzar error visible al usuario).
- *
- *   events.js ya importa UI directamente a nivel superior, así que un
- *   `import { Events } from '../events/events.js'` estático en ui.js
- *   crearía un ciclo bidireccional real. Se resuelve con el mismo
- *   patrón de setter diferido ya usado entre EditSystem y RoutePicker:
- *   app.js llama _setEvents(Events) una vez, al arrancar, después de
- *   que ambos módulos ya terminaron de evaluarse.
+ *   - State (core/state.js)
+ *   - escH (utils/dom.js)
+ *   - fmtDate (utils/format.js) — usado por _renderRowsBody() (historial)
+ *   - getMapped, COLS_PDF, COLS_DESP, COLS_FILL, PREVIEW_COLS,
+ *     WORKTABLE_COLS (core/constants.js)
+ *   - SVE_CRIT, SVE_WARN, SVE_INFO, SVE_ICONS (features/validation/sve.js)
+ *   - FactCache (features/fact-cache.js)
+ *   - Events (events/events.js) — resuelto en runtime vía _setEvents()
  */
 import { State } from '../core/state.js';
 import { escH } from '../utils/dom.js';
 import { fmtDate } from '../utils/format.js';
 import {
-  getMapped, COLS_PDF, COLS_DESP, COLS_FILL, PREVIEW_COLS
+  getMapped, COLS_PDF, COLS_DESP, COLS_FILL, PREVIEW_COLS, WORKTABLE_COLS
 } from '../core/constants.js';
 import { SVE_CRIT, SVE_WARN, SVE_INFO, SVE_ICONS } from '../features/validation/sve.js';
 import { FactCache } from '../features/fact-cache.js';
-import { PulseBar } from './pulse-bar.js';
 
 let Events;
 /** Resuelve la dependencia circular UI ↔ Events — llamado una vez desde core/app.js */
 export function _setEvents(ev) { Events = ev; }
+
+// ── Estado puramente de presentación de la Mesa de Trabajo ──
+// Deliberadamente NO vive en core/state.js: es UI state (qué filtro/
+// búsqueda tiene aplicado el usuario ahora mismo), no dato de negocio.
+// Se resetea junto con el resto en UI.resetAll().
+let _tableFilter = 'all';
+let _tableSearch = '';
+
+// Mapea la clave de fuente ('pdf'|'xls'|'wtms'|'desp') al sufijo de
+// IDs usado en el HTML de Preparación (#dropPDF/#pdfSub/#pdfStatus, etc).
+const SOURCE_ID = { pdf: 'PDF', xls: 'XLS', wtms: 'WTMS', desp: 'DESP' };
 
 export const UI = {
 
@@ -117,29 +83,35 @@ export const UI = {
     localStorage.setItem('sd_theme', t);
     State.theme = t;
     const btn = document.getElementById('btnTheme');
-    if (btn) btn.textContent = t === 'dark' ? '☀️' : '🌙';
-    document.getElementById('themeOptLight').classList.toggle('selected', t === 'light');
-    document.getElementById('themeOptDark').classList.toggle('selected', t === 'dark');
+    if (btn) { btn.textContent = t === 'dark' ? '☀️' : '🌙'; btn.classList.toggle('on', t === 'dark'); }
+    const optLight = document.getElementById('themeOptLight');
+    const optDark  = document.getElementById('themeOptDark');
+    if (optLight) optLight.classList.toggle('selected', t === 'light');
+    if (optDark)  optDark.classList.toggle('selected', t === 'dark');
   },
-  selectTheme(t) { UI.applyTheme(t); },  // called by data-theme delegation in init
+  selectTheme(t) { UI.applyTheme(t); },
 
   // ── User ──
   setUser(name) {
     State.user = name || '';
     localStorage.setItem('sd_user', State.user);
-    document.getElementById('tbUserName').textContent = State.user || '—';
+    const nameEl = document.getElementById('tbUserName');
+    if (nameEl) nameEl.textContent = State.user || '—';
+    const avatarEl = document.getElementById('tbAvatar');
+    if (avatarEl) {
+      const initials = String(State.user || '')
+        .trim().split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
+      avatarEl.textContent = initials || '—';
+    }
   },
 
-  // ── Modal ──
-  // mode: 'setup' (first run, no skip) | 'settings' (user-triggered, has cancel)
+  // ── Modal (nombre + tema) ──
   openModal(mode) {
     mode = mode || 'settings';
     State._modalMode = mode;
     document.getElementById('nameInput').value = State.user;
-    // Sync theme opts to current theme
     document.getElementById('themeOptLight').classList.toggle('selected', State.theme === 'light');
     document.getElementById('themeOptDark').classList.toggle('selected', State.theme === 'dark');
-    // Update copy based on mode
     if (mode === 'setup') {
       document.getElementById('modalTitle').textContent = '¡Bienvenido!';
       document.getElementById('modalSub').textContent = 'Configura tu sesión una sola vez. Esta información se guardará automáticamente.';
@@ -156,86 +128,65 @@ export const UI = {
     document.getElementById('nameModal').classList.add('hidden');
     if (name !== null) {
       UI.setUser(name);
-      // Mark as configured so modal never shows again on load
       localStorage.setItem('sd_configured', '1');
     }
   },
 
-  // ── Pipeline ──
-  setPipeStep(n, state, stat) {
-    const step = document.getElementById('pipeStep' + n);
-    const num  = document.getElementById('pipeNum' + n);
-    const stEl = document.getElementById('pipeStat' + n);
-    step.className = 'pipe-step';
-    if (state === 'done')      { step.classList.add('done');     num.textContent = '✓'; }
-    else if (state === 'active')   { step.classList.add('active');   }
-    else if (state === 'optional') { step.classList.add('optional'); }
-    if (stat) stEl.textContent = stat;
+  // ═══════════════════════════════════════════════════════════════
+  // ── PREPARACIÓN — tarjetas de fuente (NUEVO, reemplaza pipeline) ──
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Actualiza una tarjeta de fuente en la pantalla Preparación.
+   * @param {string} key — 'pdf'|'xls'|'wtms'|'desp'
+   * @param {boolean} done — true = fuente cargada (tarjeta en verde)
+   * @param {string} statusText — texto corto (ej. '✓ Completo')
+   * @param {string} subText — detalle (ej. '42 archivos · 238 entregas')
+   */
+  setSourceStatus(key, done, statusText, subText) {
+    const suffix = SOURCE_ID[key];
+    if (!suffix) return;
+    const card   = document.getElementById('drop' + suffix);
+    const status = document.getElementById(key + 'Status');
+    const sub    = document.getElementById(key + 'Sub');
+    if (card)   card.classList.toggle('done', !!done);
+    if (status) status.textContent = statusText;
+    if (sub)    sub.textContent    = subText;
   },
 
-  // ── Pulse Bar (topbar) — Fase 1 del rediseño ──
-  // Nombre público conservado (updateHealthRail) por compatibilidad con
-  // todos los callers existentes — ver nota de cabecera del módulo.
-  // Internamente arma los datos agregados del día y delega el pintado
-  // a PulseBar.render(). nCrit/nWarn se leen de los contadores ocultos
-  // del SVE (sveCrit/sveWarn), el mismo patrón que ya usa
-  // events.js → handleForceExport() para leer esos valores.
-  // CAMBIO Fase 5: también pasa State.operationalMode, para que la
-  // PulseBar distinga 'arranque' de 'triage' en su mensaje idle.
-  updateHealthRail() {
-    const total   = State.merged.length || 0;
-    const matched = State.merged.filter(r => r._matched).length;
-    const nCrit   = parseInt(document.getElementById('sveCrit')?.textContent || '0', 10);
-    const nWarn   = parseInt(document.getElementById('sveWarn')?.textContent || '0', 10);
-    PulseBar.render({ total, matched, quality: State.sveLastQuality, nCrit, nWarn, mode: State.operationalMode });
+  /** Agrega una nota adicional (ej. aviso de caché histórico) al sub-texto de una fuente, sin pisar el texto principal. */
+  appendSourceNote(key, note) {
+    const sub = document.getElementById(key + 'Sub');
+    if (!sub || !note) return;
+    sub.innerHTML += ` · <span style="color:var(--amber-deep)">${note}</span>`;
   },
 
-  // ── ModeSurface — Fase 5 del rediseño "Centro de Operaciones" ──
-  // Aplica State.operationalMode como atributo data-mode en <body>.
-  // Deliberadamente NO contiene lógica de negocio ni decide nada por sí
-  // mismo — solo refleja el getter puro de State en el DOM. Todo el
-  // comportamiento visual por modo vive en CSS (selectores
-  // body[data-mode="..."] en index.html), siguiendo el mismo principio
-  // que ya usamos en el resto de la app: UI pinta, no decide.
-  //
-  // Se llama junto a updateHealthRail() en los mismos puntos donde el
-  // estado global ya se recalcula: triggerMerge() y
-  // saveAndRevalidate() (vía events.js/edit-system.js),
-  // refreshTodayBanner() (vía events.js), resetAll() (abajo) y el
-  // bootstrap de core/app.js.
-  applyMode() {
-    document.body.dataset.mode = State.operationalMode;
-  },
+  /**
+   * Colapsa/expande la grilla de Preparación según falten fuentes o no.
+   * @param {string[]} missing — salida de Events.checkSources().missing
+   */
+  updatePrepView(missing) {
+    const grid      = document.getElementById('prepGrid');
+    const collapsed = document.getElementById('prepCollapsed');
+    if (!grid || !collapsed) return;
+    const allDone = missing.length === 0;
+    grid.style.display      = allDone ? 'none' : '';
+    collapsed.style.display = allDone ? '' : 'none';
+    if (!allDone) return;
 
-  // ── Stats strip ──
-  // CAMBIO Fase 1: se retiraron los `set()` a stMatch/stNoMatch/stLic/
-  // stDesp — esos elementos ya no existen en index.html (la PulseBar
-  // resume esta información arriba). Todo lo demás de esta función
-  // (badge de cache-hits, badges de la barra de acciones, previewDesc)
-  // se conserva sin cambios.
-  updateStats() {
-    // Show cache-hit summary if any rows used historical data
-    const cacheHits = State.merged.filter(r => r._factSource === 'cache').length;
-    if (cacheHits > 0) {
-      const fcStats = FactCache.stats();
-      const badge   = document.getElementById('xlsBadge');
-      if (badge) badge.innerHTML += ` · <span style="color:var(--amber-dk)">⟳ ${cacheHits} fact. históricas (${fcStats.dates[0]||''})</span>`;
-    }
-
-    const total = State.merged.length;
-    const match = State.matchCount;
-    const noM   = total - match;
-    const desp  = State.despCount;
-
-    // Badges
-    const bdg = (id, v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
-    bdg('bdgPDF',     new Set([...State.pdfData.keys()].filter(k=>!k.includes('|D|'))).size || '—');
-    bdg('bdgXLS',     State.xlsData ? State.xlsData.length : '—');
-    bdg('bdgMatch',   match || '—');
-    bdg('bdgNoMatch', noM);
-    bdg('bdgDesp',    desp);
-
-    document.getElementById('previewDesc').textContent = `${total} rutas · ${match} con PDF · ${State.licCount} con licencia`;
+    const chipsEl = document.getElementById('prepChips');
+    if (!chipsEl) return;
+    const pdfCount  = new Set([...State.pdfData.keys()].filter(k => !k.includes('|D|'))).size;
+    const xlsCount  = State.xlsData ? State.xlsData.length : 0;
+    const wtmsCount = State.wtmsData.size;
+    const despCount = State.despData.size;
+    chipsEl.innerHTML = `
+      <span class="chip ok">📄 ${pdfCount} PDFs</span>
+      <span class="chip ok">📊 ${xlsCount} rutas</span>
+      <span class="chip ok">🛰️ ${wtmsCount} WTMS</span>
+      <span class="chip ok">📋 ${despCount} despacho</span>`;
+    const timeEl = document.getElementById('prepCollapsedTime');
+    if (timeEl) timeEl.textContent = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
   },
 
   // ── Progress ──
@@ -265,27 +216,7 @@ export const UI = {
     document.getElementById('errLogInner').textContent = '';
   },
 
-  // ── DZ state ──
-  setDZDone(id, label) {
-    const dz = document.getElementById(id);
-    dz.classList.add('done');
-    dz.querySelector('.dz-text').innerHTML = `<strong>✓ ${escH(label)}</strong>`;
-  },
-  resetDZ(id, ico, main, sub) {
-    const dz = document.getElementById(id);
-    dz.classList.remove('done','drag');
-    dz.querySelector('.dz-ico').textContent  = ico;
-    dz.querySelector('.dz-text').innerHTML   = main;
-    dz.querySelector('.dz-sub').textContent  = sub;
-  },
-  setBadge(id, text, cls) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.textContent  = text;
-    el.className    = 'dz-badge' + (cls ? ' ' + cls : '');
-  },
-
-  // ── Paste preview ──
+  // ── Paste preview (Status de despacho) ──
   renderPastePreview(preview, idx) {
     const cols = ['RUTA'];
     if (idx.caseta !== undefined) cols.push('SALIDA CASETA');
@@ -306,63 +237,171 @@ export const UI = {
     el.textContent = msg;
   },
 
-  // ── Table preview ──
+  // ═══════════════════════════════════════════════════════════════
+  // ── MESA DE TRABAJO — tabla principal (REESCRITO, mockup) ──
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Construye rowId → 'crit'|'warn'|'fixed'|'ok' para el status pill de
+   * cada fila. Un solo paso sobre issues + edits — barato incluso con
+   * cientos de filas/decenas de incidencias.
+   * @private
+   */
+  _buildRowStatusMap(rows) {
+    const map = new Map();
+    rows.forEach(r => map.set(r._rowId, 'ok'));
+    (State.sveIssues || []).forEach(issue => {
+      if (issue.sev !== SVE_CRIT && issue.sev !== SVE_WARN) return;
+      (issue.rowIds || []).forEach(rid => {
+        if (!map.has(rid)) return;
+        if (issue.sev === SVE_CRIT) map.set(rid, 'crit');
+        else if (map.get(rid) !== 'crit') map.set(rid, 'warn');
+      });
+    });
+    const editedIds = new Set((State.edits || []).map(e => e.rowId));
+    editedIds.forEach(rid => { if (map.get(rid) === 'ok') map.set(rid, 'fixed'); });
+    return map;
+  },
+
+  /** Aplica búsqueda de texto + filtro de estado sobre State.merged. @private */
+  _filteredRows(statusMap) {
+    let rows = State.merged;
+    if (_tableSearch) {
+      const q = _tableSearch.toLowerCase();
+      rows = rows.filter(r => {
+        const hay = [
+          getMapped(r,'RUTA'), getMapped(r,'FAC.'), r['TIENDA'],
+          getMapped(r,'OPERADOR'), getMapped(r,'TRACTOR ')
+        ].map(v => String(v||'').toLowerCase());
+        return hay.some(v => v.includes(q));
+      });
+    }
+    if (_tableFilter !== 'all') {
+      rows = rows.filter(r => statusMap.get(r._rowId) === _tableFilter);
+    }
+    return rows;
+  },
+
+  /** Cambia el filtro activo de la toolbar y re-pinta solo el cuerpo de la tabla. */
+  setTableFilter(key) {
+    _tableFilter = key;
+    UI._renderTableBody();
+  },
+  /** Cambia el texto de búsqueda de la toolbar y re-pinta solo el cuerpo de la tabla. */
+  setTableSearch(text) {
+    _tableSearch = String(text || '');
+    UI._renderTableBody();
+  },
+
+  /** Renderiza la tabla completa de Mesa de Trabajo (thead es estático en el HTML — solo se genera el tbody). */
   renderTable() {
-    document.getElementById('thead').innerHTML = UI._previewTheadHtml();
-    UI._renderRowsBody(State.merged, 'tbody');
-    document.getElementById('legendRow').classList.add('on');
+    UI._renderTableBody();
   },
 
-  /**
-   * HTML del <thead> de vista previa — compartido entre la tabla principal
-   * (renderTable) y el preview del Historial de Procesamientos
-   * (renderHistoryPreview), para no duplicar la lógica de columnas/colores.
-   * @private
-   */
-  _previewTheadHtml() {
-    return PREVIEW_COLS.map(c => {
-      const cls = c==='RUTA' ? 'h-key' : COLS_PDF.has(c) ? 'h-pdf' : COLS_DESP.has(c) ? 'h-desp' : COLS_FILL.has(c) ? 'h-fill' : '';
-      return `<th class="${cls}">${c.trim()}</th>`;
-    }).join('');
-  },
+  /** @private */
+  _renderTableBody() {
+    const tbody = document.getElementById('mainTbody');
+    if (!tbody) return;
 
-  /**
-   * HTML del <tbody> de vista previa para un array arbitrario de rows
-   * (mismo shape que State.merged) — compartido entre la tabla principal
-   * y el preview del Historial de Procesamientos.
-   * @private
-   */
-  _renderRowsBody(rows, tbodyId) {
-    const tbody = document.getElementById(tbodyId);
-    const slice = rows.slice(0, 50);
-    if (!slice.length) {
-      tbody.innerHTML = '<tr><td colspan="22"><div class="empty-state"><div class="empty-ico">📂</div><div class="empty-title">Sin datos</div></div></td></tr>';
+    const statusMap = UI._buildRowStatusMap(State.merged);
+    UI._renderFilterChips(statusMap);
+
+    const { ok } = Events ? Events.checkSources() : { ok: true };
+    if (!State.merged.length) {
+      const msg = !ok
+        ? 'Faltan fuentes por cargar — vuelve a Preparación'
+        : 'Sin datos aún';
+      tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state">
+        <div class="empty-ico">📂</div><div class="empty-title">${escH(msg)}</div>
+      </div></td></tr>`;
       return;
     }
-    tbody.innerHTML = slice.map(row => {
-      const cacheIndicator = row._factSource === 'cache'
-        ? ` title="Datos de factura del ${row._factCacheDate||'día anterior'} (concentrado histórico)"`
-        : '';
-      return '<tr' + cacheIndicator + '>' + PREVIEW_COLS.map(c => {
-        let val = getMapped(row, c);
-        if (val instanceof Date) val = fmtDate(val);
-        if (!row._matched && COLS_PDF.has(c)) return '<td><span class="no-data">—</span></td>';
-        const cls = c==='RUTA' ? 'c-key' : COLS_PDF.has(c) ? 'c-pdf' : COLS_DESP.has(c) ? 'c-desp' : COLS_FILL.has(c) ? 'c-fill' : '';
-        const isCacheField = row._factSource === 'cache' && (c === 'GLS DE EMB.' || c === 'HORA DE FACTURACION');
-        const extraStyle   = isCacheField ? ` style="color:var(--amber-dk);opacity:.8" title="Fuente: concentrado histórico ${escH(row._factCacheDate||'')}"` : '';
-        return `<td><span class="${cls}"${extraStyle}>${escH(String(val))}</span></td>`;
-      }).join('') + '</tr>';
+
+    const rows = UI._filteredRows(statusMap);
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state">
+        <div class="empty-ico">🔍</div><div class="empty-title">Sin resultados para este filtro</div>
+      </div></td></tr>`;
+      return;
+    }
+
+    const STATUS_MAP = {
+      ok:    ['status-pill ok',    'Completa'],
+      warn:  ['status-pill warn',  'Advertencia'],
+      crit:  ['status-pill crit',  'Crítica'],
+      fixed: ['status-pill fixed', 'Corregida'],
+    };
+
+    tbody.innerHTML = rows.slice(0, 500).map(row => {
+      const st = statusMap.get(row._rowId) || 'ok';
+      const [cls, label] = STATUS_MAP[st];
+      const cell = col => {
+        const v = getMapped(row, col);
+        if (!row._matched && COLS_PDF.has(col)) return '<span class="dim">—</span>';
+        const s = String(v ?? '').trim();
+        return s ? escH(s) : '<span class="dim">—</span>';
+      };
+      const ruta = String(row['RUTA'] || '').trim();
+      return `<tr>
+        <td class="rt">${escH(ruta)}</td>
+        <td>${cell('OPERADOR')}</td>
+        <td>${cell('LIC.')}</td>
+        <td>${cell('TARIMAS')}</td>
+        <td>${cell('MARCHAMO 1')}</td>
+        <td>${cell('FAC.')}</td>
+        <td>${cell('TIENDA')}</td>
+        <td>${cell('TRACTOR ')}</td>
+        <td>${cell('REMOLQUE')}</td>
+        <td><span class="${cls}">${label}</span></td>
+        <td><button class="row-edit-btn" data-edit-ruta="${escH(ruta)}" data-edit-rowid="${escH(row._rowId)}">✎</button></td>
+      </tr>`;
     }).join('');
   },
 
-  // ── SVE ──
-  // CAMBIO Fase 1: resetSVE() ahora también limpia los contadores
-  // ocultos (sveCrit/sveWarn/sveInfo/svePass) a '0' — antes esto no
-  // era necesario porque el ring/shield se repintaban siempre que
-  // renderSVE() corría, pero ahora updateHealthRail() puede leer esos
-  // contadores en cualquier momento (incluido después de un reset), así
-  // que deben quedar consistentes con "sin datos" en vez de conservar
-  // el último valor pintado.
+  /** @private */
+  _renderFilterChips(statusMap) {
+    const bar = document.getElementById('filterChips');
+    if (!bar) return;
+    const total = State.merged.length;
+    let crit = 0, warn = 0, fixed = 0;
+    statusMap.forEach(st => {
+      if (st === 'crit') crit++; else if (st === 'warn') warn++; else if (st === 'fixed') fixed++;
+    });
+    const ok = total - crit - warn - fixed;
+    const DEFS = [
+      { key: 'all',   label: 'Todas',           cnt: total },
+      { key: 'crit',  label: 'Con errores',      cnt: crit  },
+      { key: 'warn',  label: 'Datos faltantes',  cnt: warn  },
+      { key: 'fixed', label: 'Corregidas',       cnt: fixed },
+      { key: 'ok',    label: 'Completas',        cnt: ok    },
+    ];
+    bar.innerHTML = DEFS.map(d => `
+      <button class="fchip${d.key === _tableFilter ? ' active' : ''}" data-filter="${d.key}">
+        ${d.label} <span class="cnt">${d.cnt}</span>
+      </button>`).join('');
+  },
+
+  /** Sub-título de la pantalla Mesa de Trabajo — "N rutas del día operativo · actualizado HH:MM" */
+  _updateWorktableSub() {
+    const el = document.getElementById('worktableSub');
+    if (!el) return;
+    const total = State.merged.length;
+    if (!total) { el.textContent = 'Carga las 4 fuentes en Preparación para comenzar.'; return; }
+    const time = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+    el.textContent = `${total} rutas del día operativo · actualizado ${time}`;
+  },
+
+  // ── Stats (contadores internos — ya no hay badges de acción sueltos) ──
+  updateStats() {
+    const cacheHits = State.merged.filter(r => r._factSource === 'cache').length;
+    if (cacheHits > 0) {
+      const fcStats = FactCache.stats();
+      UI.appendSourceNote('xls', `⟳ ${cacheHits} fact. históricas (${fcStats.dates[0] || ''})`);
+    }
+    UI._updateWorktableSub();
+  },
+
+  // ── SVE (panel de incidencias — vive en #legacyPanel por ahora) ──
   resetSVE() {
     document.getElementById('svePanel').classList.remove('on', 'expanded');
     document.getElementById('sveSummaryToggle').className = 'sve-summary-toggle';
@@ -374,7 +413,7 @@ export const UI = {
     State.sveLastQuality = 100;
   },
 
-  /** @private — ver nota en resetSVE() */
+  /** @private */
   _resetSveCounters() {
     ['sveCrit','sveWarn','sveInfo','svePass'].forEach(id => {
       const el = document.getElementById(id);
@@ -386,17 +425,11 @@ export const UI = {
     const panel = document.getElementById('svePanel');
     panel.classList.add('on');
 
-    // Contadores — SIGUEN en el DOM aunque ya no se muestren
-    // visualmente (ver nota de cabecera del módulo): events.js y
-    // warn-modal.js leen su textContent directamente.
     document.getElementById('sveCrit').textContent = nCrit;
     document.getElementById('sveWarn').textContent = nWarn;
     document.getElementById('sveInfo').textContent = nInfo;
     document.getElementById('svePass').textContent = nPass;
 
-    // Barra de resumen (Fase 3) — única parte visible por defecto.
-    // Reemplaza al antiguo shield+ring+subtitle del header eliminado
-    // en la Fase 1, condensado en una sola línea.
     const summaryToggle = document.getElementById('sveSummaryToggle');
     const summaryIco    = document.getElementById('sveSummaryIco');
     const summaryText   = document.getElementById('sveSummaryText');
@@ -414,15 +447,9 @@ export const UI = {
       summaryText.textContent = `Solo incidencias informativas — calidad ${quality}%`;
     }
 
-    // Expandido/colapsado: un crítico siempre fuerza la expansión (no
-    // se puede ocultar un bloqueo). Si no hay críticos, se conserva el
-    // estado que el usuario ya tenía (este método se re-ejecuta en
-    // cada guardado del drawer de edición — no debe cerrarle el panel
-    // en plena revisión).
     const wasExpanded = panel.classList.contains('expanded');
     panel.classList.toggle('expanded', nCrit > 0 || wasExpanded);
 
-    // Alerts
     const container = document.getElementById('sveAlerts');
     if (!issues.length) {
       container.innerHTML = '<div class="sve-empty-msg">✅ Sin incidencias detectadas — los datos lucen bien.</div>';
@@ -466,10 +493,6 @@ export const UI = {
       }).join('');
     }
 
-    // Export gate — three states:
-    //   critical  → gate visible (red), buttons blocked
-    //   warn-only → gate visible (amber), buttons enabled, click triggers confirm modal
-    //   clean     → gate hidden, buttons enabled, direct export
     const gate   = document.getElementById('exportGate');
     const btnExp = document.getElementById('btnExport');
     const btnExp2= document.getElementById('btnExport2');
@@ -481,8 +504,6 @@ export const UI = {
         <span>Existen errores críticos. Corrígelos antes de continuar, o acepta la responsabilidad.</span>
       </div>
       <button class="btn btn-danger-outline btn-sm" id="btnForceExport">Exportar de todas formas →</button>`;
-      // Re-attach force-export listener (innerHTML replaced the node).
-      // Events se resuelve en runtime vía _setEvents() — ver nota de cabecera.
       document.getElementById('btnForceExport').addEventListener('click', () => Events.handleForceExport());
       btnExp.disabled  = true;
       btnExp2.disabled = true;
@@ -496,7 +517,6 @@ export const UI = {
       btnExp.disabled  = false;
       btnExp2.disabled = false;
     } else {
-      // Clean: no issues or info-only — gate hidden, export enabled immediately
       gate.classList.remove('on', 'warn-only', 'forced');
       btnExp.disabled  = false;
       btnExp2.disabled = false;
@@ -505,7 +525,19 @@ export const UI = {
     UI.updateHealthRail();
   },
 
-  // ── Catalog ──
+  // ── Health rail — STUB (ver nota de cabecera). Se conserva el nombre
+  // público porque events.js/edit-system.js/app.js lo siguen llamando;
+  // su función visual (PulseBar en el topbar) queda reservada para el
+  // Quality Ring de la futura pantalla "Calidad" del mockup.
+  updateHealthRail() {
+    // Intencionalmente sin efecto visual en esta fase.
+  },
+
+  applyMode() {
+    document.body.dataset.mode = State.operationalMode;
+  },
+
+  // ── Catalog (operadores) ──
   renderCatalog() {
     const tbody = document.getElementById('catTbody');
     const cnt   = State.catalog.size;
@@ -522,25 +554,14 @@ export const UI = {
           <td class="td-lic">${escH(lic)}</td>
           <td><button class="btn-del" data-del-op="${escH(op)}">✕</button></td>
         </tr>`).join('');
-    // FIX: antes era onclick="Events.delOp(...)" inline — referenciaba un
-    // global que ya no existe tras la modularización (ver nota de cabecera).
-    // Ahora expone data-del-op y la delegación vive en core/app.js.
   },
   setCatStatus(msg, cls) {
     const el = document.getElementById('catSt');
     el.className   = 'cat-status' + (cls ? ' ' + cls : '');
     el.textContent = msg;
   },
-  // ── Catálogos Maestros (Camino C, Fase 3) ──
-// ── Catálogos Maestros (Camino C, Fase 3) ──
-  // FIX: antes dependía únicamente de State.catalogMeta, que solo se
-  // escribe cuando el import pasa por el botón "Importar/Reemplazar".
-  // Si los datos se cargaron directo en Supabase (CSV/SQL manual),
-  // catalog_meta queda vacío legítimamente y el badge mentía diciendo
-  // "Nunca cargado" aunque State.catalogs[catalogId] SÍ tuviera filas.
-  // Ahora usa el conteo real de State.catalogs como fallback, así el
-  // badge siempre refleja lo que la app puede usar de verdad para
-  // enriquecer, sin importar cómo llegaron los datos ahí.
+
+  // ── Catálogos Maestros (Camino C) ──
   renderCatalogMasterStatus(catalogId) {
     const elId = catalogId === 'ventanaRecibo' ? 'mcVentanaStatus' : 'mcPoolStatus';
     const el   = document.getElementById(elId);
@@ -565,10 +586,6 @@ export const UI = {
   },
 
   // ── Cache History ──
-  // Panel de diagnóstico del FactCache — reutiliza las clases visuales
-  // de .cat-panel (contenedor) y .sve-group (acordeón por fecha) que ya
-  // existen en el CSS, para no agregar estilos nuevos salvo los 3
-  // modificadores de badge (.warn/.err/.idle) documentados en index.html.
   renderCacheHistory() {
     const summary  = FactCache.dateSummary();
     const badge    = document.getElementById('cacheHistBadge');
@@ -633,16 +650,17 @@ export const UI = {
 
   // ── Buttons ──
   // Warnings never disable export — they trigger a confirmation modal instead.
+  // btnAddPDF/btnClear (barra de acciones antigua) se retiraron de este
+  // método: la tarjeta de PDF sigue aceptando más archivos aunque ya
+  // esté "done" (el input no se deshabilita), y "Reemplazar archivos"
+  // (antes btnClear) vive ahora en la vista contraída de Preparación,
+  // siempre habilitado.
   setActionsEnabled(on) {
     document.getElementById('btnExport').disabled  = !on || State.sveHasCritical;
     document.getElementById('btnExport2').disabled = !on || State.sveHasCritical;
-    document.getElementById('btnAddPDF').disabled  = !on;
-    document.getElementById('btnClear').disabled   = !on;
   },
 
-  // ── Dispatch History (Camino B / Fase 3) ──
-
-  /** Muestra "💾 Guardando…" en los botones de export mientras se persiste la sesión. */
+  // ── Dispatch History ──
   setExportBusy(isBusy) {
     ['btnExport', 'btnExport2'].forEach(id => {
       const btn = document.getElementById(id);
@@ -653,12 +671,11 @@ export const UI = {
         btn.disabled = true;
       } else {
         if (btn.dataset.origText) btn.textContent = btn.dataset.origText;
-        btn.disabled = State.sveHasCritical; // respeta el gate crítico al reactivar
+        btn.disabled = State.sveHasCritical;
       }
     });
   },
 
-  /** Aviso "El día operativo de hoy ya fue procesado" — session=null lo oculta. */
   renderTodayBanner(session) {
     const banner = document.getElementById('todayBanner');
     if (!banner) return;
@@ -672,7 +689,6 @@ export const UI = {
       `Hora: <strong>${escH(time)}</strong> · ${session.row_count} registros`;
   },
 
-  /** Lista de sesiones para el panel "Historial de Procesamientos". */
   renderHistoryList(sessions) {
     const el = document.getElementById('historyList');
     if (!sessions.length) {
@@ -700,7 +716,47 @@ export const UI = {
     }).join('');
   },
 
-  /** Vista previa de una sesión seleccionada del historial. */
+  /**
+   * HTML del <thead> de vista previa — usado EXCLUSIVAMENTE por
+   * renderHistoryPreview() (modal de Historial). La Mesa de Trabajo
+   * ya no lo usa — su thead es HTML estático (ver index.html).
+   * @private
+   */
+  _previewTheadHtml() {
+    return PREVIEW_COLS.map(c => {
+      const cls = c==='RUTA' ? 'h-key' : COLS_PDF.has(c) ? 'h-pdf' : COLS_DESP.has(c) ? 'h-desp' : COLS_FILL.has(c) ? 'h-fill' : '';
+      return `<th class="${cls}">${c.trim()}</th>`;
+    }).join('');
+  },
+
+  /**
+   * HTML del <tbody> de vista previa — usado EXCLUSIVAMENTE por
+   * renderHistoryPreview(). Ver nota de _previewTheadHtml().
+   * @private
+   */
+  _renderRowsBody(rows, tbodyId) {
+    const tbody = document.getElementById(tbodyId);
+    const slice = rows.slice(0, 50);
+    if (!slice.length) {
+      tbody.innerHTML = '<tr><td colspan="22"><div class="empty-state"><div class="empty-ico">📂</div><div class="empty-title">Sin datos</div></div></td></tr>';
+      return;
+    }
+    tbody.innerHTML = slice.map(row => {
+      const cacheIndicator = row._factSource === 'cache'
+        ? ` title="Datos de factura del ${row._factCacheDate||'día anterior'} (concentrado histórico)"`
+        : '';
+      return '<tr' + cacheIndicator + '>' + PREVIEW_COLS.map(c => {
+        let val = getMapped(row, c);
+        if (val instanceof Date) val = fmtDate(val);
+        if (!row._matched && COLS_PDF.has(c)) return '<td><span class="no-data">—</span></td>';
+        const cls = c==='RUTA' ? 'c-key' : COLS_PDF.has(c) ? 'c-pdf' : COLS_DESP.has(c) ? 'c-desp' : COLS_FILL.has(c) ? 'c-fill' : '';
+        const isCacheField = row._factSource === 'cache' && (c === 'GLS DE EMB.' || c === 'HORA DE FACTURACION');
+        const extraStyle   = isCacheField ? ` style="color:var(--amber-dk);opacity:.8" title="Fuente: concentrado histórico ${escH(row._factCacheDate||'')}"` : '';
+        return `<td><span class="${cls}"${extraStyle}>${escH(String(val))}</span></td>`;
+      }).join('') + '</tr>';
+    }).join('');
+  },
+
   renderHistoryPreview(rows, session) {
     document.getElementById('historyPreviewMeta').innerHTML =
       `${escH(session.session_date)} · Procesado por ${escH(session.created_by || '—')} · ` +
@@ -710,43 +766,31 @@ export const UI = {
   },
 
   // ── Reset everything ──
-  // CAMBIO Fase 1: se retiró el bloque que reseteaba stMatch/stNoMatch/
-  // stLic/stDesp (elementos eliminados de index.html). Todo lo demás
-  // se conserva igual — incluyendo el reset de los badges de la barra
-  // de acciones (bdgPDF/bdgXLS/bdgMatch/bdgNoMatch), que siguen vigentes.
   resetAll() {
     State.pdfData  = new Map();
     State.xlsData  = null;
     State.factData = new Map();
     State.despData = new Map();
+    State.wtmsData = new Map();   // FIX: faltaba en el reset original — bug latente desde que se agregó WTMS
     State.merged   = [];
+    State.sveIssues = [];
     State.sveHasCritical = false;
     State.sveHasWarnings = false;
     State.sveLastQuality = 100;
 
-    UI.resetDZ('dropPDF','☁️','<strong>Arrastra los PDFs aquí</strong> o haz clic','Todos los archivos del día a la vez');
-    UI.resetDZ('dropXLS','📊','<strong>Arrastra el Excel macro</strong> o haz clic','Lee ambas pestañas automáticamente');
-    UI.setBadge('pdfBadge', '● 0 archivos');
-    UI.setBadge('xlsBadge', '● 0 rutas');
-
-    ['bdgPDF','bdgXLS','bdgMatch','bdgNoMatch'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent='—'; });
-    document.getElementById('bdgDesp').textContent = '0';
+    UI.setSourceStatus('pdf',  false, 'Arrastra o haz clic', 'Todos los archivos del día a la vez');
+    UI.setSourceStatus('xls',  false, 'Arrastra o haz clic', 'Lee ambas pestañas automáticamente');
+    UI.setSourceStatus('wtms', false, 'Arrastra o haz clic', 'Archivo .csv');
+    UI.setSourceStatus('desp', false, 'Pega desde Excel',    'Copia RUTA · CASETA · WTMS · ID\'S MASTER');
 
     document.getElementById('pasteArea').value = '';
     document.getElementById('pasteSt').textContent = '';
     document.getElementById('pastePreview').classList.remove('on');
 
-    const tbody = document.getElementById('tbody');
-    tbody.innerHTML = '<tr><td colspan="22"><div class="empty-state"><div class="empty-ico">📂</div><div class="empty-title">Sin datos aún</div><div class="empty-desc">Carga los PDFs y el Excel macro para comenzar</div></div></td></tr>';
-    document.getElementById('thead').innerHTML = '';
-    document.getElementById('legendRow').classList.remove('on');
-    document.getElementById('previewDesc').textContent = 'Carga los PDFs y el Excel macro para comenzar';
-
-    UI.setPipeStep(1, 'active', 'En espera');
-    UI.setPipeStep(2, '', 'En espera');
-    UI.setPipeStep(3, 'optional', 'Opcional');
-    document.getElementById('pipeNum1').textContent = '1';
-    document.getElementById('pipeNum2').textContent = '2';
+    _tableFilter = 'all';
+    _tableSearch = '';
+    const searchInput = document.getElementById('tableSearch');
+    if (searchInput) searchInput.value = '';
 
     document.getElementById('svePanel').classList.remove('on');
     UI._resetSveCounters();
@@ -754,6 +798,9 @@ export const UI = {
     UI.clearErrors();
     UI.hideProgress();
     UI.setActionsEnabled(false);
+    UI.updatePrepView(['PDFs de cargas','Excel macro (RUTEO NUEVO)',"Status de despacho (RUTA + ID'S MASTER)",'Reporte WTMS']);
+    UI.renderTable();
+    UI.updateStats();
     UI.updateHealthRail();
     UI.applyMode();
   }

@@ -2,12 +2,27 @@
  * core/app.js
  * Bootstrap de SmartDispatch — punto de entrada de la aplicación.
  *
- * CAMBIO (integración Reporte WTMS — 4ª fuente obligatoria, jul-2026):
- *   Se agrega el wiring del dropzone #dropWTMS/#fileWTMS →
- *   Events.handleWTMS(). El pipeline pasa de 3 a 4 pasos — ninguno
- *   "optional" ya (Status y WTMS son obligatorios). El gate de fuentes
- *   faltantes (UI.renderSourceGate) se muestra la primera vez que el
- *   usuario cargue cualquier fuente, vía Events.triggerMerge().
+ * CAMBIO (rediseño Preparación / Mesa de Trabajo — mockup jul-2026):
+ *   Se agrega el stepper superior (Preparación → Mesa de Trabajo →
+ *   Correcciones → Calidad → Exportación) + botón Administración,
+ *   fiel al mockup validado por EduarDo. Solo 'prep' y 'table' son
+ *   pantallas rediseñadas en esta fase — 'fix'/'quality'/'export'/
+ *   'admin' son ALIAS que navegan a la pantalla 'table' y hacen scroll
+ *   hasta #legacyPanel, donde vive TODA la funcionalidad que aún no
+ *   tiene pantalla propia (panel SVE + exportación, catálogo de
+ *   operadores, catálogos maestros, caché de facturas, historial) —
+ *   sin cambios de comportamiento, solo de ubicación visual. Cuando
+ *   esas pantallas se construyan en fases futuras, LEGACY_ALIASES se
+ *   reduce entrada por entrada; el resto del wiring no cambia.
+ *
+ *   Se retira el wiring de: pipeline antiguo (#pipeStep1..4 — ya no
+ *   existen, reemplazados por las tarjetas de fuente), #btnAddPDF (la
+ *   tarjeta de PDF sigue aceptando archivos aunque esté "done", ver
+ *   ui.js). Se agrega wiring de: #tableSearch (búsqueda), #filterChips
+ *   (delegación de clic en los chips de filtro), #mainTbody (delegación
+ *   del botón de editar por fila → EditSystem.locateAndEdit), botón
+ *   "Reemplazar archivos" de la vista contraída de Preparación (mismo
+ *   handler que antes tenía #btnClear).
  *
  * Dependencias: todos los módulos de la aplicación.
  */
@@ -22,6 +37,46 @@ import { initCatalog } from '../features/catalog.js';
 import { DispatchHistory } from '../features/dispatch-history.js';
 import { CatalogStore } from '../features/catalogs/catalog-store.js';
 
+// ── Stepper — navegación entre pantallas ──
+const STEPS = [
+  { id: 'prep',    label: 'Preparación' },
+  { id: 'table',   label: 'Mesa de Trabajo' },
+  { id: 'fix',     label: 'Correcciones' },
+  { id: 'quality', label: 'Calidad' },
+  { id: 'export',  label: 'Exportación' },
+];
+// Pantallas todavía no rediseñadas — ver nota de cabecera. Alias hacia
+// 'table', con scroll a #legacyPanel donde vive la funcionalidad real.
+const LEGACY_ALIASES = new Set(['fix', 'quality', 'export', 'admin']);
+let currentStepIdx = 0;
+
+function renderStepper() {
+  const el = document.getElementById('stepper');
+  if (!el) return;
+  el.innerHTML = STEPS.map((s, i) => {
+    const cls = i < currentStepIdx ? 'done' : i === currentStepIdx ? 'active' : '';
+    const dotContent = i < currentStepIdx ? '✓' : (i + 1);
+    const conn = i < STEPS.length - 1 ? '<div class="step-connector"></div>' : '';
+    return `<div class="step ${cls}" data-goto="${s.id}"><div class="step-dot">${dotContent}</div><div class="step-label">${s.label}</div></div>${conn}`;
+  }).join('');
+  el.querySelectorAll('.step').forEach(elm => elm.addEventListener('click', () => goStep(elm.dataset.goto)));
+}
+
+function goStep(id) {
+  const targetScreen = LEGACY_ALIASES.has(id) ? 'table' : id;
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.dataset.screen === targetScreen));
+
+  if (!LEGACY_ALIASES.has(id)) {
+    const idx = STEPS.findIndex(s => s.id === id);
+    if (idx > -1) currentStepIdx = idx;
+    renderStepper();
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (LEGACY_ALIASES.has(id)) {
+    setTimeout(() => document.getElementById('legacyPanel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+  }
+}
+
 /**
  * Inicializa la aplicación completa.
  */
@@ -35,6 +90,10 @@ export async function init() {
   UI.applyTheme(State.theme);
   UI.setUser(State.user);
 
+  // ── Stepper ──
+  renderStepper();
+  document.getElementById('btnAdmin').addEventListener('click', () => goStep('admin'));
+
   // ── Load FactCache from Supabase (Camino B, Fase 2) ──
   State.factCache    = await FactCache.load();
   State.factCacheLog = await FactCache.loadLog();
@@ -44,19 +103,22 @@ export async function init() {
   }
   UI.renderCacheHistory();
 
-  // ── Drop zones ──
+  // ── Drop zones (4 fuentes obligatorias) ──
   Events.setupDrop('dropPDF', 'filePDF', Events.handlePDFs.bind(Events));
   Events.setupDrop('dropXLS', 'fileXLS', Events.handleXLS.bind(Events));
-  // NUEVO — Reporte WTMS (4ª fuente obligatoria)
   Events.setupDrop('dropWTMS', 'fileWTMS', Events.handleWTMS.bind(Events));
 
-  // ── Buttons ──
+  // ── Preparación — "Continuar" y "Reemplazar archivos" (vista contraída) ──
+  document.getElementById('btnGoTable').addEventListener('click', () => goStep('table'));
+  document.getElementById('btnPrepReset').addEventListener('click', () => UI.resetAll());
+
+  // ── Status de despacho (paste) ──
   document.getElementById('btnParse').addEventListener('click',      () => Events.handlePaste());
   document.getElementById('btnPasteClear').addEventListener('click', () => Events.clearPaste());
+
+  // ── Exportación ──
   document.getElementById('btnExport').addEventListener('click',     () => Events.handleExport());
   document.getElementById('btnExport2').addEventListener('click',    () => Events.handleExport());
-  document.getElementById('btnAddPDF').addEventListener('click',     () => document.getElementById('filePDF').click());
-  document.getElementById('btnClear').addEventListener('click',      () => UI.resetAll());
 
   // ── Theme toggle ──
   document.getElementById('btnTheme').addEventListener('click', () =>
@@ -81,29 +143,29 @@ export async function init() {
     if (e.key === 'Enter') document.getElementById('nameModalBtn').click();
   });
 
-  // ── Pulse Bar ──
-  document.getElementById('pulseBar').addEventListener('click', () => {
-    const svePanel = document.getElementById('svePanel');
-    if (svePanel.classList.contains('on')) {
-      svePanel.classList.add('expanded');
-      svePanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+  // ── Mesa de Trabajo — búsqueda y filtros ──
+  document.getElementById('tableSearch').addEventListener('input', e => UI.setTableSearch(e.target.value));
+  document.getElementById('filterChips').addEventListener('click', e => {
+    const btn = e.target.closest('.fchip');
+    if (!btn) return;
+    UI.setTableFilter(btn.dataset.filter);
   });
+
+  // ── Mesa de Trabajo — botón de editar por fila ──
+  document.getElementById('mainTbody').addEventListener('click', e => {
+    const btn = e.target.closest('.row-edit-btn');
+    if (!btn) return;
+    EditSystem.locateAndEdit(btn.dataset.editRuta, '', JSON.stringify([btn.dataset.editRowid]));
+  });
+
+  // ── Ir a Correcciones (botón en el header de Mesa de Trabajo) ──
+  const btnGoFix = document.getElementById('btnGoFix');
+  if (btnGoFix) btnGoFix.addEventListener('click', () => goStep('fix'));
 
   // ── SVE — barra de resumen colapsable ──
   document.getElementById('sveSummaryToggle').addEventListener('click', () =>
     document.getElementById('svePanel').classList.toggle('expanded'));
 
-  // ── Datos de referencia ──
-  document.getElementById('refToggle').addEventListener('click', () =>
-    document.getElementById('refPanel').classList.toggle('open'));
-  document.getElementById('refTabs').addEventListener('click', e => {
-    const tabBtn = e.target.closest('.ref-tab');
-    if (!tabBtn) return;
-    const tab = tabBtn.dataset.tab;
-    document.querySelectorAll('.ref-tab').forEach(b => b.classList.toggle('active', b === tabBtn));
-    document.querySelectorAll('.ref-tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tabPanel === tab));
-  });
   // ── Catálogos Maestros ──
   document.getElementById('masterCatToggle').addEventListener('click', () =>
     document.getElementById('masterCatPanel').classList.toggle('open'));
@@ -114,7 +176,7 @@ export async function init() {
     Events.importMasterCatalog('poolReal', this.files[0]); this.value = '';
   });
 
-  // ── Catalog ──
+  // ── Catalog (operadores) ──
   document.getElementById('btnCatAdd').addEventListener('click',     () => Events.addCatalogEntry());
   document.getElementById('catLicInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') Events.addCatalogEntry();
@@ -126,6 +188,17 @@ export async function init() {
     const btn = e.target.closest('.btn-del');
     if (!btn) return;
     Events.delOp(btn.dataset.delOp);
+  });
+
+  // ── Pestañas del panel "Datos de referencia" ──
+  document.getElementById('refToggle').addEventListener('click', () =>
+    document.getElementById('refPanel').classList.toggle('open'));
+  document.getElementById('refTabs').addEventListener('click', e => {
+    const tabBtn = e.target.closest('.ref-tab');
+    if (!tabBtn) return;
+    const tab = tabBtn.dataset.tab;
+    document.querySelectorAll('.ref-tab').forEach(b => b.classList.toggle('active', b === tabBtn));
+    document.querySelectorAll('.ref-tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tabPanel === tab));
   });
 
   // ── Historial de caché ──
@@ -145,6 +218,7 @@ export async function init() {
       btn.dataset.locateField,
       btn.dataset.locateIds || '[]'
     );
+    goStep('table');
   });
 
   // ── Warn Confirm Modal ──
@@ -194,13 +268,10 @@ export async function init() {
   document.getElementById('btnTodayPreview').addEventListener('click', () => Events.previewTodaySession());
   document.getElementById('btnTodayRedownload').addEventListener('click', () => Events.redownloadToday());
 
-  // ── Init pipeline (visual, no depende del catálogo) ──
-  // CAMBIO WTMS: el pipeline pasa de 3 a 4 pasos — ninguno "optional"
-  // ya (Status y WTMS son obligatorios ahora). El gate de fuentes
-  // faltantes se muestra la primera vez que el usuario cargue
-  // cualquier fuente, vía Events.triggerMerge().
-  UI.setPipeStep(1, 'active', 'En espera');
+  // ── Init visual (no depende del catálogo) ──
   UI.setActionsEnabled(false);
+  UI.updatePrepView(['PDFs de cargas','Excel macro (RUTEO NUEVO)',"Status de despacho (RUTA + ID'S MASTER)",'Reporte WTMS']);
+  UI.renderTable();
   UI.updateHealthRail();
   UI.applyMode();
 

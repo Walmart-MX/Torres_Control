@@ -3,9 +3,21 @@
  * EVENTS — coordinador central de todos los manejadores de eventos.
  *
  * CAMBIO (integración Reporte WTMS — 4ª fuente obligatoria, jul-2026):
- *   Ninguna de las 4 fuentes es opcional. Se agrega checkSources(),
- *   handleWTMS() y se reescribe triggerMerge() para bloquear el merge
- *   completo si falta cualquier fuente.
+ *   Ninguna de las 4 fuentes es opcional. checkSources() y triggerMerge()
+ *   bloquean el merge completo si falta cualquiera.
+ *
+ * CAMBIO (rediseño Mesa de Trabajo/Preparación — mockup jul-2026):
+ *   La pantalla de Preparación reemplaza la barra de pipeline (3/4 pasos
+ *   con pipeStep1..4) y los badges sueltos (pdfBadge/xlsBadge/bdgDesp)
+ *   por 4 tarjetas de fuente ("up-card"). Los handlers de cada fuente ya
+ *   no llaman UI.setBadge()/UI.setDZDone()/UI.setPipeStep() (retirados
+ *   de ui.js, sus IDs de destino no existen en el nuevo HTML) — ahora
+ *   llaman UI.setSourceStatus(key, done, statusText, subText), un único
+ *   método que actualiza la tarjeta completa. triggerMerge() reemplaza
+ *   UI.renderSourceGate(missing) (nunca definido en ui.js — gap
+ *   detectado durante el rediseño) por UI.updatePrepView(missing), que
+ *   además colapsa/expande la grilla de Preparación según
+ *   Events.checkSources().ok.
  */
 import { State } from '../core/state.js';
 import { normOp } from '../utils/format.js';
@@ -76,10 +88,7 @@ export const Events = {
     UI.hideProgress();
 
     const uniqueCount = new Set([...State.pdfData.keys()].filter(k => !k.includes('|D|'))).size;
-    UI.setBadge('pdfBadge', `✓ ${ok} archivos · ${uniqueCount} entregas`, 'done');
-    UI.setDZDone('dropPDF', `${ok} archivos cargados`);
-    UI.setPipeStep(1, 'done', `${uniqueCount} entregas`);
-    document.getElementById('pipeNum1').textContent = '✓';
+    UI.setSourceStatus('pdf', true, '✓ Completo', `${ok} archivos · ${uniqueCount} entregas`);
 
     if (errors.length) UI.showErrors(errors);
     Events.triggerMerge();
@@ -101,11 +110,7 @@ export const Events = {
         UI.renderCacheHistory();
       });
 
-      UI.setBadge('xlsBadge', `✓ ${rows.length} rutas · ${factSheetLabel}`, 'done');
-      UI.setDZDone('dropXLS', file.name);
-      UI.setPipeStep(2, 'done', `${rows.length} rutas`);
-      document.getElementById('pipeNum2').textContent = '✓';
-      document.getElementById('bdgXLS').textContent   = rows.length;
+      UI.setSourceStatus('xls', true, '✓ Completo', `${rows.length} rutas · ${factSheetLabel}`);
 
       UI.hideProgress();
       Events.triggerMerge();
@@ -115,7 +120,7 @@ export const Events = {
     }
   },
 
-  // ── Reporte WTMS handler — NUEVO (4ª fuente obligatoria) ──
+  // ── Reporte WTMS handler (4ª fuente obligatoria) ──
   async handleWTMS(files) {
     const file = files.find(f => f.name.match(/\.csv$/i));
     if (!file) { if (files.length) UI.showErrors(['El Reporte WTMS debe ser un archivo .csv']); return; }
@@ -125,10 +130,7 @@ export const Events = {
       const { data } = processWTMS(raw);
       State.wtmsData = data;
 
-      UI.setBadge('wtmsBadge', `✓ ${data.size} cargas`, 'done');
-      UI.setDZDone('dropWTMS', file.name);
-      UI.setPipeStep(4, 'done', `${data.size} cargas`);
-      document.getElementById('pipeNum4').textContent = '✓';
+      UI.setSourceStatus('wtms', true, '✓ Completo', `${data.size} cargas`);
 
       UI.hideProgress();
       Events.triggerMerge();
@@ -145,10 +147,8 @@ export const Events = {
     try {
       const { data, preview, idx } = processPaste(raw);
       State.despData = data;
-      document.getElementById('bdgDesp').textContent = data.size;
       UI.setPasteSt(`✓ ${data.size} rutas detectadas`, 'ok');
-      UI.setPipeStep(3, 'done', `${data.size} rutas`);
-      document.getElementById('pipeNum3').textContent = '✓';
+      UI.setSourceStatus('desp', true, '✓ Completo', `${data.size} rutas detectadas`);
       if (preview.length) UI.renderPastePreview(preview, idx);
       Events.triggerMerge();
     } catch (e) {
@@ -160,14 +160,12 @@ export const Events = {
     document.getElementById('pasteArea').value = '';
     document.getElementById('pastePreview').classList.remove('on');
     State.despData = new Map();
-    document.getElementById('bdgDesp').textContent = '0';
     UI.setPasteSt('', '');
-    UI.setPipeStep(3, '', 'En espera');
-    document.getElementById('pipeNum3').textContent = '3';
+    UI.setSourceStatus('desp', false, 'Pega desde Excel', 'Copia RUTA · CASETA · WTMS · ID\'S MASTER');
     Events.triggerMerge();
   },
 
-  // ── Validación de fuentes obligatorias — NUEVO ──
+  // ── Validación de fuentes obligatorias ──
   checkSources() {
     const missing = [];
     if (State.pdfData.size === 0) missing.push('PDFs de cargas');
@@ -179,10 +177,11 @@ export const Events = {
 
   triggerMerge() {
     const { ok, missing } = Events.checkSources();
+    UI.updatePrepView(missing);
 
     if (!ok) {
       State.merged = [];
-      UI.renderSourceGate(missing);
+      State.sveIssues = [];
       UI.renderTable();
       UI.updateStats();
       UI.resetSVE();
@@ -192,18 +191,23 @@ export const Events = {
       return;
     }
 
-    UI.renderSourceGate([]);
     runMerge();
     UI.renderTable();
     UI.updateStats();
     UI.setActionsEnabled(true);
     setTimeout(() => {
-      const sveResult = runSVE(State.merged);
+      const screenCount = State.xlsData ? State.xlsData.length : 0;
+      const sveResult = runSVE(State.merged, screenCount);
       if (sveResult) {
+        State.sveIssues = sveResult.issues;
         UI.renderSVE(sveResult.issues, sveResult.quality, sveResult.nCrit, sveResult.nWarn, sveResult.nInfo, sveResult.nPass);
       } else {
+        State.sveIssues = [];
         UI.resetSVE();
       }
+      // El status pill por fila depende de State.sveIssues, recién
+      // poblado arriba — se repinta la tabla para reflejarlo.
+      UI.renderTable();
       UI.updateHealthRail();
       UI.applyMode();
     }, 100);

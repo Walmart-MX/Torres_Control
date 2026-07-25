@@ -8,6 +8,16 @@
  *     desde nr['_ID_RETORNO']/nr['_CARTA_PORTE'] (armados en merge.js
  *     a partir del cruce con el WTMS). Sobreescritura intencional.
  *   - 'ID RETORNO'/'CARTA PORTE' se agregan a COLS_DESP y PREVIEW_COLS.
+ *
+ * CAMBIO (rediseño Mesa de Trabajo — mockup jul-2026):
+ *   - Se agrega WORKTABLE_COLS: el subconjunto de columnas que muestra
+ *     la nueva tabla de Mesa de Trabajo (ui.js → renderTable()), fiel
+ *     al set de columnas del mockup (Ruta, Operador, Lic., Tarimas,
+ *     Marchamo, Factura, Tienda, Tractor, Remolque — Estado y el botón
+ *     de editar se resuelven aparte, no vía getMapped()). PREVIEW_COLS
+ *     NO se toca — sigue siendo el set completo usado por
+ *     renderHistoryPreview() en el modal de Historial, que conserva su
+ *     diseño anterior.
  */
 import { State } from './state.js';
 
@@ -47,6 +57,22 @@ export const PREVIEW_COLS = [
   'GLS DE EMB.','HORA DE FACTURACION',
   'ID IDA','ID RETORNO','CARTA PORTE','HR. DESPACHO','SALIDA DE CASETA ','USUARIO WTMS',
   'CAJAS','CORTINA','TRACTOR ','ENRAMPE','RETIRO','CITA'
+];
+
+/**
+ * WORKTABLE_COLS — columnas de datos de la nueva tabla "Mesa de Trabajo"
+ * (fiel al mockup de rediseño). Deliberadamente un subconjunto reducido
+ * de PREVIEW_COLS — el mockup prioriza legibilidad sobre exhaustividad;
+ * el detalle completo de una ruta se consulta abriendo el drawer de
+ * edición (EditSystem), que ya expone EDITABLE_FIELDS con más campos.
+ * 'TIENDA' no tiene entrada en COL_MAP — getMapped() cae a row['TIENDA']
+ * directo, que es exactamente donde enrichRow() (Ventana de Recibo) lo
+ * escribe. 'ESTADO' de la fila (pill Completa/Advertencia/Crítica/
+ * Corregida) NO vive aquí — se deriva aparte en ui.js a partir de
+ * State.sveIssues + State.edits, no es una columna de datos mapeable.
+ */
+export const WORKTABLE_COLS = [
+  'RUTA', 'OPERADOR', 'LIC.', 'TARIMAS', 'MARCHAMO 1', 'FAC.', 'TIENDA', 'TRACTOR ', 'REMOLQUE'
 ];
 
 export const INT_COLS      = new Set(['DET','RUTA','TARIMAS','CAJAS','CORTINA',

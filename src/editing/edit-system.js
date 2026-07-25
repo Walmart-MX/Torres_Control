@@ -10,6 +10,19 @@
  *   cualquiera de esos dos campos, para que runSVE() ya no lo marque
  *   crítico una vez resuelto.
  *
+ * CAMBIO (rediseño Mesa de Trabajo — mockup jul-2026):
+ *   saveAndRevalidate() ahora:
+ *     1) pasa screenCount a runSVE() — ver nota "Fix regla K" en
+ *        features/validation/sve.js (ya no lee #bdgXLS del DOM);
+ *     2) guarda el resultado en State.sveIssues, la misma fuente que
+ *        usa UI._buildRowStatusMap() para pintar el status pill
+ *        (Completa/Advertencia/Crítica/Corregida) de cada fila;
+ *     3) vuelve a llamar UI.renderTable() DESPUÉS de correr el SVE
+ *        (antes solo se llamaba una vez, antes de conocer el
+ *        resultado del SVE) — así el pill de la fila editada refleja
+ *        de inmediato si la corrección resolvió o no la incidencia,
+ *        sin esperar a la siguiente acción del usuario.
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - escH (utils/dom.js)
@@ -85,8 +98,8 @@ export const EditSystem = {
     EditSystem._currentRowId   = rowId;
     EditSystem._originalValues = {};
 
-    const tbody     = document.getElementById('tbody');
-    const tableRows = tbody.querySelectorAll('tr');
+    const tbody     = document.getElementById('mainTbody');
+    const tableRows = tbody ? tbody.querySelectorAll('tr') : [];
     tableRows.forEach(r => r.classList.remove('row-highlight'));
     if (tableRows[idx]) {
       tableRows[idx].classList.add('row-highlight');
@@ -210,12 +223,19 @@ export const EditSystem = {
     UI.renderTable();
     UI.updateStats();
 
-    const sveResult = runSVE(State.merged);
+    const screenCount = State.xlsData ? State.xlsData.length : 0;
+    const sveResult = runSVE(State.merged, screenCount);
     if (sveResult) {
+      State.sveIssues = sveResult.issues;
       UI.renderSVE(sveResult.issues, sveResult.quality, sveResult.nCrit, sveResult.nWarn, sveResult.nInfo, sveResult.nPass);
     } else {
+      State.sveIssues = [];
       UI.resetSVE();
     }
+    // Re-pinta la tabla: el status pill de cada fila depende de
+    // State.sveIssues, que recién se actualizó arriba — ver nota de
+    // cabecera del módulo.
+    UI.renderTable();
     UI.updateHealthRail();
     UI.applyMode();
   },

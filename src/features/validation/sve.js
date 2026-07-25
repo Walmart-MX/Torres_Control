@@ -10,11 +10,9 @@
  *   Ahora: runSVE(rows) NO toca UI. Devuelve:
  *     - null                                            si no hay rows
  *     - { issues, quality, nCrit, nWarn, nInfo, nPass }  si hay rows
- *   El caller (Events.triggerMerge, todavía en index.html) es responsable
- *   de decidir qué hacer con UI.resetSVE() / UI.renderSVE() según el
- *   resultado. Esto elimina la dependencia sve.js → ui.js que habría sido
- *   necesaria de otro modo, y es el mismo cambio que se habría requerido
- *   en la Fase 9 de todas formas.
+ *   El caller (Events.triggerMerge, EditSystem.saveAndRevalidate) es
+ *   responsable de decidir qué hacer con UI.resetSVE() / UI.renderSVE()
+ *   según el resultado.
  *
  * Las 11 reglas (A-K) y el cálculo de quality score son IDÉNTICOS al
  * original — ningún cambio de lógica, solo el contrato de salida.
@@ -24,29 +22,27 @@
  *   ocultaba a qué ENTREGA (DETTE) específica pertenecía el problema
  *   cuando una ruta tenía múltiples líneas. Se agrega un campo `dette`
  *   al objeto de incidencia (issue), poblado según corresponda por cada
- *   regla:
- *     - D1 (missing — Operador/Licencia): SIGUE consolidada solo por
- *       RUTA (sin dette) — son el mismo dato para todas las entregas de
- *       la ruta, así que no tiene sentido pedirlo por entrega (decisión
- *       confirmada con EduarDo).
- *     - D2 (missing — Tarimas), A (dup_march), E (no_march) y J
- *       (bad_march): SÍ cambian su agrupación de `ruta` a `ruta+dette`,
- *       porque son datos que legítimamente varían por línea/entrega
- *       dentro de una misma ruta.
- *   Se agrega además una regla nueva independiente para CITA vacía
- *   (D-bis) — ver su comentario específico más abajo para la
- *   justificación de por qué es una regla separada.
+ *   regla — ver detalle en versiones anteriores de este comentario.
  *
- *   El engine de DEDUP ahora incluye `dette` en su clave — antes
- *   `rule||ruta||field` podía colapsar dos incidencias legítimas del
- *   mismo tipo/ruta/campo pertenecientes a distintas entregas en una
- *   sola. Es una corrección de un bug latente que este cambio expone.
+ * CAMBIO (rediseño Mesa de Trabajo — mockup jul-2026, "Fix regla K"):
+ *   runSVE(rows) ganaba una SEGUNDA fuente de verdad no declarada: leía
+ *   document.getElementById('bdgXLS').textContent directamente del DOM
+ *   para la regla K (integridad UI vs memoria). Esto ya estaba señalado
+ *   como deuda técnica en el comentario original ("no ideal, pero se
+ *   preserva tal cual del original"). El elemento #bdgXLS desaparece en
+ *   el rediseño de Mesa de Trabajo (la barra de acciones antigua se
+ *   retira) — en vez de inventar un nuevo ancla en el DOM, se elimina
+ *   la dependencia por completo: runSVE(rows, screenCount) recibe el
+ *   conteo como PARÁMETRO. sve.js vuelve a ser una función pura, sin
+ *   ninguna lectura de document.*.
  *
- * Nota de acoplamiento preexistente (regla K): esta función lee
- * document.getElementById('bdgXLS') directamente para comparar el
- * conteo mostrado en pantalla contra State.merged. Es un acceso a DOM
- * dentro de una función de validación — no ideal, pero se preserva tal
- * cual del original para no alterar comportamiento en esta fase.
+ *   Los callers (events.js → triggerMerge, edit-system.js →
+ *   saveAndRevalidate) pasan `State.xlsData ? State.xlsData.length : 0`
+ *   — el mismo valor que antes se mostraba en el badge #bdgXLS y que
+ *   updateStats() calculaba de la misma fuente (State.xlsData.length).
+ *   Si no se pasa screenCount (o es 0/undefined), la regla K
+ *   simplemente no se evalúa — mismo comportamiento que antes cuando
+ *   el badge estaba vacío o en '—'.
  *
  * Dependencias:
  *   - State (core/state.js) — lee rows ya vía parámetro, pero escribe
@@ -71,13 +67,17 @@ export const SVE_ICONS = {
  * Ejecuta las reglas de validación sobre las rows del merge.
  *
  * @param {Array<object>} rows — normalmente State.merged
+ * @param {number} [screenCount] — conteo de rutas que el caller
+ *   considera "lo que muestra la pantalla" (típicamente
+ *   State.xlsData.length) — usado únicamente por la regla K
+ *   (integridad UI vs memoria). Si se omite, la regla K no se evalúa.
  * @returns {null|{
  *   issues: Array<object>,
  *   quality: number,
  *   nCrit: number, nWarn: number, nInfo: number, nPass: number
  * }} — null si rows está vacío (el caller debe llamar UI.resetSVE() en ese caso)
  */
-export function runSVE(rows) {
+export function runSVE(rows, screenCount) {
   if (!rows || !rows.length) return null;
 
   const raw = [];
@@ -116,11 +116,6 @@ export function runSVE(rows) {
       if (marchMap.has(marc)) {
         const prev = marchMap.get(marc);
         if (prev.ruta !== ruta) {
-          // Two distinct rutas claim the same marchamo — expose both rowIds so
-          // the user can pick which one to correct from the route selector.
-          // Se incluye la entrega (DETTE) de ambos lados en la descripción
-          // para que el usuario identifique exactamente qué línea de cada
-          // ruta está en conflicto, sin tener que revisar todas las líneas.
           rawAdd(SVE_CRIT,'dup_march', ruta, `MARCHAMO ${m}`,
             `Marchamo ${marc} asignado a ruta ${ruta} (entrega ${dette||'—'}) y también a ruta ${prev.ruta} (entrega ${prev.dette||'—'}).`,
             'Confirma con la documentación cuál ruta lleva este marchamo.',
@@ -164,12 +159,7 @@ export function runSVE(rows) {
     'Revisa el Excel macro: busca filas con columna RUTA vacía.',
     noRutaCnt > 1 ? `×${noRutaCnt}` : '');
 
-  // D1: Operador y Licencia — atributos de la RUTA COMPLETA (mismo
-  // operador/licencia para todas sus entregas), se consolidan SOLO por
-  // RUTA — sin entrega — para que el usuario capture el dato una sola
-  // vez en vez de repetirlo entrega tras entrega. Decisión confirmada
-  // con EduarDo (jul-2026): a diferencia de TARIMAS (ver D2 abajo), estos
-  // dos campos no varían por línea/destino dentro de la misma ruta.
+  // D1: Operador y Licencia — atributos de la RUTA COMPLETA
   const missingRouteByRuta = new Map();
   const REQ_ROUTE = [
     { field:'OPERADOR', label:'Operador', sev:SVE_CRIT },
@@ -192,18 +182,12 @@ export function runSVE(rows) {
     const fl  = [...fields].join(', ');
     const act = fields.has('Licencia') && fields.size === 1
       ? 'Agrega al operador en el catálogo.' : 'Revisa el PDF de esta ruta.';
-    // Sin `dette` — la incidencia aplica a la ruta completa, no a una
-    // entrega específica (ver justificación arriba).
     rawAdd(sev,'missing', ruta, fl,
       `Ruta ${ruta}: campo${fields.size>1?'s':''} incompleto${fields.size>1?'s':''} — ${fl}.`,
       act, '', [...rowIds]);
   });
 
-  // D2: Tarimas — a diferencia de Operador/Licencia, SÍ varía por línea:
-  // cada entrega/destino dentro de una ruta puede tener un conteo de
-  // tarimas distinto. Se mantiene consolidado por RUTA + ENTREGA (DETTE)
-  // para que el usuario identifique exactamente cuál entrega tiene el
-  // dato faltante sin tener que revisar todas las líneas de la ruta.
+  // D2: Tarimas — varía por línea, consolidado por RUTA + ENTREGA (DETTE)
   const missingTarimasByRutaDette = new Map();
   matched.forEach(r => {
     const ruta  = String(getMapped(r,'RUTA')||'').trim();
@@ -220,16 +204,7 @@ export function runSVE(rows) {
     `Ruta ${ruta} · Entrega ${dette||'—'}: campo incompleto — Tarimas.`,
     'Revisa el PDF de esta ruta.', '', [...rowIds], dette));
 
-  // D-bis: CITA pendiente — regla NUEVA, independiente de D1/D2.
-  // JUSTIFICACIÓN de por qué es una regla separada y no un campo más en
-  // REQ_ROUTE/TARIMAS: esos campos son genuinamente obligatorios — su
-  // ausencia es siempre un problema. CITA no lo es: no todas las entregas
-  // tienen cita (puede deberse a que el dato no vino en el origen, o a
-  // que la anotación del PDF no hizo match con ningún destino). Mezclarla
-  // con los campos obligatorios escalaría su severidad junto a problemas
-  // reales cuando aparecen en la misma entrega. Por eso es SIEMPRE
-  // SVE_INFO — nunca bloquea la exportación — y se presenta como un dato
-  // PENDIENTE de decisión del usuario, no como un error.
+  // D-bis: CITA pendiente — SIEMPRE SVE_INFO, nunca bloquea la exportación
   const noCitaByRutaDette = new Map();
   matched.forEach(r => {
     const ruta  = String(getMapped(r,'RUTA')||'').trim();
@@ -362,7 +337,8 @@ export function runSVE(rows) {
       vals.size>1?`×${vals.size}`:'',
       [...rowIds], dette);
   });
-// L: Ventana de Recibo — DETTE no encontrado (consolidado por ruta)
+
+  // L: Ventana de Recibo — DETTE no encontrado (consolidado por ruta)
   const noVentanaByRuta = new Map();
   matched.forEach(r => {
     const miss = (r._enrichMisses || []).find(m => m.catalog === 'ventanaRecibo');
@@ -426,21 +402,16 @@ export function runSVE(rows) {
       'Revisa las fechas capturadas de enrampe/retiro/despacho/caseta.',
       '', [...rowIds]);
   });
-  // K: Integridad UI vs memoria
-  const screenCnt = parseInt(document.getElementById('bdgXLS').textContent || '0', 10);
-  if (screenCnt && screenCnt !== rows.length)
+
+  // K: Integridad "pantalla" vs memoria — ver nota de cabecera "Fix regla K".
+  // screenCount llega como parámetro (antes se leía de #bdgXLS en el DOM).
+  if (screenCount && screenCount !== rows.length)
     rawAdd(SVE_CRIT,'integrity','','CONTEO',
-      `Discrepancia: UI muestra ${screenCnt} rutas, memoria contiene ${rows.length}.`,
+      `Discrepancia: se esperaban ${screenCount} rutas del Excel, memoria contiene ${rows.length}.`,
       'Recarga la página y vuelve a procesar los archivos.',
-      `UI:${screenCnt}/MEM:${rows.length}`);
+      `Excel:${screenCount}/MEM:${rows.length}`);
 
   // ── DEDUP ENGINE ──
-  // Key: rule + ruta + field + dette — se agrega `dette` (jul-2026) para
-  // que dos incidencias del mismo tipo/ruta/campo pertenecientes a
-  // distintas entregas NO se colapsen en una sola (bug latente antes de
-  // este cambio, expuesto al introducir agrupación por entrega en las
-  // reglas D/A/E/J). Para las reglas que no setean `dette`, el valor por
-  // defecto es '' — el comportamiento de dedup para ellas no cambia.
   const seen = new Set();
   const issues = [];
   for (const issue of raw) {

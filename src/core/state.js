@@ -16,13 +16,14 @@ export const State = {
   xlsData:  null,        // Array of rows from RUTEO NUEVO
   factData: new Map(),   // invoice# → { gls, horaFact }
   despData: new Map(),   // RUTA → { hrDesp, caseta, wtms, idIda }
+  wtmsData: new Map(),   // ID de la carga → { carteporte, siguienteCarga }
   merged:   [],          // Final merged rows (output of tryMerge)
   catalog:  new Map(),   // normalizedName → licencia
   // Catálogos maestros (Camino C) — reemplazan RUTEO NUEVO manual de
   // FORMATO/TIENDA/ESTADO (Ventana de Recibo) y LINEA/PLACAS/CAPACIDAD
   // (Pool Real). Empiezan vacíos hasta que se importen desde el panel
-  // "Catálogos" (Fase 3, pendiente) — el motor de enriquecimiento
-  // no-opea con seguridad mientras tanto.
+  // "Catálogos" — el motor de enriquecimiento no-opea con seguridad
+  // mientras tanto.
   catalogs:     { ventanaRecibo: [], poolReal: [] },
   catalogMeta:  {},   // catalogId → { row_count, updated_at, updated_by }
   catalogIndices: null,   // Map — reconstruido en cada runMerge()
@@ -47,6 +48,16 @@ export const State = {
   sveHasWarnings: false,
   sveLastQuality: 100,
   sveAuditLog: [],
+  // Último array de incidencias devuelto por runSVE() — NUEVO (rediseño
+  // Mesa de Trabajo, jul-2026). Antes runSVE() era consumido una sola
+  // vez por Events.triggerMerge()/EditSystem.saveAndRevalidate() para
+  // pintar el panel SVE y se descartaba. Ahora también lo necesita
+  // UI._buildRowStatusMap() para derivar el status pill (Completa /
+  // Advertencia / Crítica / Corregida) de cada fila de la tabla —
+  // cruza issue.rowIds contra cada row._rowId. Se escribe en los mismos
+  // dos puntos donde antes solo se llamaba a UI.renderSVE(); null/[]
+  // cuando no hay filas (mismo caso en que runSVE() devuelve null).
+  sveIssues: [],
 
   // Inline edits — patches applied to merged rows this session
   // Each entry: { rowIndex, field, oldVal, newVal, ts }
@@ -64,16 +75,11 @@ export const State = {
 
   // cacheUpdating: true mientras FactCache.persist() está en curso — usado
   // por el panel "Historial de caché" para mostrar el indicador 🔄.
-  // Hoy es casi instantáneo (localStorage es síncrono); queda listo para
-  // cuando fact_cache migre a Supabase en Camino B Fase 2 (escritura async).
   cacheUpdating: false,
 
   // Sesión completada del día operativo de hoy (Camino B Fase 3),
   // sincronizada por Events.refreshTodayBanner() y por el bootstrap de
-  // core/app.js — antes solo se pasaba directo a UI.renderTodayBanner()
-  // sin guardarse en State. Se agrega aquí (Fase 5 del rediseño) porque
-  // operationalMode necesita leerla de forma síncrona para calcular el
-  // modo 'cerrado' sin depender de una llamada async adicional.
+  // core/app.js.
   todaySession: null,
 
   // Computed helpers
@@ -83,10 +89,9 @@ export const State = {
   get factCount()   { return this.merged.filter(r => r._factMatched).length; },
 
   /**
-   * operationalMode — Fase 5 del rediseño "Centro de Operaciones".
-   * Getter puro, sin efectos secundarios: infiere en qué momento del
-   * día operativo está el usuario a partir de datos que YA existen en
-   * State — no depende de ninguna selección manual.
+   * operationalMode — getter puro, sin efectos secundarios: infiere en
+   * qué momento del día operativo está el usuario a partir de datos que
+   * YA existen en State — no depende de ninguna selección manual.
    *
    *   'cerrado'    — ya se exportó una sesión hoy y no hay datos
    *                  cargados en memoria (recién se abrió la app, o se
@@ -96,10 +101,6 @@ export const State = {
    *                  todavía no produjo resultados (State.merged vacío)
    *   'correccion' — hay resultados y quedan críticos o advertencias
    *   'listo'      — hay resultados y cero críticos/advertencias
-   *
-   * El orden de los checks importa: 'cerrado' se evalúa primero porque
-   * es más informativo que 'arranque' cuando ambas condiciones podrían
-   * describir la pantalla (nada cargado, pero el día ya se cerró).
    */
   get operationalMode() {
     if (this.todaySession && !this.merged.length) return 'cerrado';
