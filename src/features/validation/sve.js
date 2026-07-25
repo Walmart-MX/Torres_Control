@@ -24,6 +24,18 @@
  *   al objeto de incidencia (issue), poblado según corresponda por cada
  *   regla — ver detalle en versiones anteriores de este comentario.
  *
+ * CAMBIO (rediseño Correcciones — mockup jul-2026):
+ *   - D1 (Operador/Licencia) se separa en DOS issues independientes en
+ *     vez de un field combinado "Operador, Licencia" — cada issue debe
+ *     mapear a UN solo campo editable para la tarjeta de corrección
+ *     rápida de Correcciones (ver ui.js → QUICKFIX_FIELD_MAP).
+ *   - F (zero_tar) y G (high_tar) pasan de agrupar por RUTA a agrupar
+ *     por RUTA + ENTREGA (DETTE) — consistente con D2 (tarimas
+ *     faltantes), confirmado con EduarDo: las tres reglas de tarimas
+ *     deben identificar la entrega exacta, no solo la ruta.
+ *   - D2 cambia su field de 'Tarimas' a 'TARIMAS' (mayúsculas) — mismo
+ *     texto que F/G, para que las tres mapeen al mismo campo editable.
+ *
  * CAMBIO (rediseño Mesa de Trabajo — mockup jul-2026, "Fix regla K"):
  *   runSVE(rows) ganaba una SEGUNDA fuente de verdad no declarada: leía
  *   document.getElementById('bdgXLS').textContent directamente del DOM
@@ -159,33 +171,38 @@ export function runSVE(rows, screenCount) {
     'Revisa el Excel macro: busca filas con columna RUTA vacía.',
     noRutaCnt > 1 ? `×${noRutaCnt}` : '');
 
-  // D1: Operador y Licencia — atributos de la RUTA COMPLETA
-  const missingRouteByRuta = new Map();
-  const REQ_ROUTE = [
-    { field:'OPERADOR', label:'Operador', sev:SVE_CRIT },
-    { field:'LIC.',      label:'Licencia', sev:SVE_WARN },
-  ];
+  // D1: Operador y Licencia — atributos de la RUTA COMPLETA (mismo dato
+  // para todas sus entregas), consolidados SOLO por RUTA — sin dette.
+  //
+  // CAMBIO (Correcciones — mockup jul-2026): antes ambos campos se
+  // combinaban en UN solo issue con field="Operador, Licencia" cuando
+  // faltaban los dos a la vez. Se separan en DOS issues independientes
+  // — uno por campo — porque la pantalla de Correcciones mapea cada
+  // issue a UNA tarjeta de corrección rápida con UN campo editable; un
+  // field compuesto no es editable con un solo input. Efecto
+  // secundario positivo: el panel SVE (legacyPanel) ahora también
+  // muestra Operador y Licencia como incidencias separadas, más
+  // preciso que el texto combinado anterior.
+  const missingOperadorByRuta = new Map();
+  const missingLicByRuta      = new Map();
   matched.forEach(r => {
     const ruta = String(getMapped(r,'RUTA')||'').trim();
     if (!ruta) return;
-    REQ_ROUTE.forEach(({ field, label, sev }) => {
-      if (!String(getMapped(r, field)||'').trim()) {
-        if (!missingRouteByRuta.has(ruta)) missingRouteByRuta.set(ruta, { fields: new Set(), sev: SVE_WARN, rowIds: new Set() });
-        const e = missingRouteByRuta.get(ruta);
-        e.fields.add(label);
-        if (r._rowId) e.rowIds.add(r._rowId);
-        if (sev === SVE_CRIT) e.sev = SVE_CRIT;
-      }
-    });
+    if (!String(getMapped(r,'OPERADOR')||'').trim()) {
+      if (!missingOperadorByRuta.has(ruta)) missingOperadorByRuta.set(ruta, { rowIds: new Set() });
+      if (r._rowId) missingOperadorByRuta.get(ruta).rowIds.add(r._rowId);
+    }
+    if (!String(getMapped(r,'LIC.')||'').trim()) {
+      if (!missingLicByRuta.has(ruta)) missingLicByRuta.set(ruta, { rowIds: new Set() });
+      if (r._rowId) missingLicByRuta.get(ruta).rowIds.add(r._rowId);
+    }
   });
-  missingRouteByRuta.forEach(({ fields, sev, rowIds }, ruta) => {
-    const fl  = [...fields].join(', ');
-    const act = fields.has('Licencia') && fields.size === 1
-      ? 'Agrega al operador en el catálogo.' : 'Revisa el PDF de esta ruta.';
-    rawAdd(sev,'missing', ruta, fl,
-      `Ruta ${ruta}: campo${fields.size>1?'s':''} incompleto${fields.size>1?'s':''} — ${fl}.`,
-      act, '', [...rowIds]);
-  });
+  missingOperadorByRuta.forEach(({ rowIds }, ruta) => rawAdd(SVE_CRIT,'missing', ruta, 'OPERADOR',
+    `Ruta ${ruta}: falta Operador.`,
+    'Revisa el PDF de esta ruta.', '', [...rowIds]));
+  missingLicByRuta.forEach(({ rowIds }, ruta) => rawAdd(SVE_WARN,'missing', ruta, 'LIC.',
+    `Ruta ${ruta}: falta Licencia.`,
+    'Agrega al operador en el catálogo.', '', [...rowIds]));
 
   // D2: Tarimas — varía por línea, consolidado por RUTA + ENTREGA (DETTE)
   const missingTarimasByRutaDette = new Map();
@@ -200,7 +217,7 @@ export function runSVE(rows, screenCount) {
       if (r._rowId) e.rowIds.add(r._rowId);
     }
   });
-  missingTarimasByRutaDette.forEach(({ ruta, dette, rowIds }) => rawAdd(SVE_CRIT,'missing', ruta, 'Tarimas',
+  missingTarimasByRutaDette.forEach(({ ruta, dette, rowIds }) => rawAdd(SVE_CRIT,'missing', ruta, 'TARIMAS',
     `Ruta ${ruta} · Entrega ${dette||'—'}: campo incompleto — Tarimas.`,
     'Revisa el PDF de esta ruta.', '', [...rowIds], dette));
 
@@ -242,41 +259,49 @@ export function runSVE(rows, screenCount) {
     cnt>1 ? `×${cnt} líneas`:'',
     [...rowIds], dette));
 
-  // F: Tarimas = 0 — consolidado por ruta
-  const zeroTarByRuta = new Map();
+  // F: Tarimas = 0 — consolidado por RUTA + ENTREGA (DETTE).
+  // CAMBIO (Correcciones — mockup jul-2026): antes se consolidaba solo
+  // por RUTA, inconsistente con D2 (tarimas FALTANTES), que ya agrupa
+  // por entrega. Si una ruta con varias entregas tiene tarimas=0 en
+  // una sola línea, ahora se identifica exactamente cuál — mismo
+  // criterio para las tres reglas de tarimas (D2/F/G).
+  const zeroTarByRutaDette = new Map();
   matched.forEach(r => {
-    const ruta = String(getMapped(r,'RUTA')||'').trim();
-    const tar  = parseInt(String(getMapped(r,'TARIMAS')||'0').replace(/\D/g,''), 10);
+    const ruta  = String(getMapped(r,'RUTA')||'').trim();
+    const dette = String(getMapped(r,'DET')||'').trim();
+    const tar   = parseInt(String(getMapped(r,'TARIMAS')||'0').replace(/\D/g,''), 10);
     if (isNaN(tar) || tar === 0) {
-      if (!zeroTarByRuta.has(ruta)) zeroTarByRuta.set(ruta, { cnt: 0, rowIds: new Set() });
-      const e = zeroTarByRuta.get(ruta);
-      e.cnt++;
+      const groupKey = ruta + '||' + dette;
+      if (!zeroTarByRutaDette.has(groupKey)) zeroTarByRutaDette.set(groupKey, { ruta, dette, rowIds: new Set() });
+      const e = zeroTarByRutaDette.get(groupKey);
       if (r._rowId) e.rowIds.add(r._rowId);
     }
   });
-  zeroTarByRuta.forEach(({ cnt, rowIds }, ruta) => rawAdd(SVE_WARN,'zero_tar', ruta,'TARIMAS',
-    `Ruta ${ruta}: tarimas = 0 o no detectadas.`,
-    'Confirma que el PDF esté correctamente asignado a esta ruta.',
-    cnt>1?`×${cnt} líneas`:'',
-    [...rowIds]));
+  zeroTarByRutaDette.forEach(({ ruta, dette, rowIds }) => rawAdd(SVE_WARN,'zero_tar', ruta,'TARIMAS',
+    `Ruta ${ruta} · Entrega ${dette||'—'}: tarimas = 0 o no detectadas.`,
+    'Confirma que el PDF esté correctamente asignado a esta entrega.',
+    '', [...rowIds], dette));
 
-  // G: Tarimas > 60 — consolidado por ruta
-  const highTarByRuta = new Map();
+  // G: Tarimas > 60 — consolidado por RUTA + ENTREGA (DETTE). Mismo
+  // cambio que F — ver nota arriba.
+  const highTarByRutaDette = new Map();
   matched.forEach(r => {
-    const ruta = String(getMapped(r,'RUTA')||'').trim();
-    const tar  = parseInt(String(getMapped(r,'TARIMAS')||'0').replace(/\D/g,''), 10);
+    const ruta  = String(getMapped(r,'RUTA')||'').trim();
+    const dette = String(getMapped(r,'DET')||'').trim();
+    const tar   = parseInt(String(getMapped(r,'TARIMAS')||'0').replace(/\D/g,''), 10);
     if (tar > 60) {
-      const prev = highTarByRuta.get(ruta) || { tar: 0, rowIds: new Set() };
+      const groupKey = ruta + '||' + dette;
+      const prev = highTarByRutaDette.get(groupKey) || { ruta, dette, tar: 0, rowIds: new Set() };
       if (tar > prev.tar) prev.tar = tar;
       if (r._rowId) prev.rowIds.add(r._rowId);
-      highTarByRuta.set(ruta, prev);
+      highTarByRutaDette.set(groupKey, prev);
     }
   });
-  highTarByRuta.forEach(({ tar, rowIds }, ruta) => rawAdd(SVE_WARN,'high_tar', ruta,'TARIMAS',
-    `Ruta ${ruta}: tarimas inusualmente altas (${tar}).`,
+  highTarByRutaDette.forEach(({ ruta, dette, tar, rowIds }) => rawAdd(SVE_WARN,'high_tar', ruta,'TARIMAS',
+    `Ruta ${ruta} · Entrega ${dette||'—'}: tarimas inusualmente altas (${tar}).`,
     'Confirma si es una carga doble o error de lectura de PDF.',
     `${tar} tar.`,
-    [...rowIds]));
+    [...rowIds], dette));
 
   // H: Rutas sin PDF — una alerta por ruta
   const noPdfByRuta = new Map();

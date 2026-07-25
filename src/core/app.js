@@ -5,15 +5,13 @@
  * CAMBIO (rediseño Preparación / Mesa de Trabajo — mockup jul-2026):
  *   Se agrega el stepper superior (Preparación → Mesa de Trabajo →
  *   Correcciones → Calidad → Exportación) + botón Administración,
- *   fiel al mockup validado por EduarDo. Solo 'prep' y 'table' son
- *   pantallas rediseñadas en esta fase — 'fix'/'quality'/'export'/
- *   'admin' son ALIAS que navegan a la pantalla 'table' y hacen scroll
- *   hasta #legacyPanel, donde vive TODA la funcionalidad que aún no
- *   tiene pantalla propia (panel SVE + exportación, catálogo de
- *   operadores, catálogos maestros, caché de facturas, historial) —
- *   sin cambios de comportamiento, solo de ubicación visual. Cuando
- *   esas pantallas se construyan en fases futuras, LEGACY_ALIASES se
- *   reduce entrada por entrada; el resto del wiring no cambia.
+ *   fiel al mockup validado por EduarDo. Solo 'prep', 'table' y 'fix'
+ *   son pantallas rediseñadas hasta ahora — 'quality'/'export'/'admin'
+ *   siguen siendo ALIAS que navegan a 'table' y hacen scroll hasta
+ *   #legacyPanel, donde vive lo que aún no tiene pantalla propia
+ *   (exportación, catálogos, historial) — sin cambios de comportamiento,
+ *   solo de ubicación visual. Cuando esas pantallas se construyan,
+ *   LEGACY_ALIASES se reduce entrada por entrada; el resto no cambia.
  *
  *   Se retira el wiring de: pipeline antiguo (#pipeStep1..4 — ya no
  *   existen, reemplazados por las tarjetas de fuente), #btnAddPDF (la
@@ -23,6 +21,20 @@
  *   del botón de editar por fila → EditSystem.locateAndEdit), botón
  *   "Reemplazar archivos" de la vista contraída de Preparación (mismo
  *   handler que antes tenía #btnClear).
+ *
+ * CAMBIO (rediseño Correcciones — mockup jul-2026):
+ *   Se agrega wiring de #fixList/#fixInfoList (delegación de clic en
+ *   las tarjetas de corrección rápida ".fix-save" → EditSystem.quickFix,
+ *   y de las tarjetas "Revisar" ".fix-review-btn" → mismo mecanismo que
+ *   ya usa el panel SVE legacy: EditSystem.locateAndEdit). A diferencia
+ *   del botón "Localizar y corregir" del panel legacy (que sí navega a
+ *   'table' para que el usuario vea la fila resaltada), el botón
+ *   "Revisar" de Correcciones NO cambia de pantalla — el drawer de
+ *   edición es un overlay `position:fixed` visible sobre cualquier
+ *   pantalla, así que el usuario permanece en Correcciones mientras
+ *   corrige. #btnGoQuality (dentro del estado "todo corregido") usa el
+ *   mismo alias hacia 'table'/#legacyPanel que el resto de pasos
+ *   todavía no rediseñados.
  *
  * Dependencias: todos los módulos de la aplicación.
  */
@@ -47,7 +59,7 @@ const STEPS = [
 ];
 // Pantallas todavía no rediseñadas — ver nota de cabecera. Alias hacia
 // 'table', con scroll a #legacyPanel donde vive la funcionalidad real.
-const LEGACY_ALIASES = new Set(['fix', 'quality', 'export', 'admin']);
+const LEGACY_ALIASES = new Set(['quality', 'export', 'admin']);
 let currentStepIdx = 0;
 
 function renderStepper() {
@@ -162,6 +174,29 @@ export async function init() {
   const btnGoFix = document.getElementById('btnGoFix');
   if (btnGoFix) btnGoFix.addEventListener('click', () => goStep('fix'));
 
+  // ── Correcciones — tarjetas de corrección rápida y "Revisar" ──
+  const handleFixCardClick = e => {
+    const saveBtn = e.target.closest('.fix-save');
+    if (saveBtn) {
+      const card  = saveBtn.closest('.fix-card');
+      const input = card.querySelector('.fix-input');
+      if (!input.value.trim()) { input.focus(); input.classList.add('fix-input-error'); return; }
+      const rowIds = JSON.parse(saveBtn.dataset.fixRowids || '[]');
+      EditSystem.quickFix(rowIds, saveBtn.dataset.fixKey, input.value);
+      return;
+    }
+    const reviewBtn = e.target.closest('.fix-review-btn');
+    if (reviewBtn) {
+      EditSystem.locateAndEdit(reviewBtn.dataset.locateRuta, reviewBtn.dataset.locateField, reviewBtn.dataset.locateIds || '[]');
+    }
+  };
+  document.getElementById('fixList').addEventListener('click', handleFixCardClick);
+  document.getElementById('fixInfoList').addEventListener('click', handleFixCardClick);
+
+  // ── Correcciones — "Todo corregido" → Dashboard de Calidad (alias) ──
+  const btnGoQuality = document.getElementById('btnGoQuality');
+  if (btnGoQuality) btnGoQuality.addEventListener('click', () => goStep('quality'));
+
   // ── SVE — barra de resumen colapsable ──
   document.getElementById('sveSummaryToggle').addEventListener('click', () =>
     document.getElementById('svePanel').classList.toggle('expanded'));
@@ -270,8 +305,10 @@ export async function init() {
 
   // ── Init visual (no depende del catálogo) ──
   UI.setActionsEnabled(false);
+  UI.resetFixPeak();
   UI.updatePrepView(['PDFs de cargas','Excel macro (RUTEO NUEVO)',"Status de despacho (RUTA + ID'S MASTER)",'Reporte WTMS']);
   UI.renderTable();
+  UI.renderFixList();
   UI.updateHealthRail();
   UI.applyMode();
 

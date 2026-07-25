@@ -310,6 +310,62 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 .row-highlight{outline:2px solid var(--amber)!important;background:var(--amber-soft)!important;animation:rowPulse .6s ease 2}
 @keyframes rowPulse{0%,100%{background:var(--amber-soft)}50%{background:#FEF08A}}
 
+/* ══════════════════ CORRECCIONES ══════════════════ */
+.fix-hd{display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap}
+.fix-counter{font-family:var(--disp);font-weight:800;font-size:34px;color:var(--red);line-height:1}
+[data-theme="dark"] .fix-counter{color:#FF7A80}
+.fix-counter.done{color:var(--green)}
+.fix-counter-label{font-size:11px;color:var(--text-3);font-weight:600}
+.fix-progress-track{flex:1;min-width:160px;height:6px;border-radius:100px;background:var(--surface-3);overflow:hidden}
+.fix-progress-fill{height:100%;border-radius:100px;background:linear-gradient(90deg,var(--red),var(--amber),var(--green));transition:width .5s ease}
+
+.fix-list{display:flex;flex-direction:column;gap:10px}
+.fix-card{
+  display:flex;align-items:center;gap:16px;padding:14px 18px;background:var(--surface);
+  border:1px solid var(--border);border-left:3px solid var(--red);border-radius:var(--r);box-shadow:var(--shadow-sm);
+  transition:all .3s ease;flex-wrap:wrap;
+}
+.fix-card.warn{border-left-color:var(--amber)}
+.fix-card.info{border-left-color:var(--blue)}
+.fix-ruta{font-family:var(--mono);font-weight:800;font-size:14px;color:var(--navy);min-width:70px}
+[data-theme="dark"] .fix-ruta{color:var(--amber)}
+.fix-dette{font-family:var(--mono);font-size:9px;font-weight:600;color:var(--text-3);margin-top:2px}
+.fix-field-info{min-width:150px}
+.fix-field-label{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);margin-bottom:2px}
+.fix-field-desc{font-size:11.5px;color:var(--text-2)}
+.fix-input-wrap{flex:1;min-width:160px;max-width:260px}
+.fix-input{
+  width:100%;padding:8px 12px;border-radius:9px;border:1.5px solid var(--red);background:var(--red-soft);
+  font-family:var(--mono);font-size:12.5px;outline:none;color:var(--text);transition:all .15s;
+}
+.fix-input:focus{box-shadow:0 0 0 3px rgba(229,72,77,.15)}
+.fix-input::placeholder{color:var(--text-3)}
+.fix-input-error{border-color:var(--red)!important;box-shadow:0 0 0 3px rgba(229,72,77,.2)!important}
+.fix-card.info .fix-input{border-color:var(--blue);background:var(--blue-soft)}
+.fix-card.info .fix-input:focus{box-shadow:0 0 0 3px rgba(62,123,250,.15)}
+.fix-save{
+  background:var(--green);color:#fff;padding:8px 16px;border-radius:9px;font-size:11.5px;font-weight:700;
+  display:flex;align-items:center;gap:6px;transition:all .15s;flex-shrink:0;
+}
+.fix-save:hover{filter:brightness(1.1);transform:translateY(-1px)}
+.fix-review-btn{
+  background:var(--surface-3);color:var(--text-2);border:1px solid var(--border-2);padding:8px 16px;border-radius:9px;
+  font-size:11.5px;font-weight:700;display:flex;align-items:center;gap:6px;transition:all .15s;flex-shrink:0;
+}
+.fix-review-btn:hover{background:var(--amber);color:#1A0F00;border-color:var(--amber)}
+.fix-hint{font-size:10.5px;color:var(--text-3);font-style:italic;max-width:220px}
+
+.fix-empty{text-align:center;padding:60px 20px;display:none}
+.fix-empty.show{display:block}
+.fix-empty-ico{font-size:44px;margin-bottom:14px}
+.fix-empty-title{font-family:var(--disp);font-weight:800;font-size:18px;margin-bottom:6px}
+.fix-empty-sub{font-size:12px;color:var(--text-3)}
+
+.fix-info-section{margin-top:28px}
+.fix-info-hd{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.fix-info-hd .eyebrow{margin-bottom:0}
+.fix-info-hd span{font-size:11px;color:var(--text-3)}
+
 /* ── PUENTE VISUAL: componentes aún no rediseñados (#legacyPanel) ──
    Reutilizan las clases y comportamiento EXACTOS de la versión
    anterior de SmartDispatch — panel SVE, catálogos, historial,
@@ -829,6 +885,47 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
             <div class="cat-status" id="mcStatus"></div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- ══════════ CORRECCIONES ══════════ -->
+    <section class="screen" data-screen="fix">
+      <div class="screen-hd">
+        <div>
+          <div class="eyebrow">Paso 3 de 5</div>
+          <div class="screen-title">Correcciones</div>
+          <div class="screen-sub">Resuelve cada incidencia sin salir de esta pantalla — un campo, un valor, listo.</div>
+        </div>
+      </div>
+
+      <div class="fix-hd">
+        <div>
+          <div class="fix-counter" id="fixCounter">0</div>
+          <div class="fix-counter-label">incidencias pendientes</div>
+        </div>
+        <div class="fix-progress-track"><div class="fix-progress-fill" id="fixProgress" style="width:0%"></div></div>
+      </div>
+
+      <div class="fix-list" id="fixList"></div>
+
+      <div class="fix-empty" id="fixEmpty">
+        <div class="fix-empty-ico" id="fixEmptyIco">📥</div>
+        <div class="fix-empty-title" id="fixEmptyTitle">Aún no hay datos</div>
+        <div class="fix-empty-sub" id="fixEmptySub">Completa las 4 fuentes en Preparación para empezar a corregir.</div>
+        <div style="margin-top:18px"><button class="btn btn-amber" id="btnGoQuality">Ver Dashboard de Calidad →</button></div>
+      </div>
+
+      <!-- Cita — SIEMPRE informativa, nunca bloquea la exportación.
+           Se muestra aparte y NO cuenta en el contador de incidencias
+           pendientes (decisión confirmada con EduarDo) — no todas las
+           entregas requieren cita, así que tratarla como "pendiente"
+           urgente sería engañoso. -->
+      <div class="fix-info-section" id="fixInfoSection" style="display:none">
+        <div class="fix-info-hd">
+          <div class="eyebrow">📅 Citas sin capturar</div>
+          <span>— informativo, no bloquea la exportación</span>
+        </div>
+        <div class="fix-list" id="fixInfoList"></div>
       </div>
     </section>
 

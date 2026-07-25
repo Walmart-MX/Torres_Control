@@ -161,65 +161,94 @@ export const EditSystem = {
     }
   },
 
-  saveAndRevalidate() {
-    if (!EditSystem._currentRowId) return;
+  /**
+   * Aplica un cambio de campo a una o más filas, con los mismos efectos
+   * secundarios que antes vivían solo dentro de saveAndRevalidate():
+   * recálculo de _wtmsAmbiguous, propagación de Licencia a todas las
+   * entregas del mismo operador + sincronización con el catálogo, y
+   * registro en State.edits (auditoría + fuente del status pill
+   * "Corregida" en la Mesa de Trabajo).
+   *
+   * NUEVO (Correcciones — mockup jul-2026): antes esta lógica vivía
+   * inline en el forEach de saveAndRevalidate() y solo la usaba el
+   * drawer completo. Se extrae aquí para que las tarjetas de
+   * "corrección rápida" de Correcciones (un campo, un valor) la
+   * reutilicen sin duplicar la propagación de licencia ni el recálculo
+   * de WTMS ambiguo — un solo lugar define "qué pasa cuando cambia
+   * este campo", sin importar desde qué pantalla se editó.
+   *
+   * No-op silencioso por fila si newVal es idéntico al valor actual —
+   * seguro de llamar aunque el campo no haya cambiado.
+   *
+   * @param {string[]} rowIds — _rowId de las filas a editar (normalmente 1;
+   *   puede ser más de 1 para incidencias de ruta completa, ej. Operador
+   *   faltante en varias entregas de la misma ruta)
+   * @param {string} field — clave del campo en State.merged (ej. 'OPERADOR', '_LIC', 'TARIMAS')
+   * @param {string} newVal
+   * @param {{ts?: string}} [opts] — ts opcional para que varios campos de un mismo guardado compartan timestamp
+   * @returns {boolean} true si se aplicó al menos un cambio real
+   */
+  applyFieldEdit(rowIds, field, newVal, opts = {}) {
+    const ts = opts.ts || new Date().toLocaleString('es-MX');
+    let appliedAny = false;
 
-    const found = EditSystem.findByRowId(EditSystem._currentRowId);
-    if (!found) { console.warn('[EditSystem] Row disappeared before save:', EditSystem._currentRowId); return; }
-    const { row } = found;
+    (rowIds || []).forEach(rowId => {
+      const found = EditSystem.findByRowId(rowId);
+      if (!found) { console.warn('[EditSystem] rowId no encontrado al aplicar edición:', rowId); return; }
+      const { row } = found;
 
-    const inputs = document.getElementById('editFieldsGrid').querySelectorAll('.edit-field-input');
-    const ts     = new Date().toLocaleString('es-MX');
+      const oldVal = String(row[field] || '');
+      if (newVal === oldVal) return;
+      row[field] = newVal;
+      appliedAny = true;
 
-    inputs.forEach(inp => {
-      const field  = inp.dataset.field;
-      const newVal = inp.value.trim();
-      const oldVal = EditSystem._originalValues[field] || '';
-      if (newVal !== oldVal) {
-        row[field] = newVal;
-
-        if (field === '_ID_RETORNO' || field === '_CARTA_PORTE') {
-          const stillAmbiguous =
-            String(row['_ID_RETORNO']  || '').includes(',') ||
-            String(row['_CARTA_PORTE'] || '').includes(',');
-          row['_wtmsAmbiguous'] = stillAmbiguous;
-        }
-
-        if (field === '_LIC') {
-          row['LIC.'] = newVal;
-
-          const opNorm = normOp(row['OPERADOR'] || '');
-          let propagated = 0;
-          if (opNorm) {
-            State.merged.forEach(r => {
-              if (r === row) return;
-              if (normOp(r['OPERADOR'] || '') === opNorm && r['_LIC'] !== newVal) {
-                r['_LIC'] = newVal;
-                r['LIC.'] = newVal;
-                propagated++;
-              }
-            });
-          }
-          if (propagated) console.log(`[EditSystem] Licencia propagada a ${propagated} entrega(s) adicional(es) del mismo operador.`);
-
-          const opName = String(row['OPERADOR'] || '').trim();
-          if (opName && newVal) {
-            addOperator(opName, newVal).then(result => {
-              UI.renderCatalog();
-              if (!result.ok) console.warn('[EditSystem] No se pudo sincronizar la licencia con el catálogo:', result.msg);
-            });
-          }
-        }
-        State.edits.push({
-          rowId: EditSystem._currentRowId,
-          ruta:  String(row['RUTA']||''),
-          field, oldVal, newVal, ts,
-          user:  State.user
-        });
+      if (field === '_ID_RETORNO' || field === '_CARTA_PORTE') {
+        row['_wtmsAmbiguous'] =
+          String(row['_ID_RETORNO']  || '').includes(',') ||
+          String(row['_CARTA_PORTE'] || '').includes(',');
       }
+
+      if (field === '_LIC') {
+        row['LIC.'] = newVal;
+
+        const opNorm = normOp(row['OPERADOR'] || '');
+        let propagated = 0;
+        if (opNorm) {
+          State.merged.forEach(r => {
+            if (r === row) return;
+            if (normOp(r['OPERADOR'] || '') === opNorm && r['_LIC'] !== newVal) {
+              r['_LIC'] = newVal;
+              r['LIC.'] = newVal;
+              propagated++;
+            }
+          });
+        }
+        if (propagated) console.log(`[EditSystem] Licencia propagada a ${propagated} entrega(s) adicional(es) del mismo operador.`);
+
+        const opName = String(row['OPERADOR'] || '').trim();
+        if (opName && newVal) {
+          addOperator(opName, newVal).then(result => {
+            UI.renderCatalog();
+            if (!result.ok) console.warn('[EditSystem] No se pudo sincronizar la licencia con el catálogo:', result.msg);
+          });
+        }
+      }
+
+      State.edits.push({ rowId, ruta: String(row['RUTA']||''), field, oldVal, newVal, ts, user: State.user });
     });
 
-    EditSystem.close();
+    return appliedAny;
+  },
+
+  /**
+   * Remate común tras cualquier edición (drawer completo o corrección
+   * rápida de Correcciones): re-pinta la tabla, recorre el SVE con el
+   * dataset actualizado, guarda State.sveIssues, y vuelve a pintar
+   * tanto la Mesa de Trabajo (status pill por fila) como Correcciones
+   * (lista de incidencias pendientes) con el resultado fresco.
+   * @private
+   */
+  _revalidateAfterEdit() {
     UI.renderTable();
     UI.updateStats();
 
@@ -232,12 +261,47 @@ export const EditSystem = {
       State.sveIssues = [];
       UI.resetSVE();
     }
-    // Re-pinta la tabla: el status pill de cada fila depende de
-    // State.sveIssues, que recién se actualizó arriba — ver nota de
-    // cabecera del módulo.
+    // El status pill de cada fila y la lista de Correcciones dependen
+    // de State.sveIssues, recién actualizado arriba.
     UI.renderTable();
+    UI.renderFixList();
     UI.updateHealthRail();
     UI.applyMode();
+  },
+
+  /**
+   * Punto de entrada de las tarjetas de "corrección rápida" en
+   * Correcciones — un campo, un valor, sin abrir el drawer completo.
+   * @param {string[]} rowIds
+   * @param {string} field
+   * @param {string} newVal
+   * @returns {boolean} true si se aplicó el cambio
+   */
+  quickFix(rowIds, field, newVal) {
+    const val = String(newVal || '').trim();
+    if (!val) return false;
+    const applied = EditSystem.applyFieldEdit(rowIds, field, val);
+    if (applied) EditSystem._revalidateAfterEdit();
+    return applied;
+  },
+
+  saveAndRevalidate() {
+    if (!EditSystem._currentRowId) return;
+
+    const found = EditSystem.findByRowId(EditSystem._currentRowId);
+    if (!found) { console.warn('[EditSystem] Row disappeared before save:', EditSystem._currentRowId); return; }
+
+    const inputs = document.getElementById('editFieldsGrid').querySelectorAll('.edit-field-input');
+    const ts     = new Date().toLocaleString('es-MX');
+
+    inputs.forEach(inp => {
+      const field  = inp.dataset.field;
+      const newVal = inp.value.trim();
+      EditSystem.applyFieldEdit([EditSystem._currentRowId], field, newVal, { ts });
+    });
+
+    EditSystem.close();
+    EditSystem._revalidateAfterEdit();
   },
 
   close() {

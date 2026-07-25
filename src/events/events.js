@@ -183,6 +183,7 @@ export const Events = {
       State.merged = [];
       State.sveIssues = [];
       UI.renderTable();
+      UI.renderFixList();
       UI.updateStats();
       UI.resetSVE();
       UI.setActionsEnabled(false);
@@ -192,6 +193,10 @@ export const Events = {
     }
 
     runMerge();
+    // Nuevo merge completo = nueva sesión de corrección — el progreso
+    // de Correcciones (% resuelto) arranca de cero contra el total
+    // fresco de este merge, no contra el de la corrida anterior.
+    UI.resetFixPeak();
     UI.renderTable();
     UI.updateStats();
     UI.setActionsEnabled(true);
@@ -205,9 +210,10 @@ export const Events = {
         State.sveIssues = [];
         UI.resetSVE();
       }
-      // El status pill por fila depende de State.sveIssues, recién
-      // poblado arriba — se repinta la tabla para reflejarlo.
+      // El status pill por fila y la lista de Correcciones dependen de
+      // State.sveIssues, recién poblado arriba.
       UI.renderTable();
+      UI.renderFixList();
       UI.updateHealthRail();
       UI.applyMode();
     }, 100);

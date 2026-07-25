@@ -71,6 +71,29 @@ export function _setEvents(ev) { Events = ev; }
 let _tableFilter = 'all';
 let _tableSearch = '';
 
+// ── Correcciones — clasificación de incidencias (NUEVO, mockup jul-2026) ──
+// Reglas cuyo issue mapea 1:1 a UN solo campo editable — candidatas a
+// tarjeta de "corrección rápida" (input inline). Cualquier otra regla
+// CRÍTICA/ADVERTENCIA (dup_march, no_pdf, wtms_ambiguous, no_ventana,
+// no_pool, cat_dup) se muestra como tarjeta "Revisar", que abre el
+// drawer completo — no tienen un único campo+valor claro que resolver
+// con un input suelto. Ver features/validation/sve.js para el porqué
+// de cada field.
+const QUICKFIX_RULES = new Set(['missing', 'no_march', 'zero_tar', 'high_tar']);
+const QUICKFIX_FIELD_MAP = {
+  'OPERADOR':   { key: 'OPERADOR',   label: 'Operador',   placeholder: 'Nombre del operador…' },
+  'LIC.':       { key: '_LIC',       label: 'Licencia',   placeholder: 'Número de licencia…' },
+  'TARIMAS':    { key: 'TARIMAS',    label: 'Tarimas',    placeholder: 'Cantidad de tarimas…' },
+  'MARCHAMO 1': { key: 'MARCHAMO 1', label: 'Marchamo 1', placeholder: 'Número de marchamo…' },
+  'CITA':       { key: 'CITA',       label: 'Cita',       placeholder: 'DD/MM/AAAA HH:MM' },
+};
+// Total "pico" de incidencias accionables desde el último merge completo
+// — referencia para la barra de progreso de Correcciones (% resuelto
+// dentro de ESTA sesión de corrección). null = sin baseline todavía;
+// se fija la primera vez que renderFixList() corre tras un merge nuevo
+// (ver UI.resetFixPeak(), llamado desde Events.triggerMerge()).
+let _fixPeakTotal = null;
+
 // Mapea la clave de fuente ('pdf'|'xls'|'wtms'|'desp') al sufijo de
 // IDs usado en el HTML de Preparación (#dropPDF/#pdfSub/#pdfStatus, etc).
 const SOURCE_ID = { pdf: 'PDF', xls: 'XLS', wtms: 'WTMS', desp: 'DESP' };
@@ -399,6 +422,121 @@ export const UI = {
       UI.appendSourceNote('xls', `⟳ ${cacheHits} fact. históricas (${fcStats.dates[0] || ''})`);
     }
     UI._updateWorktableSub();
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // ── CORRECCIONES — pantalla dedicada (NUEVO, mockup jul-2026) ──
+  // ═══════════════════════════════════════════════════════════════
+
+  /** Reinicia el baseline de la barra de progreso — llamar tras un merge completo (Events.triggerMerge), NUNCA tras una edición individual (revalidateAfterEdit), para que el progreso avance dentro de la sesión de corrección en vez de resetearse con cada guardado. */
+  resetFixPeak() { _fixPeakTotal = null; },
+
+  /**
+   * Clasifica las incidencias accionables (CRÍTICA/ADVERTENCIA) de
+   * State.sveIssues en "corrección rápida" (un campo editable claro) vs
+   * "revisar" (todo lo demás — necesita el drawer completo). CITA
+   * (no_cita) es siempre INFORMATIVA — nunca entra en `quick`/`review`,
+   * se devuelve aparte en `info` y no cuenta para el contador de
+   * "incidencias pendientes" (decisión confirmada con EduarDo).
+   * @private
+   */
+  _buildFixBuckets() {
+    const issues = State.sveIssues || [];
+    const quick = [], review = [];
+    issues.forEach(issue => {
+      if (issue.sev !== SVE_CRIT && issue.sev !== SVE_WARN) return;
+      const canQuickFix = QUICKFIX_RULES.has(issue.rule) && QUICKFIX_FIELD_MAP[issue.field] && issue.rowIds && issue.rowIds.length;
+      (canQuickFix ? quick : review).push(issue);
+    });
+    const info = issues.filter(i => i.rule === 'no_cita');
+    return { quick, review, info };
+  },
+
+  /** Tarjeta de corrección rápida — input inline + Guardar. @private */
+  _fixCardQuick(issue, variant) {
+    const qf    = QUICKFIX_FIELD_MAP[issue.field];
+    const sevCls = variant === 'info' ? 'info' : (issue.sev === SVE_WARN ? 'warn' : '');
+    const dette  = issue.dette ? `<div class="fix-dette">Entrega ${escH(issue.dette)}</div>` : '';
+    const rowIds = escH(JSON.stringify(issue.rowIds || []));
+    return `
+      <div class="fix-card ${sevCls}">
+        <div class="fix-ruta">${escH(issue.ruta || '—')}${dette}</div>
+        <div class="fix-field-info"><div class="fix-field-label">${escH(qf.label)}</div><div class="fix-field-desc">${escH(issue.desc)}</div></div>
+        <div class="fix-input-wrap"><input class="fix-input" placeholder="${escH(qf.placeholder)}"></div>
+        <button class="fix-save" data-fix-rowids="${rowIds}" data-fix-key="${escH(qf.key)}">✓ Guardar</button>
+      </div>`;
+  },
+
+  /** Tarjeta "Revisar" — abre el drawer completo (o el selector de ruta si aplica a varias filas). Sin botón cuando la incidencia no tiene ruta asociada (ej. duplicados de catálogo) — se muestra la acción sugerida como texto. @private */
+  _fixCardReview(issue) {
+    const sevCls = issue.sev === SVE_WARN ? 'warn' : '';
+    const dette  = issue.dette ? `<div class="fix-dette">Entrega ${escH(issue.dette)}</div>` : '';
+    const rowIds = escH(JSON.stringify(issue.rowIds || []));
+    const action = issue.ruta
+      ? `<button class="fix-review-btn" data-locate-ruta="${escH(issue.ruta)}" data-locate-field="${escH(issue.field)}" data-locate-ids="${rowIds}">🔍 Revisar</button>`
+      : `<div class="fix-hint">${escH(issue.action)}</div>`;
+    return `
+      <div class="fix-card ${sevCls} fix-card-review">
+        <div class="fix-ruta">${escH(issue.ruta || '—')}${dette}</div>
+        <div class="fix-field-info"><div class="fix-field-label">${escH(issue.field)}</div><div class="fix-field-desc">${escH(issue.desc)}</div></div>
+        <div class="fix-input-wrap"></div>
+        ${action}
+      </div>`;
+  },
+
+  /** Pinta la pantalla completa de Correcciones — contador, barra de progreso, lista de tarjetas y la sección aparte de Cita. */
+  renderFixList() {
+    const list      = document.getElementById('fixList');
+    const counter   = document.getElementById('fixCounter');
+    const progress  = document.getElementById('fixProgress');
+    const empty     = document.getElementById('fixEmpty');
+    const emptyIco  = document.getElementById('fixEmptyIco');
+    const emptyTtl  = document.getElementById('fixEmptyTitle');
+    const emptySub  = document.getElementById('fixEmptySub');
+    const infoWrap  = document.getElementById('fixInfoSection');
+    const infoList  = document.getElementById('fixInfoList');
+    if (!list || !counter || !progress) return;
+
+    const { ok } = Events ? Events.checkSources() : { ok: true };
+
+    if (!ok || !State.merged.length) {
+      list.innerHTML = '';
+      counter.textContent = '0';
+      counter.classList.remove('done');
+      progress.style.width = '0%';
+      empty.classList.add('show');
+      if (emptyIco) emptyIco.textContent = '📥';
+      if (emptyTtl) emptyTtl.textContent = 'Aún no hay datos';
+      if (emptySub) emptySub.textContent = 'Completa las 4 fuentes en Preparación para empezar a corregir.';
+      if (infoWrap) infoWrap.style.display = 'none';
+      return;
+    }
+
+    const { quick, review, info } = UI._buildFixBuckets();
+    const total = quick.length + review.length;
+
+    if (_fixPeakTotal === null || total > _fixPeakTotal) _fixPeakTotal = total;
+    const pct = _fixPeakTotal > 0 ? Math.round((1 - total / _fixPeakTotal) * 100) : (total === 0 ? 100 : 0);
+
+    counter.textContent = total;
+    counter.classList.toggle('done', total === 0);
+    progress.style.width = pct + '%';
+
+    if (!total) {
+      list.innerHTML = '';
+      empty.classList.add('show');
+      if (emptyIco) emptyIco.textContent = '🎉';
+      if (emptyTtl) emptyTtl.textContent = 'Todo corregido';
+      if (emptySub) emptySub.textContent = 'Ya no quedan incidencias pendientes — continúa al Dashboard de Calidad.';
+    } else {
+      empty.classList.remove('show');
+      list.innerHTML = quick.map(i => UI._fixCardQuick(i)).join('') + review.map(i => UI._fixCardReview(i)).join('');
+    }
+
+    if (infoWrap) {
+      infoWrap.style.display = info.length ? '' : 'none';
+      if (infoList) infoList.innerHTML = info.map(i => UI._fixCardQuick(i, 'info')).join('');
+    }
   },
 
   // ── SVE (panel de incidencias — vive en #legacyPanel por ahora) ──
@@ -798,8 +936,10 @@ export const UI = {
     UI.clearErrors();
     UI.hideProgress();
     UI.setActionsEnabled(false);
+    UI.resetFixPeak();
     UI.updatePrepView(['PDFs de cargas','Excel macro (RUTEO NUEVO)',"Status de despacho (RUTA + ID'S MASTER)",'Reporte WTMS']);
     UI.renderTable();
+    UI.renderFixList();
     UI.updateStats();
     UI.updateHealthRail();
     UI.applyMode();
