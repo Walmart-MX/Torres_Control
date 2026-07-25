@@ -261,10 +261,11 @@ export const EditSystem = {
       State.sveIssues = [];
       UI.resetSVE();
     }
-    // El status pill de cada fila y la lista de Correcciones dependen
-    // de State.sveIssues, recién actualizado arriba.
+    // El status pill de cada fila, Correcciones y Calidad dependen de
+    // State.sveIssues, recién actualizado arriba.
     UI.renderTable();
     UI.renderFixList();
+    UI.renderQualityScreen();
     UI.updateHealthRail();
     UI.applyMode();
   },

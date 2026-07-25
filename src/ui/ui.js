@@ -87,6 +87,12 @@ const QUICKFIX_FIELD_MAP = {
   'MARCHAMO 1': { key: 'MARCHAMO 1', label: 'Marchamo 1', placeholder: 'Número de marchamo…' },
   'CITA':       { key: 'CITA',       label: 'Cita',       placeholder: 'DD/MM/AAAA HH:MM' },
 };
+// Calidad inicial de ESTA sesión de corrección (antes de cualquier
+// arreglo) — referencia para el "antes/después" del Dashboard de
+// Calidad. null = sin baseline todavía; se fija la primera vez que
+// renderQualityScreen() corre tras un merge nuevo (ver
+// UI.resetQualityBaseline(), llamado desde Events.triggerMerge()).
+let _qualityBaseline = null;
 // Total "pico" de incidencias accionables desde el último merge completo
 // — referencia para la barra de progreso de Correcciones (% resuelto
 // dentro de ESTA sesión de corrección). null = sin baseline todavía;
@@ -422,6 +428,106 @@ export const UI = {
       UI.appendSourceNote('xls', `⟳ ${cacheHits} fact. históricas (${fcStats.dates[0] || ''})`);
     }
     UI._updateWorktableSub();
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // ── CALIDAD — Dashboard con Quality Ring (NUEVO, mockup jul-2026) ──
+  // ═══════════════════════════════════════════════════════════════
+
+  /** Reinicia el "antes" del comparativo de calidad — llamar junto a resetFixPeak(), en el mismo momento (merge fresco), nunca tras una edición individual. */
+  resetQualityBaseline() { _qualityBaseline = null; },
+
+  /** Pinta el Dashboard de Calidad: ring SVG, comparativo antes/después, grilla de métricas y CTA de cierre. */
+  renderQualityScreen() {
+    const ringArc  = document.getElementById('qArc');
+    const ringNum  = document.getElementById('qRingNum');
+    const heroTtl  = document.getElementById('qHeroTitle');
+    const heroSub  = document.getElementById('qHeroSub');
+    const baInit   = document.getElementById('qBaInitial');
+    const baFinal  = document.getElementById('qBaFinal');
+    const metrics  = document.getElementById('qMetrics');
+    const ctaWrap  = document.getElementById('qFinalCta');
+    if (!ringArc || !metrics) return;
+
+    const { ok } = Events ? Events.checkSources() : { ok: true };
+    const CIRC = 452.4; // 2·π·72 — mismo radio que el SVG del anillo
+
+    if (!ok || !State.merged.length) {
+      ringArc.style.strokeDashoffset = CIRC;
+      if (ringNum) ringNum.textContent = '—';
+      if (heroTtl) heroTtl.textContent = 'Aún no hay datos';
+      if (heroSub) heroSub.textContent = 'Completa las 4 fuentes en Preparación y corrige las incidencias para ver el resultado aquí.';
+      if (baInit)  baInit.textContent  = '—';
+      if (baFinal) baFinal.textContent = '—';
+      metrics.innerHTML = '';
+      if (ctaWrap) ctaWrap.innerHTML = '';
+      return;
+    }
+
+    const quality = State.sveLastQuality;
+    if (_qualityBaseline === null) _qualityBaseline = quality;
+
+    ringArc.style.strokeDashoffset = String(CIRC * (1 - quality / 100));
+    if (ringNum) ringNum.textContent = quality + '%';
+
+    const { quick, review } = UI._buildFixBuckets();
+    const currentTotal = quick.length + review.length;
+    const resolved = _fixPeakTotal !== null ? Math.max(0, _fixPeakTotal - currentTotal) : 0;
+    const total = State.merged.length;
+
+    if (heroTtl) {
+      heroTtl.textContent = quality >= 95 ? 'Excelente trabajo — el día está casi listo'
+        : quality >= 80 ? 'Buen avance — quedan algunos detalles'
+        : 'Aún hay trabajo por hacer';
+    }
+    if (heroSub) {
+      heroSub.textContent = resolved > 0
+        ? `Se corrigieron ${resolved} incidencia${resolved!==1?'s':''} sobre ${total} ruta${total!==1?'s':''} procesada${total!==1?'s':''}. La calidad mejoró desde el primer cruce automático.`
+        : `${total} ruta${total!==1?'s':''} procesada${total!==1?'s':''} — calidad ${quality}% desde el primer cruce automático.`;
+    }
+    if (baInit)  baInit.textContent  = _qualityBaseline + '%';
+    if (baFinal) baFinal.textContent = quality + '%';
+
+    const facOk  = State.merged.filter(r => String(getMapped(r,'FAC.')||'').trim()).length;
+    const opOk   = State.merged.filter(r => String(getMapped(r,'OPERADOR')||'').trim()).length;
+    const marchOk= State.merged.filter(r => String(getMapped(r,'MARCHAMO 1')||'').trim()).length;
+    const remOk  = State.merged.filter(r => String(r['PLACA REMOLQUE']||'').trim()).length;
+    const timeAnomalies = (State.sveIssues||[]).filter(i => i.rule === 'time_anomaly').length;
+    const dupPending    = (State.sveIssues||[]).filter(i => i.rule === 'dup_march' || i.rule === 'cat_dup').length;
+    const captureMin = State.captureStartedAt ? Math.max(1, Math.round((Date.now() - State.captureStartedAt) / 60000)) : 0;
+
+    const METRIC_DEFS = [
+      { ico:'🔧', trend: resolved ? `${resolved} aplicadas` : '', val: resolved, label: 'Correcciones realizadas' },
+      { ico:'🧾', trend: `${Math.round(facOk/total*100)}%`,   val: `${facOk}/${total}`,   label: 'Facturas completas' },
+      { ico:'🪪', trend: `${Math.round(opOk/total*100)}%`,    val: `${opOk}/${total}`,    label: 'Operadores completos' },
+      { ico:'🔖', trend: `${Math.round(marchOk/total*100)}%`, val: `${marchOk}/${total}`, label: 'Marchamos completos' },
+      { ico:'🚚', trend: `${Math.round(remOk/total*100)}%`,   val: `${remOk}/${total}`,   label: 'Remolques completos' },
+      { ico:'⏱️', trend: '', val: timeAnomalies, label: 'Anomalías de tiempo' },
+      { ico:'🔗', trend: '', val: dupPending,    label: 'Duplicados sin resolver' },
+      { ico:'⏳', trend: '', val: captureMin ? `${captureMin} min` : '—', label: 'Tiempo de captura' },
+    ];
+    metrics.innerHTML = METRIC_DEFS.map(m => `
+      <div class="q-metric">
+        <div class="q-metric-top"><span class="q-metric-ico">${m.ico}</span>${m.trend ? `<span class="q-metric-trend">${escH(String(m.trend))}</span>` : ''}</div>
+        <div class="q-metric-val">${escH(String(m.val))}</div>
+        <div class="q-metric-label">${m.label}</div>
+      </div>`).join('');
+
+    if (ctaWrap) {
+      if (State.sveHasCritical) {
+        ctaWrap.className = 'q-final-cta q-final-cta-blocked';
+        ctaWrap.innerHTML = `
+          <div class="q-final-txt"><strong style="color:var(--red)">⚠ Exportación bloqueada</strong><span>Todavía hay errores críticos pendientes — corrígelos antes de continuar.</span></div>
+          <button class="btn btn-primary" id="qBtnGoFix">Volver a Correcciones →</button>`;
+        document.getElementById('qBtnGoFix')?.addEventListener('click', () => document.querySelector('.step[data-goto="fix"]')?.click());
+      } else {
+        ctaWrap.className = 'q-final-cta';
+        ctaWrap.innerHTML = `
+          <div class="q-final-txt"><strong>✓ Listo para exportar</strong><span>Sin errores críticos pendientes — el archivo final refleja ${total} ruta${total!==1?'s':''}.</span></div>
+          <button class="btn btn-amber" id="qBtnGoExport">Continuar a Exportación →</button>`;
+        document.getElementById('qBtnGoExport')?.addEventListener('click', () => document.querySelector('.step[data-goto="export"]')?.click());
+      }
+    }
   },
 
   // ═══════════════════════════════════════════════════════════════
@@ -915,6 +1021,7 @@ export const UI = {
     State.sveHasCritical = false;
     State.sveHasWarnings = false;
     State.sveLastQuality = 100;
+    State.captureStartedAt = null;
 
     UI.setSourceStatus('pdf',  false, 'Arrastra o haz clic', 'Todos los archivos del día a la vez');
     UI.setSourceStatus('xls',  false, 'Arrastra o haz clic', 'Lee ambas pestañas automáticamente');
@@ -937,9 +1044,11 @@ export const UI = {
     UI.hideProgress();
     UI.setActionsEnabled(false);
     UI.resetFixPeak();
+    UI.resetQualityBaseline();
     UI.updatePrepView(['PDFs de cargas','Excel macro (RUTEO NUEVO)',"Status de despacho (RUTA + ID'S MASTER)",'Reporte WTMS']);
     UI.renderTable();
     UI.renderFixList();
+    UI.renderQualityScreen();
     UI.updateStats();
     UI.updateHealthRail();
     UI.applyMode();

@@ -82,6 +82,14 @@ export const State = {
   // core/app.js.
   todaySession: null,
 
+  // Marca de tiempo del primer merge exitoso de la sesión (las 4
+  // fuentes completas por primera vez) — NUEVO (Calidad, mockup
+  // jul-2026). Alimenta el metric "Tiempo de captura" del Dashboard de
+  // Calidad. Se fija UNA sola vez por sesión (Events.triggerMerge no
+  // la reescribe en merges subsecuentes causados por re-importar un
+  // catálogo) y se limpia en UI.resetAll().
+  captureStartedAt: null,
+
   // Computed helpers
   get matchCount()  { return this.merged.filter(r => r._matched).length; },
   get licCount()    { return this.merged.filter(r => r._LIC).length; },

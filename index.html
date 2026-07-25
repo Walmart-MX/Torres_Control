@@ -310,6 +310,34 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 .row-highlight{outline:2px solid var(--amber)!important;background:var(--amber-soft)!important;animation:rowPulse .6s ease 2}
 @keyframes rowPulse{0%,100%{background:var(--amber-soft)}50%{background:#FEF08A}}
 
+/* ══════════════════ CALIDAD ══════════════════ */
+.q-hero{display:flex;align-items:center;gap:40px;padding:36px;background:linear-gradient(135deg,var(--navy),var(--navy-2));border-radius:var(--r-xl);color:#fff;margin-bottom:22px;flex-wrap:wrap;box-shadow:var(--shadow-lg)}
+.q-ring-wrap{position:relative;width:168px;height:168px;flex-shrink:0}
+.q-ring-num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.q-ring-num strong{font-family:var(--disp);font-weight:800;font-size:34px;line-height:1}
+.q-ring-num span{font-size:10px;color:rgba(255,255,255,.55);font-weight:600;letter-spacing:.04em;margin-top:2px}
+.q-hero-info{flex:1;min-width:240px}
+.q-hero-title{font-family:var(--disp);font-weight:800;font-size:20px;margin-bottom:8px}
+.q-hero-sub{font-size:12.5px;color:rgba(255,255,255,.65);line-height:1.6;max-width:440px;margin-bottom:16px}
+.q-before-after{display:flex;align-items:center;gap:14px}
+.q-ba-item{text-align:center}
+.q-ba-num{font-family:var(--mono);font-weight:700;font-size:16px}
+.q-ba-label{font-size:9.5px;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.05em}
+.q-ba-arrow{font-size:16px;color:var(--amber)}
+
+.q-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:22px}
+.q-metric{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px 18px;box-shadow:var(--shadow-sm)}
+.q-metric-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.q-metric-ico{font-size:16px}
+.q-metric-trend{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--green)}
+.q-metric-val{font-family:var(--disp);font-weight:800;font-size:24px}
+.q-metric-label{font-size:11px;color:var(--text-3);margin-top:2px}
+
+.q-final-cta{display:flex;align-items:center;justify-content:space-between;padding:22px 26px;background:var(--green-soft);border:1px solid var(--green);border-radius:var(--r-lg);flex-wrap:wrap;gap:14px}
+.q-final-cta.q-final-cta-blocked{background:var(--red-soft);border-color:var(--red)}
+.q-final-txt strong{display:block;font-family:var(--disp);font-weight:800;font-size:15px;color:var(--green);margin-bottom:2px}
+.q-final-txt span{font-size:11.5px;color:var(--text-2)}
+
 /* ══════════════════ CORRECCIONES ══════════════════ */
 .fix-hd{display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap}
 .fix-counter{font-family:var(--disp);font-weight:800;font-size:34px;color:var(--red);line-height:1}
@@ -927,6 +955,45 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
         </div>
         <div class="fix-list" id="fixInfoList"></div>
       </div>
+    </section>
+
+    <!-- ══════════ CALIDAD ══════════ -->
+    <section class="screen" data-screen="quality">
+      <div class="screen-hd">
+        <div>
+          <div class="eyebrow">Paso 4 de 5</div>
+          <div class="screen-title">Dashboard de calidad</div>
+          <div class="screen-sub">Revisa el resultado antes de exportar el día operativo.</div>
+        </div>
+      </div>
+
+      <div class="q-hero">
+        <div class="q-ring-wrap">
+          <svg width="168" height="168" viewBox="0 0 168 168">
+            <circle cx="84" cy="84" r="72" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="14"/>
+            <circle cx="84" cy="84" r="72" fill="none" stroke="url(#qgrad)" stroke-width="14"
+              stroke-dasharray="452.4" stroke-dashoffset="452.4" stroke-linecap="round" transform="rotate(-90 84 84)"
+              id="qArc" style="transition:stroke-dashoffset 1.2s cubic-bezier(.2,.8,.2,1)"/>
+            <defs><linearGradient id="qgrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#F5A623"/><stop offset="100%" stop-color="#1E9E6B"/>
+            </linearGradient></defs>
+          </svg>
+          <div class="q-ring-num"><strong id="qRingNum">—</strong><span>CALIDAD FINAL</span></div>
+        </div>
+        <div class="q-hero-info">
+          <div class="q-hero-title" id="qHeroTitle">Aún no hay datos</div>
+          <div class="q-hero-sub" id="qHeroSub">Completa las 4 fuentes en Preparación y corrige las incidencias para ver el resultado aquí.</div>
+          <div class="q-before-after">
+            <div class="q-ba-item"><div class="q-ba-num" id="qBaInitial" style="color:rgba(255,255,255,.5)">—</div><div class="q-ba-label">Inicial</div></div>
+            <div class="q-ba-arrow">→</div>
+            <div class="q-ba-item"><div class="q-ba-num" id="qBaFinal" style="color:var(--amber)">—</div><div class="q-ba-label">Final</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="q-metrics" id="qMetrics"></div>
+
+      <div class="q-final-cta" id="qFinalCta"></div>
     </section>
 
   </div>

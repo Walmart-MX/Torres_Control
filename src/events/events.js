@@ -184,6 +184,7 @@ export const Events = {
       State.sveIssues = [];
       UI.renderTable();
       UI.renderFixList();
+      UI.renderQualityScreen();
       UI.updateStats();
       UI.resetSVE();
       UI.setActionsEnabled(false);
@@ -192,11 +193,17 @@ export const Events = {
       return;
     }
 
+    // Marca de "inicio de captura" — solo la primera vez que las 4
+    // fuentes están completas en esta sesión (ver nota en state.js).
+    if (!State.captureStartedAt) State.captureStartedAt = Date.now();
+
     runMerge();
     // Nuevo merge completo = nueva sesión de corrección — el progreso
-    // de Correcciones (% resuelto) arranca de cero contra el total
-    // fresco de este merge, no contra el de la corrida anterior.
+    // de Correcciones y el "antes/después" de Calidad arrancan de cero
+    // contra el total fresco de este merge, no contra el de la corrida
+    // anterior.
     UI.resetFixPeak();
+    UI.resetQualityBaseline();
     UI.renderTable();
     UI.updateStats();
     UI.setActionsEnabled(true);
@@ -210,10 +217,13 @@ export const Events = {
         State.sveIssues = [];
         UI.resetSVE();
       }
-      // El status pill por fila y la lista de Correcciones dependen de
-      // State.sveIssues, recién poblado arriba.
+      // El status pill por fila, Correcciones y Calidad dependen de
+      // State.sveIssues, recién poblado arriba — en ese orden: la
+      // barra de progreso de Correcciones fija su "pico" primero, y
+      // Calidad reutiliza ese mismo pico para su comparación antes/después.
       UI.renderTable();
       UI.renderFixList();
+      UI.renderQualityScreen();
       UI.updateHealthRail();
       UI.applyMode();
     }, 100);

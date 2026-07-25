@@ -36,6 +36,14 @@
  *   mismo alias hacia 'table'/#legacyPanel que el resto de pasos
  *   todavía no rediseñados.
  *
+ * CAMBIO (rediseño Calidad — mockup jul-2026):
+ *   Calidad sale de LEGACY_ALIASES — tiene pantalla propia con el
+ *   Quality Ring. Sin wiring adicional en app.js: los botones "Volver
+ *   a Correcciones"/"Continuar a Exportación" del CTA final se generan
+ *   dinámicamente en cada renderQualityScreen() (ui.js), porque su
+ *   destino depende de si hay errores críticos pendientes — se
+ *   enganchan ahí mismo, no aquí.
+ *
  * Dependencias: todos los módulos de la aplicación.
  */
 import { State } from './state.js';
@@ -59,7 +67,7 @@ const STEPS = [
 ];
 // Pantallas todavía no rediseñadas — ver nota de cabecera. Alias hacia
 // 'table', con scroll a #legacyPanel donde vive la funcionalidad real.
-const LEGACY_ALIASES = new Set(['quality', 'export', 'admin']);
+const LEGACY_ALIASES = new Set(['export', 'admin']);
 let currentStepIdx = 0;
 
 function renderStepper() {
@@ -306,9 +314,11 @@ export async function init() {
   // ── Init visual (no depende del catálogo) ──
   UI.setActionsEnabled(false);
   UI.resetFixPeak();
+  UI.resetQualityBaseline();
   UI.updatePrepView(['PDFs de cargas','Excel macro (RUTEO NUEVO)',"Status de despacho (RUTA + ID'S MASTER)",'Reporte WTMS']);
   UI.renderTable();
   UI.renderFixList();
+  UI.renderQualityScreen();
   UI.updateHealthRail();
   UI.applyMode();
 
