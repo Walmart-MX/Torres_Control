@@ -38,6 +38,33 @@
  * de runMerge) y se reportan como incidencia informativa en el SVE
  * (features/validation/sve.js, regla 'pdf_orphan').
  *
+ * FIX (cruce con Reporte WTMS — jul-2026, gap detectado en auditoría):
+ *   El cruce Status.ID'S MASTER == WTMS.ID de la carga estaba
+ *   documentado desde la integración del WTMS (ver cabecera de
+ *   processors/wtms.js) pero NUNCA se implementó aquí — State.wtmsData
+ *   se cargaba correctamente pero jamás se consultaba dentro de
+ *   runMerge(). Como consecuencia, nr['_CARTA_PORTE'] y
+ *   nr['_ID_RETORNO'] nunca se escribían, dejando las columnas
+ *   'CARTA PORTE' e 'ID RETORNO' del Excel final permanentemente
+ *   vacías (ver COL_MAP en core/constants.js, que sí las lee de esas
+ *   claves) y nr['_wtmsAmbiguous'] nunca se inicializaba (edit-system.js
+ *   ya sabía recalcularlo al editar manualmente, pero no existía un
+ *   valor inicial que revisar).
+ *
+ *   Se agrega el cruce: usando nr['_ID_IDA'] (ID'S MASTER, ya resuelto
+ *   arriba desde despRow) como llave contra State.wtmsData. Si hay
+ *   match, se copian carteporte→_CARTA_PORTE y siguienteCarga→
+ *   _ID_RETORNO, y se marca _wtmsAmbiguous=true si cualquiera de los
+ *   dos trae más de un valor separado por coma ("doble dato" — caso de
+ *   negocio documentado en wtms.js, ej. "1234,4321" en Siguiente
+ *   Carga). Si no hay match (ID'S MASTER vacío o no encontrado en el
+ *   WTMS), los tres campos quedan vacíos/false — igual que el resto de
+ *   los bloques opcionales de este archivo (pdfRow/factRow/despRow),
+ *   sin bloquear el resto del merge.
+ *
+ *   Se reporta como incidencia SVE nueva ('wtms_ambiguous', CRÍTICA)
+ *   en features/validation/sve.js — ver comentario de cabecera ahí.
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - FactCache (features/fact-cache.js)
@@ -284,6 +311,39 @@ export function runMerge() {
       nr['_CASETA'] = '';
       nr['_WTMS'] = '';
       nr['_ID_IDA'] = '';
+
+    }
+
+    // ============================================================
+    // NUEVO — Cruce con Reporte WTMS
+    // Status.ID'S MASTER (nr['_ID_IDA'], recién resuelto arriba desde
+    // despRow) == WTMS.ID de la carga (llave de State.wtmsData). Ver
+    // nota de cabecera "FIX (cruce con Reporte WTMS...)" — este bloque
+    // era el gap que dejaba CARTA PORTE / ID RETORNO permanentemente
+    // vacías en el Excel final.
+    // ============================================================
+    const idIdaKey = String(nr['_ID_IDA'] || '').trim();
+    const wtmsRow  = idIdaKey ? (State.wtmsData.get(idIdaKey) || null) : null;
+
+    if (wtmsRow) {
+
+      nr['_CARTA_PORTE'] = wtmsRow.carteporte     || '';
+      nr['_ID_RETORNO']  = wtmsRow.siguienteCarga || '';
+
+      // "Doble dato" — caso de negocio documentado en wtms.js: un campo
+      // del WTMS puede legítimamente traer dos valores separados por
+      // coma (ej. "1234,4321" en Siguiente Carga). Se marca como
+      // ambiguo para que el SVE lo reporte y el usuario lo resuelva
+      // manualmente desde el drawer de edición (_ID_RETORNO/
+      // _CARTA_PORTE, ver EDITABLE_FIELDS en edit-system.js).
+      nr['_wtmsAmbiguous'] =
+        nr['_CARTA_PORTE'].includes(',') || nr['_ID_RETORNO'].includes(',');
+
+    } else {
+
+      nr['_CARTA_PORTE']   = '';
+      nr['_ID_RETORNO']    = '';
+      nr['_wtmsAmbiguous'] = false;
 
     }
 
