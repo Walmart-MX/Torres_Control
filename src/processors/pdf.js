@@ -4,37 +4,11 @@
  *
  * Dos funciones encadenadas:
  *   pdfExtract(file) → lee el PDF con pdf.js, devuelve líneas de texto
- *                       agrupadas por posición Y, y anotaciones FreeText/Text
- *                       (citas).
+ *                       agrupadas por posición Y, y anotaciones FreeText (citas).
  *   parsePDF(extracted, filename) → interpreta esas líneas con regex
  *                       específicas del formato del documento, devuelve
  *                       un array de rows { ruta, operador, destino, factura,
  *                       tarimas, marchamos, cita, hrDespacho }.
- *
- * FIX (auditoría post-Camino B):
- *   1. hrDespacho: el sello "Impreso / enviado por fax" lo imprime el
- *      sistema de Walmart en formato MM/DD/YYYY (convención de EEUU); el
- *      resto de la app usa DD/MM/YYYY. Antes se reensamblaban los grupos
- *      capturados sin invertir día/mes — ahora se invierten, con una
- *      validación defensiva (si el primer grupo no puede ser un mes
- *      válido, se asume que ya viene en DD/MM/YYYY y no se toca).
- *   2. parsePDF(): el regex que detecta "PDF unificado de dos rutas"
- *      (ej. "12345-67890.pdf") también matcheaba nombres de ruta partida
- *      como "4102-2.pdf", interpretándolos erróneamente como dos rutas
- *      separadas ("4102" y "2") en vez de una sola ruta ("4102-2"). Se
- *      agrega una heurística: si el segundo grupo tiene notablemente
- *      menos dígitos que el primero, se trata como sufijo de ruta partida
- *      (una sola ruta), no como PDF unificado. Caso límite documentado:
- *      si algún día existe un PDF unificado real donde la segunda ruta
- *      tiene menos dígitos que la primera, esta heurística lo clasificaría
- *      mal — no se ha observado ese caso en los datos actuales.
- *   3. pdfExtract(): los regex de fecha/hora de las citas (anotaciones)
- *      eran demasiado rígidos (exigían exactamente 2 dígitos de día/mes y
- *      4 de año, separador de hora limitado a : . ;). Se amplían para
- *      aceptar 1-2 dígitos de día/mes, año de 2 o 4 dígitos, y espacio
- *      como separador de hora — superconjunto estricto de lo anterior,
- *      no se pierden matches previos. También se aceptan anotaciones
- *      subtype 'Text' además de 'FreeText'.
  *
  * Dependencia externa: pdfjsLib (cargado globalmente desde el CDN en
  * index.html, con su workerSrc ya configurado ahí). Este módulo no
@@ -46,7 +20,7 @@
 
 /**
  * Extrae todas las líneas de texto (agrupadas por posición vertical)
- * y las anotaciones de tipo FreeText/Text (citas de cada destino) de un PDF.
+ * y las anotaciones de tipo FreeText (citas de cada destino) de un PDF.
  *
  * @param {File} file
  * @returns {Promise<{ lines: Array<{pageNum:number,y:number,text:string}>,
@@ -80,10 +54,7 @@ export async function pdfExtract(file) {
 
     const rawAnnots = await page.getAnnotations();
     for (const a of rawAnnots) {
-      // FIX #7: además de 'FreeText', algunos PDFs codifican la cita
-      // como anotación 'Text' (nota adhesiva) — se amplía sin cambiar
-      // el resto de la lógica de extracción de texto.
-      if (a.subtype !== 'FreeText' && a.subtype !== 'Text') continue;
+      if (a.subtype !== 'FreeText') continue;
       let parts = [];
       if (Array.isArray(a.textContent) && a.textContent.length) {
         parts = a.textContent.map(s => String(s).trim()).filter(Boolean);
@@ -91,40 +62,11 @@ export async function pdfExtract(file) {
         const plain = (a.contents || a.alternativeText || '').trim();
         if (plain) parts = [plain];
       }
-      const allText = parts.join(' ');
-
-      // FIX #7: 1-2 dígitos de día/mes, año de 2 o 4 dígitos — superconjunto
-      // estricto del regex anterior (\d{2}/\d{2}/\d{4}), sigue matcheando
-      // todo lo que matcheaba antes, más formatos con dígitos sin padding
-      // o año corto.
-      const dateMatch = allText.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
-      if (!dateMatch) {
-        // Diagnóstico: si alguna cita sigue sin reconocerse y no tenemos
-        // un ejemplo concreto del texto que falla, este log deja
-        // constancia en consola del contenido exacto de la anotación —
-        // la próxima vez que ocurra, revisa la consola del navegador
-        // para ver qué formato falta cubrir, en vez de adivinar.
-        if (allText) console.warn('[pdf.js] Anotación con fecha no reconocida:', JSON.stringify(allText));
-        continue;
-      }
-
-      let [, dd, mm, yy] = dateMatch;
-      dd = dd.padStart(2, '0');
-      mm = mm.padStart(2, '0');
-      if (yy.length === 2) yy = '20' + yy;
-      const fecha = `${dd}/${mm}/${yy}`;
-
-      // FIX (regresión): el timeMatch anterior buscaba en TODO allText,
-      // incluyendo los dígitos de la fecha ya capturada. Al aceptar
-      // espacio como separador de hora, un texto como
-      // "03/07/2026 08:00" podía matchear "26 08" (año + hora) ANTES de
-      // llegar al "08:00" real, produciendo horas inválidas (26:08 →
-      // normalizado a 00:09). Se acota la búsqueda al texto que viene
-      // DESPUÉS de la fecha — elimina el falso positivo sin perder la
-      // tolerancia al separador de espacio para el caso real.
-      const afterDate = allText.slice(dateMatch.index + dateMatch[0].length);
-      const timeMatch = afterDate.match(/(\d{1,2})[:.;\s]\s*(\d{2})(?![\/\-\d])/);
-
+      const allText   = parts.join(' ');
+      const dateMatch = allText.match(/(\d{2}[\/\-]\d{2}[\/\-]\d{4})/);
+      const timeMatch = allText.match(/(\d{1,2})[:.;]\s*(\d{2})(?![\/\-\d])/);
+      if (!dateMatch) continue;
+      const fecha = dateMatch[1].replace(/-/g, '/');
       let cita = fecha;
       if (timeMatch) {
         let h = parseInt(timeMatch[1], 10);
@@ -145,13 +87,10 @@ export async function pdfExtract(file) {
  * específico de los PDFs de carga de Walmart CeDis, y produce un array
  * de rows estructurados — uno por cada destino/factura encontrado.
  *
- * Maneja tres casos de nombre de archivo:
+ * Maneja dos casos de nombre de archivo:
  *   - "12345.pdf"        → ruta única
- *   - "4102-2.pdf"        → ruta partida — sufijo con menos dígitos que
- *                            la ruta principal, se trata como UNA sola ruta
- *   - "12345-67890.pdf"  → PDF unificado de dos rutas (ambos grupos con
- *                            magnitud de dígitos similar) — se reparten
- *                            los destinos entre ambas
+ *   - "12345-67890.pdf"  → PDF unificado de dos rutas (se reparten
+ *                            los destinos entre ambas)
  *
  * @param {{ lines: Array, annots: Array }} extracted — salida de pdfExtract()
  * @param {string} filename — nombre original del archivo (para detectar ruta(s))
@@ -160,14 +99,8 @@ export async function pdfExtract(file) {
 export function parsePDF({ lines, annots }, filename) {
   const baseName     = filename.replace(/\.pdf$/i, '').replace(/^\d+_/, '');
   const unifiedMatch = baseName.match(/^(\d+)-(\d+)$/);
-  // FIX #6: distingue "PDF unificado real" (dos rutas de magnitud similar,
-  // ej. "12345-67890") de "ruta partida" (ej. "4102-2", donde "2" es un
-  // sufijo de sub-ruta, no una segunda ruta completa). Heurística: si el
-  // segundo grupo tiene menos dígitos que el primero, es un sufijo de
-  // ruta partida — se trata baseName completo como una sola ruta.
-  const isSplitSuffix = !!unifiedMatch && unifiedMatch[2].length < unifiedMatch[1].length;
-  const isUnified      = !!unifiedMatch && !isSplitSuffix;
-  const rutas           = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName];
+  const isUnified    = !!unifiedMatch;
+  const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName];
 
   let nombre = '', apellido = '', hrDespacho = '';
   for (const { text } of lines) {
@@ -179,14 +112,7 @@ export function parsePDF({ lines, annots }, filename) {
         let rawDate = fm[1].replace(/-/g, '/');
         const pts = rawDate.split('/');
         if (pts[2] && pts[2].length === 2) pts[2] = '20' + pts[2];
-        // FIX #4: el sello lo imprime Walmart en MM/DD/YYYY — se
-        // intercambian día y mes para que quede en DD/MM/YYYY, la
-        // convención del resto de la app. Guard defensivo: si el primer
-        // grupo no puede ser un mes válido (>12), se asume que el PDF ya
-        // viene en DD/MM/YYYY y no se invierte.
-        const mmVal = parseInt(pts[0], 10);
-        const swapped = (mmVal >= 1 && mmVal <= 12) ? `${pts[1]}/${pts[0]}/${pts[2]}` : pts.join('/');
-        hrDespacho = swapped + ' ' + fm[2];
+        hrDespacho = pts.join('/') + ' ' + fm[2];
       }
     }
   }
