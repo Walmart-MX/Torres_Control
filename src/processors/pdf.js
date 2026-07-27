@@ -10,6 +10,21 @@
  *                       un array de rows { ruta, operador, destino, factura,
  *                       tarimas, marchamos, cita, hrDespacho }.
  *
+ * FIX (jul-2026) — HR. DESPACHO con fecha invertida:
+ *   El PDF imprime la fecha del sello "Impreso/enviado por fax" en
+ *   formato inglés MM-DD-YYYY (ej. "07-26-2026" = 26 de julio de 2026),
+ *   pero el código anterior tomaba los tres números tal cual del PDF y
+ *   los unía sin reordenar, asumiendo que ya venían como DD/MM/YYYY.
+ *   Resultado: se guardaba "07/26/2026" (mes=07, "día"=26) y
+ *   parseDateTime()/normalizeAppointment() (utils/date.js), que SIEMPRE
+ *   interpretan el primer número como día y el segundo como mes,
+ *   terminaban armando new Date(2026, 25, 7, ...) — mes 26 desborda a
+ *   JavaScript y "rueda" el año hacia adelante (de ahí el salto a 2028
+ *   observado en producción con PDFs reales).
+ *   Ahora se invierten aquí mismo pts[0]/pts[1] al capturar la fecha del
+ *   PDF, para dejarla en el formato DD/MM/YYYY que espera el resto de la
+ *   app — ningún otro módulo (date.js, merge.js, constants.js) cambia.
+ *
  * Dependencia externa: pdfjsLib (cargado globalmente desde el CDN en
  * index.html, con su workerSrc ya configurado ahí). Este módulo no
  * configura el worker — eso es responsabilidad del bootstrap en index.html.
@@ -112,7 +127,13 @@ export function parsePDF({ lines, annots }, filename) {
         let rawDate = fm[1].replace(/-/g, '/');
         const pts = rawDate.split('/');
         if (pts[2] && pts[2].length === 2) pts[2] = '20' + pts[2];
-        hrDespacho = pts.join('/') + ' ' + fm[2];
+        // FIX: el sello del PDF viene en formato inglés MM/DD/YYYY
+        // (confirmado con muestra real: "07-26-2026" = 26 de julio de
+        // 2026) — se invierte aquí a DD/MM/YYYY, que es la convención
+        // que usa el resto de la app (normalizeAppointment/parseDateTime
+        // en utils/date.js). NO tocar sin volver a verificar el formato
+        // real del sello si cambia el proveedor/plantilla del PDF.
+        hrDespacho = `${pts[1]}/${pts[0]}/${pts[2]} ${fm[2]}`;
       }
     }
   }
