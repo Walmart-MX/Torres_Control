@@ -53,3 +53,19 @@ export function formatFactDate(val) {
   }
   return String(val).trim();
 }
+
+/**
+ * Elimina diacríticos (acentos, diéresis) de un string — usada por
+ * processors/wtms.js para tolerar encabezados del Reporte WTMS con
+ * variantes acentuadas ("creación", "Vehículo", etc.) antes de
+ * compararlos contra WTMS_ALIASES. Descompone a forma NFD (letra base +
+ * marca combinante) y elimina las marcas — "María" → "Maria",
+ * "Ñ" → "N". No toca mayúsculas/minúsculas ni espacios; eso lo maneja
+ * el caller (processWTMS ya hace stripAccents(h).trim() y compara con
+ * regex case-insensitive).
+ * @param {string} s
+ * @returns {string}
+ */
+export function stripAccents(s) {
+  return String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
