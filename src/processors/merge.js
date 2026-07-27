@@ -10,6 +10,42 @@
  * el resultado en State.merged. Es intencional — preserva exactamente
  * el comportamiento original.
  *
+ * Estrategia de match PDF (en orden de prioridad):
+ *   1. ruta + factura del Excel (match específico)
+ *   2. ruta + DETTE.1 del Excel (match específico)
+ *   3. ruta + DETTE del Excel (match específico)
+ *   4. único PDF con la misma ruta, SOLO si no hay ambigüedad (ver FIX
+ *      de integridad de datos, jul-2026, abajo)
+ *
+ * FIX DE INTEGRIDAD DE DATOS (jul-2026) — "bug del marchamo heredado":
+ *   Se detectó un caso real: una ruta con dos entregas, la segunda con
+ *   un bloque de PDF ilegible/malformado (marchamo con formato inválido
+ *   → parsePDF() nunca genera una entrada específica para esa entrega).
+ *   El fallback anterior ("cualquier PDF con la misma ruta") tomaba la
+ *   PRIMERA coincidencia del Map — que resultaba ser la entrega
+ *   correcta de la OTRA entrega ya cargada. Consecuencia: la última
+ *   entrega heredaba marchamo Y factura de la primera — una
+ *   correspondencia inventada, no real.
+ *
+ *   Principio aplicado: es preferible dejar una entrega sin datos y
+ *   reportar una incidencia crítica, que asignarle información de otra
+ *   entrega. El fallback por ruta ahora:
+ *     - Cuenta cuántos bloques de PDF distintos existen para esa ruta
+ *       (dedupe por referencia de objeto — State.pdfData indexa el
+ *       mismo objeto bajo dos claves: factura y destino).
+ *     - Si hay EXACTAMENTE un candidato → se usa (caso legítimo y
+ *       frecuente: ruta de una sola entrega, sin ambigüedad posible).
+ *     - Si hay MÁS DE UNO y ninguno matcheó específicamente → NO se
+ *       adivina. pdfRow queda null, la entrega se marca
+ *       nr['_pdfAmbiguous'] = true, y features/validation/sve.js
+ *       reporta la incidencia CRÍTICA 'pdf_ambiguous' en vez de
+ *       inventar una correspondencia.
+ *
+ *   Complementa el fix en events.js → handlePDFs(), que ahora evita
+ *   indexar claves vacías en State.pdfData (factura/destino '') — esa
+ *   colisión de claves vacías era la otra vía por la que un match
+ *   "específico" podía terminar apuntando al bloque equivocado.
+ *
  * FIX (jul-2026) — motores existentes que nunca se invocaban:
  *   Tres módulos ya escritos y correctos (enrichment-engine.js,
  *   fiscal-calendar.js) más el cruce con el Reporte WTMS nunca se
@@ -25,7 +61,7 @@
  *   TIEMPO EN PATIO y la regla SVE 'time_anomaly' tampoco funcionaban.
  *
  *   Orden dentro del loop (importa):
- *     1. Resolver PDF / factura / despacho (sin cambios)
+ *     1. Resolver PDF (con el fix de ambigüedad) / factura / despacho
  *     2. Cruce WTMS (Status.ID'S MASTER == WTMS.ID de la carga) →
  *        nr['_CARTA_PORTE'] / nr['_ID_RETORNO']
  *     3. Calendario fiscal sobre row['FECHA'] → nr['_DIA'] / nr['_SW']
@@ -35,12 +71,6 @@
  *     5. computeTimes(nr) — AL FINAL, requiere que todos los campos de
  *        fecha/hora de nr ya estén resueltos (ver nota de cabecera en
  *        core/time-engine.js)
- *
- * Estrategia de match PDF (en orden de prioridad):
- *   1. ruta + factura del Excel (match específico)
- *   2. ruta + DETTE.1 del Excel (match específico)
- *   3. ruta + DETTE del Excel (match específico)
- *   4. cualquier PDF con la misma ruta (fallback, primera coincidencia)
  *
  * Estrategia de match de factura:
  *   1. State.factData (concentrado del Excel recién cargado)
@@ -91,15 +121,29 @@ export function runMerge() {
     const detteF  = String(row[COL_DETTE_F] || '').trim();
     const factXls = String(row[COL_FACT]    || '').trim();
 
-    let pdfRow = null, pdfMatchType = 'none';
+    let pdfRow = null, pdfMatchType = 'none', pdfAmbiguous = false;
     if (factXls) { const r = State.pdfData.get(ruta + '|' + factXls); if (r) { pdfRow = r; pdfMatchType = 'specific'; } }
     if (!pdfRow && detteF) { const r = State.pdfData.get(ruta + '|D|' + detteF); if (r) { pdfRow = r; pdfMatchType = 'specific'; } }
     if (!pdfRow) {
       const detteE = String(row[COL_DETTE_E] || '').trim();
       if (detteE) { const r = State.pdfData.get(ruta + '|D|' + detteE); if (r) { pdfRow = r; pdfMatchType = 'specific'; } }
     }
+    // Fallback seguro — ver nota de cabecera "FIX DE INTEGRIDAD DE DATOS".
+    // Solo se activa cuando NO hay ambigüedad posible.
     if (!pdfRow && ruta) {
-      for (const [, v] of State.pdfData) { if (v.ruta === ruta) { pdfRow = v; pdfMatchType = 'fallback'; break; } }
+      const seen = new Set(), candidates = [];
+      for (const [, v] of State.pdfData) {
+        if (v.ruta === ruta && !seen.has(v)) { seen.add(v); candidates.push(v); }
+      }
+      if (candidates.length === 1) {
+        pdfRow = candidates[0];
+        pdfMatchType = 'fallback';
+      } else if (candidates.length > 1) {
+        // Múltiples bloques de PDF candidatos para esta ruta y ninguno
+        // matcheó específicamente por factura/DETTE — no hay forma de
+        // saber cuál corresponde a esta entrega. NUNCA se adivina.
+        pdfAmbiguous = true;
+      }
     }
 
     const factKey = pdfRow ? String(pdfRow.factura || '').trim() : '';
@@ -118,6 +162,16 @@ export function runMerge() {
     const _rowId = ruta + '||' + (detteF || String(State.merged.length));
     const nr = { ...row, _rowId, _matched: !!pdfRow, _factMatched: !!factRow, _despMatched: !!despRow };
 
+    // Marca de integridad — leída por features/validation/sve.js (regla
+    // 'pdf_ambiguous') y disponible para diagnóstico/exportación futura.
+    // false en el caso normal (match específico, fallback seguro, o
+    // simplemente sin PDF de ningún tipo para esta ruta). Cubre el caso
+    // "no se encontró NINGÚN bloque de PDF con certeza" — distinto del
+    // caso "sí se encontró el bloque, pero un campo puntual (marchamo)
+    // no validó", que se maneja campo por campo vía _marchamoIssues,
+    // ver bloque if(pdfRow){...} más abajo.
+    nr['_pdfAmbiguous'] = pdfAmbiguous;
+
     if (pdfRow) {
       nr['OPERADOR'] = pdfRow.operador;
       nr['TARIMAS']  = parseInt(pdfRow.tarimas, 10) || pdfRow.tarimas;
@@ -128,11 +182,19 @@ export function runMerge() {
       nr['CITA']         = nr['_CITA_PDF'];
       nr['_LIC']         = State.catalog.get(normOp(pdfRow.operador)) || '';
       nr['_HR_DESP_PDF'] = pdfRow.hrDespacho || '';
+      // Marchamos candidatos que pdf.js detectó pero no pudo validar —
+      // ver processors/pdf.js (extracción tolerante por campo, jul-2026).
+      // La posición correspondiente en MARCHAMO N ya quedó vacía arriba;
+      // esto solo aporta el valor crudo para diagnóstico en el SVE
+      // (regla 'bad_march') — nunca afecta OPERADOR/TARIMAS/FAC_PDF,
+      // que se extrajeron de forma independiente.
+      nr['_marchamoIssues'] = pdfRow.marchamoIssues || [];
     } else {
       nr['OPERADOR'] = '';
       nr['TARIMAS']  = '';
       for (let m = 0; m < MAX_MARCH; m++) nr['MARCHAMO ' + (m + 1)] = '';
       nr['_CITA_PDF'] = ''; nr['CITA'] = ''; nr['_LIC'] = ''; nr['_HR_DESP_PDF'] = '';
+      nr['_marchamoIssues'] = [];
     }
 
     if (factRow) {
