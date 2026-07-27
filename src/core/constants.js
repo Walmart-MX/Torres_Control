@@ -18,6 +18,17 @@
  *     NO se toca — sigue siendo el set completo usado por
  *     renderHistoryPreview() en el modal de Historial, que conserva su
  *     diseño anterior.
+ *
+ * FIX (jul-2026) — columna DIA en minúsculas en el Excel exportado:
+ *   COL_MAP['DIA'] leía nr['_DIA'] tal cual, sin normalizar. Si en
+ *   algún punto de la app _DIA llega en minúsculas (por ejemplo, si se
+ *   calculó alguna vez con Date.toLocaleDateString('es-MX',{weekday:
+ *   'long'}), que en JS devuelve "lunes" en vez de "Lunes"), el Excel
+ *   final terminaba mostrando el día sin capitalizar. Se fuerza la
+ *   capitalización aquí mismo, en el único punto de lectura de esta
+ *   columna — así queda protegido sin importar cómo se generó _DIA
+ *   (merge.js ya lo arma bien vía DIA_NAMES, pero esto blinda contra
+ *   cualquier fuente futura del valor).
  */
 import { State } from './state.js';
 
@@ -99,9 +110,19 @@ export const WTMS_ALIASES = {
   siguienteCarga: /^siguiente\s*carga$/i
 };
 
+/**
+ * Capitaliza la primera letra y deja el resto en minúsculas — usado
+ * exclusivamente por COL_MAP['DIA'] para blindar contra cualquier
+ * fuente de _DIA que no llegue ya capitalizada. @private
+ */
+function _capitalize(s) {
+  const v = String(s ?? '').trim();
+  return v ? v.charAt(0).toUpperCase() + v.slice(1).toLowerCase() : '';
+}
+
 export const COL_MAP = {
   'FECHA':                r => r['FECHA']       ?? '',
-  'DIA':                  r => r['_DIA']        ?? '',
+  'DIA':                  r => _capitalize(r['_DIA']),
   'SW':                   r => r['_SW']         ?? '',
   'ENTREGA':              r => r['SETEO']        ?? '',
   'ENT1':                 r => r['ENT1']         ?? '',
