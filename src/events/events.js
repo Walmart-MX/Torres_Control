@@ -18,6 +18,24 @@
  *   detectado durante el rediseño) por UI.updatePrepView(missing), que
  *   además colapsa/expande la grilla de Preparación según
  *   Events.checkSources().ok.
+ *
+ * FIX DE INTEGRIDAD DE DATOS (jul-2026) — handlePDFs():
+ *   Antes se indexaba SIEMPRE `ruta + '|' + r.factura` y
+ *   `ruta + '|D|' + r.destino` en State.pdfData, aunque factura/destino
+ *   llegaran vacíos (entrega con bloque de PDF parcialmente ilegible).
+ *   Si dos entregas de la misma ruta tenían ese campo vacío, ambas
+ *   compartían la misma clave del Map y la última sobreescribía a la
+ *   primera — un match "específico" podía terminar apuntando al bloque
+ *   equivocado sin que nada lo detectara. Ahora solo se indexa una
+ *   clave cuando el valor correspondiente NO está vacío — así una
+ *   entrega sin factura/destino detectado simplemente no es alcanzable
+ *   por búsqueda específica (lo cual es correcto: no hay certeza), en
+ *   vez de colisionar con otra. Complementa el fix de
+ *   processors/merge.js (fallback por ruta ya no adivina cuando hay
+ *   más de un candidato) y el de processors/pdf.js (extracción
+ *   tolerante por campo — un marchamo inválido ya no vacía
+ *   factura/destino, así que esta colisión de claves vacías será cada
+ *   vez menos frecuente, pero se corrige de raíz de todas formas).
  */
 import { State } from '../core/state.js';
 import { normOp } from '../utils/format.js';
@@ -77,8 +95,13 @@ export const Events = {
         const extracted = await pdfExtract(files[i]);
         const parsed    = parsePDF(extracted, files[i].name);
         for (const r of parsed) {
-          State.pdfData.set(r.ruta + '|' + r.factura,   r);
-          State.pdfData.set(r.ruta + '|D|' + r.destino, r);
+          // FIX (jul-2026) — ver nota de cabecera "FIX DE INTEGRIDAD DE
+          // DATOS": nunca indexar una clave con factura/destino vacío.
+          // Una entrega sin ese dato detectado queda fuera del match
+          // específico (correcto: no hay certeza) en vez de arriesgarse
+          // a colisionar con otra entrega de la misma ruta.
+          if (r.factura) State.pdfData.set(r.ruta + '|' + r.factura,   r);
+          if (r.destino) State.pdfData.set(r.ruta + '|D|' + r.destino, r);
         }
         if (parsed.length) ok++;
         else errors.push('Sin datos: ' + files[i].name);
