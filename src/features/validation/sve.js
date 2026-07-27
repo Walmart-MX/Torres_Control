@@ -1,6 +1,6 @@
 /**
  * features/validation/sve.js
- * SMART VALIDATION ENGINE v1.1 — audita State.merged tras cada merge
+ * SMART VALIDATION ENGINE v1.2 — audita State.merged tras cada merge
  * y produce un reporte de incidencias (críticas, advertencias, informativas)
  * más un score de calidad 0-100.
  *
@@ -13,9 +13,6 @@
  *   El caller (Events.triggerMerge, EditSystem.saveAndRevalidate) es
  *   responsable de decidir qué hacer con UI.resetSVE() / UI.renderSVE()
  *   según el resultado.
- *
- * Las 11 reglas (A-K) y el cálculo de quality score son IDÉNTICOS al
- * original — ningún cambio de lógica, solo el contrato de salida.
  *
  * CAMBIO (contexto de localización Ruta+Entrega — jul-2026):
  *   Varias reglas consolidaban incidencias por RUTA únicamente, lo cual
@@ -39,22 +36,38 @@
  * CAMBIO (rediseño Mesa de Trabajo — mockup jul-2026, "Fix regla K"):
  *   runSVE(rows) ganaba una SEGUNDA fuente de verdad no declarada: leía
  *   document.getElementById('bdgXLS').textContent directamente del DOM
- *   para la regla K (integridad UI vs memoria). Esto ya estaba señalado
- *   como deuda técnica en el comentario original ("no ideal, pero se
- *   preserva tal cual del original"). El elemento #bdgXLS desaparece en
- *   el rediseño de Mesa de Trabajo (la barra de acciones antigua se
- *   retira) — en vez de inventar un nuevo ancla en el DOM, se elimina
- *   la dependencia por completo: runSVE(rows, screenCount) recibe el
- *   conteo como PARÁMETRO. sve.js vuelve a ser una función pura, sin
- *   ninguna lectura de document.*.
+ *   para la regla K (integridad UI vs memoria). sve.js vuelve a ser una
+ *   función pura, sin ninguna lectura de document.*. runSVE(rows,
+ *   screenCount) recibe el conteo como PARÁMETRO — ver detalle abajo en
+ *   la regla K.
  *
- *   Los callers (events.js → triggerMerge, edit-system.js →
- *   saveAndRevalidate) pasan `State.xlsData ? State.xlsData.length : 0`
- *   — el mismo valor que antes se mostraba en el badge #bdgXLS y que
- *   updateStats() calculaba de la misma fuente (State.xlsData.length).
- *   Si no se pasa screenCount (o es 0/undefined), la regla K
- *   simplemente no se evalúa — mismo comportamiento que antes cuando
- *   el badge estaba vacío o en '—'.
+ * CAMBIO (integridad de datos — jul-2026, "bug del marchamo heredado"):
+ *   Se detectó que un marchamo con formato inválido en el PDF podía
+ *   provocar que la entrega heredara marchamo Y factura de OTRA entrega
+ *   de la misma ruta (ver processors/merge.js y processors/pdf.js para
+ *   el detalle completo del root cause y su corrección). Dos ajustes
+ *   aquí, ambos de solo-lectura sobre datos ya calculados aguas arriba:
+ *
+ *   1) Regla J (bad_march) — REESCRITA. Antes escaneaba los valores
+ *      YA GUARDADOS en MARCHAMO 1-5 buscando formato inválido. Ahora
+ *      pdf.js valida cada marchamo en el momento de extraerlo (ver
+ *      processors/pdf.js, extracción tolerante por campo) y jamás dejó
+ *      pasar un valor inválido a MARCHAMO N — esa posición ya llegó
+ *      vacía. La fuente de esta regla pasa a ser r._marchamoIssues
+ *      (poblado en merge.js desde pdfRow.marchamoIssues): el valor
+ *      CRUDO que se intentó leer del PDF y no pasó el formato, para que
+ *      el usuario pueda verificarlo contra el documento original. Sigue
+ *      siendo SVE_INFO — la incidencia ACCIONABLE (el campo vacío) la
+ *      cubre automáticamente la regla E (no_march), que ya es quickfix.
+ *
+ *   2) Regla nueva 'pdf_ambiguous' (CRÍTICA) — cubre el caso distinto de
+ *      "no se pudo localizar NINGÚN bloque de PDF con certeza para esta
+ *      entrega" (más de un bloque candidato en la misma ruta, sin match
+ *      específico por factura/DETTE). A diferencia de bad_march, aquí
+ *      no hay un campo puntual que validar — es la entrega COMPLETA la
+ *      que quedó sin datos de PDF, por diseño (merge.js nunca adivina
+ *      entre candidatos ambiguos). Se excluye de la regla H (no_pdf)
+ *      para no duplicar el aviso con un mensaje menos preciso.
  *
  * Dependencias:
  *   - State (core/state.js) — lee rows ya vía parámetro, pero escribe
@@ -72,7 +85,7 @@ export const SVE_ICONS = {
   'dup_march':'🔖','dup_tarimas':'📦','missing_ruta':'🔴','missing':'🟠',
   'no_march':'🔴','zero_tar':'📐','high_tar':'📐','no_pdf':'🟡',
   'no_fac':'ℹ️','bad_march':'ℹ️','integrity':'🔗','no_ventana':'📇','no_pool':'🚚','cat_dup':'🗂️','time_anomaly':'⏱️',
-  'no_cita':'📅'
+  'no_cita':'📅','pdf_ambiguous':'🧩'
 };
 
 /**
@@ -239,7 +252,12 @@ export function runSVE(rows, screenCount) {
     'Verifica si esta entrega debe tener cita o déjala vacía si no aplica — no todas las entregas la requieren.',
     '', [...rowIds], dette));
 
-  // E: Sin marchamo principal — consolidado por RUTA + ENTREGA (DETTE)
+  // E: Sin marchamo principal — consolidado por RUTA + ENTREGA (DETTE).
+  // Esta regla ahora también cubre el caso "marchamo con formato
+  // inválido en el PDF, dejado vacío por diseño" (ver processors/pdf.js
+  // y regla J más abajo) — MARCHAMO 1 queda vacío igual que si el PDF
+  // nunca lo hubiera traído, así que esta regla ya es la incidencia
+  // ACCIONABLE (quickfix) para ese caso, sin necesidad de duplicar lógica.
   const noMarchByRutaDette = new Map();
   matched.forEach(r => {
     const ruta  = String(getMapped(r,'RUTA')||'').trim();
@@ -303,10 +321,14 @@ export function runSVE(rows, screenCount) {
     `${tar} tar.`,
     [...rowIds], dette));
 
-  // H: Rutas sin PDF — una alerta por ruta
+  // H: Rutas sin PDF — una alerta por ruta. Excluye filas marcadas
+  // _pdfAmbiguous (ver regla 'pdf_ambiguous' más abajo) — esas ya tienen
+  // un mensaje más preciso ("múltiples bloques candidatos") y reportarlas
+  // también aquí duplicaría el aviso con un texto genérico y menos útil.
   const noPdfByRuta = new Map();
   rows.forEach(r => {
     if (r._matched) return;
+    if (r._pdfAmbiguous) return;
     const ruta = String(getMapped(r,'RUTA')||'').trim();
     if (!ruta) return;
     if (!noPdfByRuta.has(ruta)) noPdfByRuta.set(ruta, { cnt: 0, rowIds: new Set() });
@@ -317,6 +339,28 @@ export function runSVE(rows, screenCount) {
   noPdfByRuta.forEach(({ cnt, rowIds }, ruta) => rawAdd(SVE_WARN,'no_pdf', ruta,'OPERADOR / LIC. / MARCHAMOS',
     `Ruta ${ruta} sin PDF asociado${cnt>1?` (${cnt} entregas)`:''}.`,
     'Carga el PDF de esta ruta o verifica el nombre del archivo.',
+    cnt>1?`${cnt} entregas`:'',
+    [...rowIds]));
+
+  // H-bis: PDF ambiguo — existen dos o más bloques de carga candidatos
+  // para esta ruta y ninguno matcheó específicamente por factura/DETTE.
+  // NUNCA se adivina cuál corresponde (ver processors/merge.js) — se
+  // reporta como CRÍTICA en vez de asignar datos de otra entrega. Caso
+  // distinto de 'bad_march' (regla J): aquí no hay un campo puntual que
+  // validar, es la entrega completa la que quedó sin PDF por falta de
+  // certeza en el match, no por un dato puntual inválido.
+  const pdfAmbiguousByRuta = new Map();
+  rows.forEach(r => {
+    if (!r._pdfAmbiguous) return;
+    const ruta = String(getMapped(r,'RUTA')||'').trim();
+    if (!pdfAmbiguousByRuta.has(ruta)) pdfAmbiguousByRuta.set(ruta, { cnt: 0, rowIds: new Set() });
+    const e = pdfAmbiguousByRuta.get(ruta);
+    e.cnt++;
+    if (r._rowId) e.rowIds.add(r._rowId);
+  });
+  pdfAmbiguousByRuta.forEach(({ cnt, rowIds }, ruta) => rawAdd(SVE_CRIT,'pdf_ambiguous', ruta,'OPERADOR / LIC. / MARCHAMOS / FAC.',
+    `Ruta ${ruta}: existen múltiples bloques de carga en el PDF y no se puede determinar con certeza cuál corresponde a esta entrega${cnt>1?` (${cnt} entregas)`:''}.`,
+    'Verifica manualmente el DETTE/factura de esta entrega contra el PDF y corrige los campos.',
     cnt>1?`${cnt} entregas`:'',
     [...rowIds]));
 
@@ -337,28 +381,34 @@ export function runSVE(rows, screenCount) {
     cnt>1?`×${cnt}`:'',
     [...rowIds]));
 
-  // J: Marchamos con formato incorrecto — consolidado por RUTA + ENTREGA (DETTE)
+  // J: Marchamos con formato incorrecto — REESCRITA (integridad de
+  // datos, jul-2026). Antes escaneaba MARCHAMO 1-5 buscando texto con
+  // formato inválido; ahora eso ya nunca ocurre — pdf.js valida cada
+  // marchamo al extraerlo y deja vacía cualquier posición inválida (ver
+  // processors/pdf.js, extracción tolerante por campo). Esta regla lee
+  // en cambio r._marchamoIssues (poblado en merge.js desde
+  // pdfRow.marchamoIssues): el texto CRUDO que se intentó leer del PDF
+  // y no pasó la validación de formato — puramente informativa, para
+  // que el usuario pueda verificar contra el documento original. La
+  // incidencia ACCIONABLE (el campo ahora vacío) la cubre
+  // automáticamente la regla E (no_march), que ya es quickfix.
   const badMarchByRutaDette = new Map();
   matched.forEach(r => {
+    const issues = r._marchamoIssues || [];
+    if (!issues.length) return;
     const ruta  = String(getMapped(r,'RUTA')||'').trim();
     const dette = String(getMapped(r,'DET')||'').trim();
-    for (let m = 1; m <= 5; m++) {
-      const marc = String(getMapped(r,`MARCHAMO ${m}`)||'').trim();
-      if (!marc || marc==='0') continue;
-      if (!/^\d{5,6}$/.test(marc.replace(/^0/,''))) {
-        const groupKey = ruta + '||' + dette;
-        if (!badMarchByRutaDette.has(groupKey)) badMarchByRutaDette.set(groupKey, { ruta, dette, vals: new Set(), rowIds: new Set() });
-        const e = badMarchByRutaDette.get(groupKey);
-        e.vals.add(marc);
-        if (r._rowId) e.rowIds.add(r._rowId);
-      }
-    }
+    const groupKey = ruta + '||' + dette;
+    if (!badMarchByRutaDette.has(groupKey)) badMarchByRutaDette.set(groupKey, { ruta, dette, vals: new Set(), rowIds: new Set() });
+    const e = badMarchByRutaDette.get(groupKey);
+    issues.forEach(iss => e.vals.add(iss.raw));
+    if (r._rowId) e.rowIds.add(r._rowId);
   });
   badMarchByRutaDette.forEach(({ ruta, dette, vals, rowIds }) => {
     const sample = [...vals].slice(0,3).join(', ') + (vals.size>3?'…':'');
     rawAdd(SVE_INFO,'bad_march', ruta,'MARCHAMOS',
-      `Ruta ${ruta} · Entrega ${dette||'—'}: ${vals.size} marchamo${vals.size>1?'s':''} con formato inesperado (${sample}).`,
-      'Los marchamos deben ser numéricos de 5-6 dígitos.',
+      `Ruta ${ruta} · Entrega ${dette||'—'}: ${vals.size} marchamo${vals.size>1?'s':''} con formato inválido detectado en el PDF (${sample}) — se dejó vacío, no se copió de ninguna otra entrega.`,
+      'El texto extraído no cumple el formato esperado (5-6 dígitos). Verifica el PDF original y corrige manualmente el campo Marchamo.',
       vals.size>1?`×${vals.size}`:'',
       [...rowIds], dette);
   });
