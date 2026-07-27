@@ -4,14 +4,40 @@
  * y el SVE tiene advertencias pero ningún error crítico. Permite revisar
  * las advertencias o exportar directamente asumiendo la responsabilidad.
  *
+ * FIX (jul-2026): app.js espera resolver la dependencia circular
+ * WarnModal ↔ Events vía _setEvents(ev) — mismo patrón ya usado por
+ * ui.js (_setEvents) y edit-system.js (_setRoutePicker) — pero este
+ * módulo nunca lo implementaba, lo que rompía el import en app.js
+ * ("does not provide an export named '_setEvents'"). Se agrega el
+ * setter y, de paso, se corrige una inconsistencia real que ese gap
+ * escondía: exportAnyway() llamaba a exportXLSX() DIRECTAMENTE en vez
+ * de pasar por Events.finalizeAndExport() — las exportaciones "con
+ * advertencias confirmadas" nunca quedaban guardadas en el historial
+ * de Supabase (DispatchHistory), a diferencia de las rutas "limpia" y
+ * "forzada" (Events.handleExport()/handleForceExport()), que sí. Ahora
+ * las tres rutas de exportación pasan por el mismo punto único
+ * (Events.finalizeAndExport()) — auditoría, persistencia en Supabase,
+ * descarga del Excel y el modal de celebración quedan consistentes sin
+ * importar por cuál de las tres puertas salió la exportación.
+ *
+ * NOTA sobre el texto del audit log: antes exportAnyway() empujaba a
+ * State.sveAuditLog una acción con el literal 'EXPORT_WITH_WARNINGS'.
+ * Ahora usa action:'warned' (mismo estilo terso que 'clean'/'forced'
+ * de los otros dos caminos) — cambia el texto guardado en el log, no
+ * su función.
+ *
  * Dependencias:
- *   - State (core/state.js) — lee sveLastQuality y sveAuditLog
- *   - exportXLSX (features/export.js) — llamada cuando el usuario confirma
+ *   - State (core/state.js) — lee sveLastQuality
  *   - UI (ui/ui.js) — para hacer scroll al panel SVE en caso de revisión
+ *   - Events (events/events.js) — resuelto en runtime vía _setEvents(),
+ *     igual que ui.js resuelve su propia dependencia circular con Events
  */
 import { State } from '../core/state.js';
-import { exportXLSX } from '../features/export.js';
 import { UI } from '../ui/ui.js';
+
+let Events;
+/** Resuelve la dependencia circular WarnModal ↔ Events — llamado una vez desde core/app.js */
+export function _setEvents(ev) { Events = ev; }
 
 export const WarnModal = {
   show() {
@@ -42,16 +68,7 @@ export const WarnModal = {
 
   exportAnyway() {
     WarnModal.close();
-    const ts    = new Date().toLocaleString('es-MX');
-    const user  = State.user || 'desconocido';
     const nWarn = parseInt(document.getElementById('sveWarn').textContent || '0', 10);
-    State.sveAuditLog.push({
-      ts, user,
-      action: 'EXPORT_WITH_WARNINGS',
-      quality: State.sveLastQuality,
-      warnings: nWarn
-    });
-    console.info('[SVE AUDIT] Exportación con advertencias:', State.sveAuditLog[State.sveAuditLog.length - 1]);
-    exportXLSX();
+    Events.finalizeAndExport({ exportType: 'despacho', action: 'warned', warnings: nWarn, quality: State.sveLastQuality });
   }
 };
