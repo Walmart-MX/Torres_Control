@@ -19,19 +19,21 @@
  *     renderHistoryPreview() en el modal de Historial, que conserva su
  *     diseño anterior.
  *
- * FIX (jul-2026) — columna DIA en minúsculas en el Excel exportado:
- *   COL_MAP['DIA'] leía nr['_DIA'] tal cual, sin normalizar. Si en
- *   algún punto de la app _DIA llega en minúsculas, el Excel final
- *   terminaba mostrando el día sin capitalizar.
- *
- * AJUSTE (jul-2026 — archivo final): dos cambios solicitados sobre el
+ * AJUSTE (jul-2026 — archivo final): tres cambios solicitados sobre el
  * archivo exportado, sin tocar ningún otro consumidor de estas
  * constantes:
- *   1) COL_MAP['DIA'] ahora exporta el nombre del día TOTALMENTE EN
- *      MAYÚSCULAS ("LUNES" en vez de "Lunes"). Se retira _capitalize()
- *      (quedaba sin otro uso) y se reemplaza por un toUpperCase()
- *      directo — mismo único punto de lectura de esta columna.
- *   2) INT_COLS gana 'ID IDA', 'ID RETORNO' y 'CARTA PORTE': el
+ *   1) COL_MAP['FECHA'] ahora prioriza r['_FECHA_TEXT'] — el texto
+ *      EXACTO que Excel mostraba en la celda FECHA de RUTEO NUEVO (ver
+ *      processors/excel.js, capturado directamente de la celda cruda
+ *      vía `.w`, sin pasar por ningún objeto Date). r['FECHA'] (el Date
+ *      que sigue usando fiscal-calendar.js/merge.js para SW/DIA) se
+ *      mantiene como fallback si por algún motivo no se detectó la
+ *      columna FECHA al leer el Excel — no debería ocurrir en el uso
+ *      normal, pero así el archivo final nunca queda con la celda vacía.
+ *   2) COL_MAP['DIA'] ahora exporta el nombre del día TOTALMENTE EN
+ *      MAYÚSCULAS ("LUNES" en vez de "Lunes"). Único punto de lectura
+ *      de esta columna — merge.js (DIA_NAMES) no cambia.
+ *   3) INT_COLS gana 'ID IDA', 'ID RETORNO' y 'CARTA PORTE': el
  *      exportador (features/export.js) ya sabe convertir cualquier
  *      columna de INT_COLS a número real y aplicarle formato '0' —
  *      agregar estas tres columnas al Set basta para que Excel las
@@ -125,7 +127,13 @@ export const WTMS_ALIASES = {
 };
 
 export const COL_MAP = {
-  'FECHA':                r => r['FECHA']       ?? '',
+  // AJUSTE (jul-2026 — archivo final): usa el TEXTO EXACTO capturado
+  // en processors/excel.js (r['_FECHA_TEXT'], leído directo de la
+  // celda cruda de RUTEO NUEVO, sin pasar por ningún objeto Date). Si
+  // por algún motivo no se detectó la columna al leer el archivo,
+  // cae a r['FECHA'] (el Date que fiscal-calendar.js/merge.js usan
+  // para SW/DIA) como respaldo — nunca se queda vacía sin razón.
+  'FECHA':                r => r['_FECHA_TEXT'] || r['FECHA'] || '',
   // AJUSTE (jul-2026 — archivo final): mayúsculas completas, ver nota
   // de cabecera. Único punto de lectura de esta columna — merge.js
   // (DIA_NAMES) sigue generando "Lunes"/"Martes"/etc. sin cambios.
