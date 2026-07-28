@@ -156,15 +156,50 @@ button{cursor:pointer;border:none;background:none}
 }
 .up-card:hover{border-color:var(--amber);box-shadow:var(--shadow-md);transform:translateY(-2px)}
 .up-card.done{border-style:solid;border-color:var(--green);background:var(--green-soft)}
-.up-ico{width:44px;height:44px;border-radius:12px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-size:20px;margin:0 auto 12px}
+.up-ico{width:44px;height:44px;border-radius:12px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-size:20px;margin:0 auto 12px;transition:transform .2s}
 .up-card.done .up-ico{background:var(--green);color:#fff}
 .up-title{font-weight:700;font-size:12.5px;margin-bottom:3px}
 .up-sub{font-size:10.5px;color:var(--text-3);margin-bottom:10px}
 .up-status{
   display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:9.5px;font-weight:600;
-  padding:3px 10px;border-radius:100px;background:var(--surface-3);color:var(--text-3);
+  padding:3px 10px;border-radius:100px;background:var(--surface-3);color:var(--text-3);transition:color .2s;
 }
 .up-card.done .up-status{background:var(--green);color:#fff}
+
+/* ── Feedback de arrastre (drag & drop) — NUEVO jul-2026 ──
+   Events.setupDrop() ya alternaba la clase .drag en dragover/dragleave/
+   drop; antes no tenía ningún estilo asociado, así que arrastrar un
+   archivo sobre la zona no daba ninguna señal visual de "te detecté".
+   Se estiliza aquí: la tarjeta se levanta, se resalta en ámbar y el
+   ícono reacciona — sensación de que el drop-zone está "vivo". */
+.up-card.drag{
+  border-color:var(--amber);border-style:solid;
+  background:var(--amber-soft);
+  box-shadow:var(--shadow-glow),var(--shadow-md);
+  transform:translateY(-3px) scale(1.015);
+}
+.up-card.drag .up-ico{transform:scale(1.12) rotate(-4deg)}
+.up-card.drag .up-status{color:var(--amber-deep)}
+
+/* ── Feedback de procesamiento ("respiración") — NUEVO jul-2026 ──
+   Se activa vía UI.setSourceProcessing(key, true/false) mientras se
+   lee un PDF/Excel/CSV — puede tardar varios segundos con archivos
+   grandes y antes no había ninguna señal de que la app siguiera viva.
+   Animación sutil de brillo/escala en bucle, se apaga automáticamente
+   al terminar (éxito o error) porque Events.* la controla en un
+   finally. No se combina con .done (una tarjeta terminada nunca queda
+   respirando) ni con .drag (arrastrar y procesar no ocurren a la vez). */
+@keyframes cardBreathe{
+  0%,100%{box-shadow:var(--shadow-sm);border-color:var(--border-2)}
+  50%{box-shadow:var(--shadow-glow),var(--shadow-md);border-color:var(--amber)}
+}
+@keyframes iconPulse{
+  0%,100%{transform:scale(1)}
+  50%{transform:scale(1.15)}
+}
+.up-card.processing{animation:cardBreathe 1.6s ease-in-out infinite;border-style:solid}
+.up-card.processing .up-ico{animation:iconPulse 1.6s ease-in-out infinite}
+.up-card.processing .up-status{color:var(--amber-deep)}
 
 /* Tarjeta "Status de despacho" — a diferencia de las 3 anteriores no es
    un dropzone de archivo sino un formulario de pegado (Ctrl+V); usa el
@@ -455,7 +490,12 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 
 /* Catálogos — reutilizado dentro de Administración (ya no hay acordeón
    .cat-toggle/.cat-body ni pestañas .ref-tabs; el admin-nav de la
-   pantalla Administración reemplaza esa navegación). */
+   pantalla Administración reemplaza esa navegación). Estas mismas
+   clases (.cat-add-row/.cat-input/.cat-table-wrap/.cat-table/
+   .cat-empty/.cat-status) ahora también las usa el panel genérico de
+   Ventana de Recibo/Pool Real (ver #mcVentanaAdmin/#mcPoolAdmin más
+   abajo y UI.renderCatalogAdmin() en ui.js) — mismo look & feel que
+   Licencias, sin CSS adicional. */
 .cat-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow-sm);overflow:hidden}
 .cat-badge-count{font-family:var(--mono);font-size:10px;font-weight:600;background:var(--green-bg);color:var(--green);border:1px solid var(--green-bd);border-radius:20px;padding:2px 9px}
 .cat-badge-count.warn{background:var(--orange-bg);color:var(--orange);border-color:var(--orange-bd)}
@@ -932,28 +972,39 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
         </div>
 
         <div class="card card-pad">
-          <!-- Pool Real -->
+          <!-- Pool Real —
+               CAMBIO (jul-2026): además del botón "Importar/Reemplazar"
+               (reemplazo masivo desde Excel, sin cambios), se agrega
+               #mcPoolAdmin — panel de alta/baja fila por fila, mismo
+               estilo visual que Licencias. Contenido generado por
+               UI.renderCatalogAdmin('poolReal') (ver ui.js) — las
+               columnas mostradas vienen de CATALOGS.poolReal.columns
+               (catalog-registry.js), no están hardcodeadas aquí. -->
           <div class="admin-panel active" data-admin-panel="pool">
-            <div class="admin-hd"><h3>Pool Real</h3><p>Placas, tractores y remolques — se reemplaza por completo al importar.</p></div>
+            <div class="admin-hd"><h3>Pool Real</h3><p>Placas, tractores y remolques. "Importar/Reemplazar" sustituye TODO el catálogo desde un Excel; la tabla de abajo permite agregar o eliminar un registro individual sin tocar el resto.</p></div>
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
               <div class="btn btn-ghost btn-sm cat-import-btn">
-                📥 Importar / Reemplazar
+                📥 Importar / Reemplazar todo
                 <input type="file" id="mcPoolFile" accept=".xlsx,.xls">
               </div>
               <span style="font-size:11px;color:var(--text-3)" id="mcPoolStatus">Cargando…</span>
             </div>
+            <div id="mcPoolAdmin"><!-- generado por UI.renderCatalogAdmin('poolReal') --></div>
           </div>
 
-          <!-- Ventana de Recibo -->
+          <!-- Ventana de Recibo — mismo patrón que Pool Real (ver nota
+               arriba). #mcVentanaAdmin generado por
+               UI.renderCatalogAdmin('ventanaRecibo'). -->
           <div class="admin-panel" data-admin-panel="ventana">
-            <div class="admin-hd"><h3>Ventana de Recibo</h3><p>Formato, tienda y estado por DETTE — se reemplaza por completo al importar.</p></div>
+            <div class="admin-hd"><h3>Ventana de Recibo</h3><p>Formato, tienda y estado por DETTE. "Importar/Reemplazar" sustituye TODO el catálogo desde un Excel; la tabla de abajo permite agregar o eliminar un registro individual sin tocar el resto.</p></div>
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
               <div class="btn btn-ghost btn-sm cat-import-btn">
-                📥 Importar / Reemplazar
+                📥 Importar / Reemplazar todo
                 <input type="file" id="mcVentanaFile" accept=".xlsx,.xls">
               </div>
               <span style="font-size:11px;color:var(--text-3)" id="mcVentanaStatus">Cargando…</span>
             </div>
+            <div id="mcVentanaAdmin"><!-- generado por UI.renderCatalogAdmin('ventanaRecibo') --></div>
             <div class="cat-status" id="mcStatus"></div>
           </div>
 

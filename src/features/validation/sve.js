@@ -1,6 +1,6 @@
 /**
  * features/validation/sve.js
- * SMART VALIDATION ENGINE v1.2 — audita State.merged tras cada merge
+ * SMART VALIDATION ENGINE v1.3 — audita State.merged tras cada merge
  * y produce un reporte de incidencias (críticas, advertencias, informativas)
  * más un score de calidad 0-100.
  *
@@ -69,6 +69,44 @@
  *      entre candidatos ambiguos). Se excluye de la regla H (no_pdf)
  *      para no duplicar el aviso con un mensaje menos preciso.
  *
+ * CAMBIO (jul-2026 — revisión de reglas operativas, decisión de EduarDo):
+ *   1) Regla B (dup_tarimas) — ELIMINADA POR COMPLETO. EduarDo confirmó
+ *      que dos entregas de la misma ruta compartiendo el mismo conteo
+ *      de tarimas es un patrón NORMAL del día a día (no indica PDF mal
+ *      asignado como se asumía originalmente) — la regla generaba
+ *      ruido sin valor operativo real. Se retira la generación de la
+ *      incidencia y el cómputo que solo alimentaba a esta regla
+ *      (lineCount/tarMap y el helper rowIdsByRuta, que no tenía otro
+ *      consumidor). El ícono 'dup_tarimas' se retira de SVE_ICONS por
+ *      la misma razón — evitar código muerto.
+ *
+ *   2) Reglas L (no_ventana) y M (no_pool) — bajan de SVE_WARN a
+ *      SVE_INFO. Motivo: FORMATO/TIENDA/ESTADO/NOMBRE (Ventana de
+ *      Recibo) y LINEA/PLACA TRACTOR/ESQUEMA/PLACA REMOLQUE/CAP. (Pool
+ *      Real) NO son campos que el operador de captura pueda corregir
+ *      desde la Mesa de Trabajo o Correcciones — de hecho no existe
+ *      entrada para ellos en EDITABLE_FIELDS (editing/edit-system.js),
+ *      así que el botón "🔍 Revisar" que antes generaban llevaba a un
+ *      drawer sin ningún campo editable relacionado: un callejón sin
+ *      salida para el operador. La única corrección real es actualizar
+ *      el catálogo maestro correspondiente en Administración (acceso
+ *      reservado a quien administra Supabase). Como SVE_INFO: ya no
+ *      cuentan en el contador de "incidencias pendientes" de
+ *      Correcciones, ya no activan el modal de advertencias al
+ *      exportar, y solo restan 0.5 puntos de calidad (antes 2) — visible
+ *      igualmente en el panel de auditoría interno para quien necesite
+ *      diagnosticar cobertura de catálogos.
+ *
+ *   NOTA para EduarDo: la regla N (cat_dup, duplicados dentro del propio
+ *   catálogo) NO se tocó en este cambio — sigue siendo SVE_WARN. Se
+ *   comporta distinto a lo que tu mensaje sugería: aunque en las
+ *   tarjetas de Correcciones se muestra solo como texto informativo
+ *   (sin botón, porque no tiene RUTA asociada), SÍ sigue sumando al
+ *   contador de "incidencias pendientes" y al modal de advertencias
+ *   al exportar. Si quieres el mismo tratamiento informativo puro para
+ *   cat_dup, es un cambio de una línea (SVE_WARN → SVE_INFO) — avísame
+ *   y lo aplico igual que aquí.
+ *
  * Dependencias:
  *   - State (core/state.js) — lee rows ya vía parámetro, pero escribe
  *     State.sveHasCritical / sveHasWarnings / sveLastQuality
@@ -82,7 +120,7 @@ export const SVE_WARN = 'ADVERTENCIA';
 export const SVE_INFO = 'INFORMATIVA';
 
 export const SVE_ICONS = {
-  'dup_march':'🔖','dup_tarimas':'📦','missing_ruta':'🔴','missing':'🟠',
+  'dup_march':'🔖','missing_ruta':'🔴','missing':'🟠',
   'no_march':'🔴','zero_tar':'📐','high_tar':'📐','no_pdf':'🟡',
   'no_fac':'ℹ️','bad_march':'ℹ️','integrity':'🔗','no_ventana':'📇','no_pool':'🚚','cat_dup':'🗂️','time_anomaly':'⏱️',
   'no_cita':'📅','pdf_ambiguous':'🧩'
@@ -125,10 +163,6 @@ export function runSVE(rows, screenCount) {
 
   const matched = rows.filter(r => r._matched);
 
-  // Helper: collect _rowId values for all rows matching a given RUTA
-  const rowIdsByRuta = ruta =>
-    rows.filter(r => String(r['RUTA']||'').trim() === ruta).map(r => r._rowId).filter(Boolean);
-
   // A: Marchamos duplicados entre rutas distintas
   // marchMap stores: marc → { ruta, rowId, dette } — keeps the first row that claimed each marchamo
   const marchMap = new Map();
@@ -154,27 +188,11 @@ export function runSVE(rows, screenCount) {
     }
   });
 
-  // B: Tarimas idénticas en múltiples líneas de la misma ruta
-  const lineCount = new Map(), tarMap = new Map();
-  rows.forEach(r => {
-    const ruta = String(getMapped(r,'RUTA')||'').trim();
-    const tar  = String(getMapped(r,'TARIMAS')||'').trim();
-    if (!ruta) return;
-    lineCount.set(ruta, (lineCount.get(ruta)||0) + 1);
-    if (tar && tar !== '0') {
-      if (!tarMap.has(ruta)) tarMap.set(ruta, new Set());
-      tarMap.get(ruta).add(tar);
-    }
-  });
-  lineCount.forEach((cnt, ruta) => {
-    if (cnt < 2) return;
-    const vals = tarMap.get(ruta);
-    if (vals && vals.size === 1) rawAdd(SVE_WARN,'dup_tarimas', ruta, 'TARIMAS',
-      `Ruta ${ruta}: las ${cnt} líneas comparten el mismo conteo de tarimas (${[...vals][0]}) — posible asignación duplicada de PDF.`,
-      'Verifica si el PDF se asignó a múltiples líneas por error.',
-      `${[...vals][0]} tar. × ${cnt} líneas`,
-      rowIdsByRuta(ruta));
-  });
+  // B (RETIRADA jul-2026): "Tarimas idénticas en múltiples líneas de la
+  // misma ruta" — ver nota de cabecera "CAMBIO (jul-2026 — revisión de
+  // reglas operativas)". Confirmado por EduarDo: es un patrón normal
+  // del día a día, no una señal de PDF mal asignado. Se elimina la
+  // regla y su cómputo (lineCount/tarMap) por completo — sin reemplazo.
 
   // C: Registros sin RUTA
   let noRutaCnt = 0;
@@ -413,7 +431,12 @@ export function runSVE(rows, screenCount) {
       [...rowIds], dette);
   });
 
-  // L: Ventana de Recibo — DETTE no encontrado (consolidado por ruta)
+  // L: Ventana de Recibo — DETTE no encontrado (consolidado por ruta).
+  // CAMBIO (jul-2026): SVE_WARN → SVE_INFO — ver nota de cabecera
+  // "CAMBIO (jul-2026 — revisión de reglas operativas)". No existe
+  // campo editable para FORMATO/TIENDA/ESTADO en EDITABLE_FIELDS — la
+  // única corrección real es actualizar el catálogo Ventana de Recibo
+  // en Administración, fuera del alcance del operador de captura.
   const noVentanaByRuta = new Map();
   matched.forEach(r => {
     const miss = (r._enrichMisses || []).find(m => m.catalog === 'ventanaRecibo');
@@ -424,13 +447,14 @@ export function runSVE(rows, screenCount) {
     e.cnt++;
     if (r._rowId) e.rowIds.add(r._rowId);
   });
-  noVentanaByRuta.forEach(({ cnt, rowIds }, ruta) => rawAdd(SVE_WARN,'no_ventana', ruta,'FORMATO / TIENDA / ESTADO',
+  noVentanaByRuta.forEach(({ cnt, rowIds }, ruta) => rawAdd(SVE_INFO,'no_ventana', ruta,'FORMATO / TIENDA / ESTADO',
     `Ruta ${ruta}: DETTE no encontrado en el catálogo Ventana de Recibo.`,
-    'Verifica el DETTE en RUTEO NUEVO o actualiza el catálogo.',
+    'Verifica el DETTE en RUTEO NUEVO o actualiza el catálogo en Administración.',
     cnt>1?`×${cnt}`:'',
     [...rowIds]));
 
-  // M: Pool Real — ECO/REMOLQUE no encontrado (consolidado por ruta)
+  // M: Pool Real — ECO/REMOLQUE no encontrado (consolidado por ruta).
+  // CAMBIO (jul-2026): SVE_WARN → SVE_INFO — mismo motivo que la regla L.
   const noPoolByRuta = new Map();
   matched.forEach(r => {
     const misses = (r._enrichMisses || []).filter(m => m.catalog === 'poolReal');
@@ -443,9 +467,9 @@ export function runSVE(rows, screenCount) {
   });
   noPoolByRuta.forEach(({ fields, rowIds }, ruta) => {
     const fl = [...fields].join(', ');
-    rawAdd(SVE_WARN,'no_pool', ruta, fl,
+    rawAdd(SVE_INFO,'no_pool', ruta, fl,
       `Ruta ${ruta}: ${fl} no encontrado en el catálogo Pool Real.`,
-      'Verifica TRACTOR/REMOLQUE (UNIDAD) en RUTEO NUEVO o actualiza el catálogo.',
+      'Verifica TRACTOR/REMOLQUE (UNIDAD) en RUTEO NUEVO o actualiza el catálogo en Administración.',
       '', [...rowIds]);
   });
 

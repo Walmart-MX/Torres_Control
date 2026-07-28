@@ -30,6 +30,15 @@
  *     - Botón de Historial → sigue en el topbar Y se agrega un acceso
  *       directo en Administración → Historial (mismo Events.openHistory()).
  *
+ * CAMBIO (jul-2026 — administración de catálogos maestros fila por fila):
+ *   Se agrega wireCatalogAdmin(catalogId, containerId) — delegación de
+ *   eventos GENÉRICA (un solo listener por contenedor) para los botones
+ *   "+ Agregar"/"✕" que UI.renderCatalogAdmin() genera dinámicamente
+ *   dentro de #mcVentanaAdmin/#mcPoolAdmin. No se listean los inputs
+ *   individualmente porque UI.renderCatalogAdmin() los reconstruye una
+ *   sola vez (guard por dataset.built) — igual patrón que el resto de
+ *   la app usa para tablas dinámicas (ver mainTbody/fixList/catTbody).
+ *
  * Dependencias: todos los módulos de la aplicación.
  */
 import { State } from './state.js';
@@ -77,6 +86,47 @@ function goStep(id) {
   const idx = STEPS.findIndex(s => s.id === id);
   if (idx > -1) { currentStepIdx = idx; renderStepper(); }
   window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+/**
+ * Delegación de eventos GENÉRICA para el panel de administración
+ * fila-por-fila de un catálogo maestro (Ventana de Recibo / Pool Real).
+ * Ver nota de cabecera "CAMBIO (jul-2026 — administración de catálogos
+ * maestros fila por fila)". Un solo listener por contenedor cubre tanto
+ * el botón "+ Agregar" (data-mc-role="add") como cualquier botón "✕"
+ * de eliminar fila (data-mc-del="<uuid>") — ambos regenerados en cada
+ * UI.renderCatalogAdmin(catalogId).
+ * @param {string} catalogId — 'ventanaRecibo' | 'poolReal'
+ * @param {string} containerId — id del contenedor en index.html
+ */
+function wireCatalogAdmin(catalogId, containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.addEventListener('click', e => {
+    const addBtn = e.target.closest('[data-mc-role="add"]');
+    if (addBtn) {
+      const inputs = container.querySelectorAll('[data-mc-field]');
+      const values = {};
+      inputs.forEach(inp => { values[inp.dataset.mcField] = inp.value.trim(); });
+      Events.addCatalogRow(catalogId, values).then(() => {
+        // Limpia el formulario solo si el alta fue exitosa — si falló
+        // (ej. faltó el índice requerido), el usuario conserva lo ya
+        // capturado para corregir sin volver a escribir todo.
+        const statusEl = container.querySelector('[data-mc-role="status"]');
+        if (statusEl && statusEl.classList.contains('ok')) {
+          inputs.forEach(inp => { inp.value = ''; });
+        }
+      });
+      return;
+    }
+    const delBtn = e.target.closest('[data-mc-del]');
+    if (delBtn) {
+      const id = delBtn.dataset.mcDel;
+      if (!id) return;
+      if (!confirm('¿Eliminar este registro del catálogo? Esta acción no se puede deshacer.')) return;
+      Events.deleteCatalogRow(catalogId, id);
+    }
+  });
 }
 
 /**
@@ -209,6 +259,11 @@ export async function init() {
     Events.importMasterCatalog('poolReal', this.files[0]); this.value = '';
   });
 
+  // ── Administración — Ventana de Recibo / Pool Real, alta y baja fila
+  // por fila (NUEVO, jul-2026) — ver wireCatalogAdmin() arriba. ──
+  wireCatalogAdmin('ventanaRecibo', 'mcVentanaAdmin');
+  wireCatalogAdmin('poolReal', 'mcPoolAdmin');
+
   // ── Administración — Licencias (catálogo de operadores) ──
   document.getElementById('btnCatAdd').addEventListener('click',     () => Events.addCatalogEntry());
   document.getElementById('catLicInput').addEventListener('keydown', e => {
@@ -308,6 +363,10 @@ export async function init() {
   await CatalogStore.loadAll();
   UI.renderCatalogMasterStatus('ventanaRecibo');
   UI.renderCatalogMasterStatus('poolReal');
+  // NUEVO (jul-2026): tabla fila-por-fila de cada catálogo maestro —
+  // ver ui.js → renderCatalogAdmin().
+  UI.renderCatalogAdmin('ventanaRecibo');
+  UI.renderCatalogAdmin('poolReal');
 
   // ── Aviso de día ya procesado (Camino B, Fase 3) ──
   const todaySession = await DispatchHistory.getTodaySession();

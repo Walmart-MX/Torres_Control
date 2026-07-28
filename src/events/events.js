@@ -19,6 +19,23 @@
  *   además colapsa/expande la grilla de Preparación según
  *   Events.checkSources().ok.
  *
+ * CAMBIO (jul-2026 — feedback visual de carga/procesamiento):
+ *   handlePDFs/handleXLS/handleWTMS ahora alternan UI.setSourceProcessing
+ *   (key, true/false) alrededor de la lectura async del archivo, siempre
+ *   dentro de un try/finally — así la animación de "respiración" de la
+ *   tarjeta (ver index.html, .up-card.processing) se apaga sin importar
+ *   si la lectura terminó en éxito o en error. La animación de arrastre
+ *   (.up-card.drag) no requiere cambios aquí: Events.setupDrop ya
+ *   alternaba esa clase, lo único que faltaba era el CSS (ver index.html).
+ *
+ * CAMBIO (jul-2026 — administración de catálogos maestros fila por fila):
+ *   Se agregan addCatalogRow()/deleteCatalogRow() — contraparte de
+ *   addCatalogEntry()/delOp() (catálogo de operadores) pero para
+ *   Ventana de Recibo/Pool Real vía CatalogStore.addRow()/deleteRow().
+ *   importMasterCatalog() ahora también refresca UI.renderCatalogAdmin()
+ *   tras un reemplazo completo, para que la tabla fila-por-fila quede
+ *   sincronizada con el Excel recién importado.
+ *
  * FIX DE INTEGRIDAD DE DATOS (jul-2026) — handlePDFs():
  *   Antes se indexaba SIEMPRE `ruta + '|' + r.factura` y
  *   `ruta + '|D|' + r.destino` en State.pdfData, aunque factura/destino
@@ -77,6 +94,7 @@ export const Events = {
 
       const result = await CatalogStore.replaceCatalog(catalogId, rows, State.user);
       UI.renderCatalogMasterStatus(catalogId);
+      UI.renderCatalogAdmin(catalogId);
       UI.setMasterCatStatus(`✓ ${result.count} registros cargados`, 'ok');
       if (State.merged.length) Events.triggerMerge();
     } catch (e) {
@@ -84,29 +102,72 @@ export const Events = {
     }
   },
 
+  /**
+   * Agrega UN registro individual a un catálogo maestro desde el panel
+   * de Administración — contraparte de addCatalogEntry() (operadores),
+   * pero genérica sobre CATALOGS (ver ui.js → renderCatalogAdmin()).
+   * @param {string} catalogId — 'ventanaRecibo' | 'poolReal'
+   * @param {object} values — { columnaCanonica: valor } capturado del formulario
+   */
+  async addCatalogRow(catalogId, values) {
+    UI.setCatalogAdminStatus(catalogId, 'Guardando…', 'ok');
+    try {
+      await CatalogStore.addRow(catalogId, values, State.user);
+      UI.renderCatalogAdmin(catalogId);
+      UI.renderCatalogMasterStatus(catalogId);
+      UI.setCatalogAdminStatus(catalogId, '✓ Registro agregado', 'ok');
+      if (State.merged.length) Events.triggerMerge();
+    } catch (e) {
+      UI.setCatalogAdminStatus(catalogId, e.message, 'err');
+    }
+  },
+
+  /**
+   * Elimina UN registro individual de un catálogo maestro por su _id.
+   * @param {string} catalogId — 'ventanaRecibo' | 'poolReal'
+   * @param {string} id — _id del registro (uuid de Supabase)
+   */
+  async deleteCatalogRow(catalogId, id) {
+    UI.setCatalogAdminStatus(catalogId, 'Eliminando…', 'ok');
+    try {
+      await CatalogStore.deleteRow(catalogId, id, State.user);
+      UI.renderCatalogAdmin(catalogId);
+      UI.renderCatalogMasterStatus(catalogId);
+      UI.setCatalogAdminStatus(catalogId, 'Eliminado', 'ok');
+      if (State.merged.length) Events.triggerMerge();
+    } catch (e) {
+      UI.setCatalogAdminStatus(catalogId, e.message, 'err');
+    }
+  },
+
   async handlePDFs(files) {
     files = files.filter(f => f.type === 'application/pdf');
     if (!files.length) return;
     UI.showProgress('Procesando PDFs…');
+    UI.setSourceProcessing('pdf', true);
     const errors = [];
     let ok = 0;
-    for (let i = 0; i < files.length; i++) {
-      try {
-        const extracted = await pdfExtract(files[i]);
-        const parsed    = parsePDF(extracted, files[i].name);
-        for (const r of parsed) {
-          // FIX (jul-2026) — ver nota de cabecera "FIX DE INTEGRIDAD DE
-          // DATOS": nunca indexar una clave con factura/destino vacío.
-          // Una entrega sin ese dato detectado queda fuera del match
-          // específico (correcto: no hay certeza) en vez de arriesgarse
-          // a colisionar con otra entrega de la misma ruta.
-          if (r.factura) State.pdfData.set(r.ruta + '|' + r.factura,   r);
-          if (r.destino) State.pdfData.set(r.ruta + '|D|' + r.destino, r);
-        }
-        if (parsed.length) ok++;
-        else errors.push('Sin datos: ' + files[i].name);
-      } catch (e) { errors.push('Error: ' + files[i].name + ' — ' + e.message); }
-      UI.setProgress(i + 1, files.length, files[i].name);
+    try {
+      for (let i = 0; i < files.length; i++) {
+        try {
+          const extracted = await pdfExtract(files[i]);
+          const parsed    = parsePDF(extracted, files[i].name);
+          for (const r of parsed) {
+            // FIX (jul-2026) — ver nota de cabecera "FIX DE INTEGRIDAD DE
+            // DATOS": nunca indexar una clave con factura/destino vacío.
+            // Una entrega sin ese dato detectado queda fuera del match
+            // específico (correcto: no hay certeza) en vez de arriesgarse
+            // a colisionar con otra entrega de la misma ruta.
+            if (r.factura) State.pdfData.set(r.ruta + '|' + r.factura,   r);
+            if (r.destino) State.pdfData.set(r.ruta + '|D|' + r.destino, r);
+          }
+          if (parsed.length) ok++;
+          else errors.push('Sin datos: ' + files[i].name);
+        } catch (e) { errors.push('Error: ' + files[i].name + ' — ' + e.message); }
+        UI.setProgress(i + 1, files.length, files[i].name);
+      }
+    } finally {
+      UI.setSourceProcessing('pdf', false);
     }
     UI.hideProgress();
 
@@ -121,6 +182,7 @@ export const Events = {
     const file = files.find(f => f.name.match(/\.xlsx?$/i));
     if (!file) return;
     UI.showProgress('Leyendo Excel…');
+    UI.setSourceProcessing('xls', true);
     try {
       const { rows, factData, ruteoName, factSheetLabel } = await processXLS(file);
       State.xlsData  = rows;
@@ -140,6 +202,8 @@ export const Events = {
     } catch (e) {
       UI.hideProgress();
       UI.showErrors([e.message]);
+    } finally {
+      UI.setSourceProcessing('xls', false);
     }
   },
 
@@ -148,6 +212,7 @@ export const Events = {
     const file = files.find(f => f.name.match(/\.csv$/i));
     if (!file) { if (files.length) UI.showErrors(['El Reporte WTMS debe ser un archivo .csv']); return; }
     UI.showProgress('Leyendo Reporte WTMS…');
+    UI.setSourceProcessing('wtms', true);
     try {
       const raw = await file.text();
       const { data } = processWTMS(raw);
@@ -160,6 +225,8 @@ export const Events = {
     } catch (e) {
       UI.hideProgress();
       UI.showErrors([e.message]);
+    } finally {
+      UI.setSourceProcessing('wtms', false);
     }
   },
 

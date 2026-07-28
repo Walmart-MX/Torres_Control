@@ -41,6 +41,28 @@
  * construida. updateHealthRail() se conserva como método (lo siguen
  * llamando ~6 call-sites) pero por ahora es un stub documentado.
  *
+ * CAMBIO (jul-2026 — feedback visual de arrastre/carga):
+ *   setSourceProcessing(key, on) — NUEVO. Antes las tarjetas de fuente
+ *   solo tenían dos estados visuales (pendiente / .done); no había
+ *   ninguna señal de que la app estuviera "viva" mientras se procesaba
+ *   un archivo (podía tardar varios segundos con PDFs pesados) ni al
+ *   arrastrar un archivo sobre la zona de drop (la clase .drag ya la
+ *   alternaba Events.setupDrop, pero el CSS nunca la estilizó — ver
+ *   index.html). Este método solo alterna la clase .processing; toda
+ *   la animación ("respiración") vive en CSS.
+ *
+ * CAMBIO (jul-2026 — administración de catálogos maestros fila por fila):
+ *   renderCatalogAdmin(catalogId) — NUEVO. Antes Ventana de Recibo y
+ *   Pool Real solo tenían el botón "Importar/Reemplazar" — sin forma de
+ *   ver, agregar o eliminar un registro individual, a diferencia de
+ *   Licencias (catálogo de operadores). Se agrega un renderer GENÉRICO
+ *   impulsado por CATALOGS (catalog-registry.js) — no hay una función
+ *   por catálogo: agregar un catálogo nuevo en el futuro sigue siendo
+ *   "una entrada en catalog-registry.js", igual que ya funciona
+ *   enrichment-engine.js. Reutiliza las clases .cat-add-row/.cat-input/
+ *   .cat-table-wrap/.cat-table/.cat-empty/.cat-status ya definidas para
+ *   Licencias — mismo look & feel, sin CSS nuevo.
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - escH (utils/dom.js)
@@ -49,6 +71,8 @@
  *     WORKTABLE_COLS (core/constants.js)
  *   - SVE_CRIT, SVE_WARN, SVE_INFO, SVE_ICONS (features/validation/sve.js)
  *   - FactCache (features/fact-cache.js)
+ *   - CATALOGS (features/catalogs/catalog-registry.js) — metadata de
+ *     columnas para renderCatalogAdmin()
  *   - Events (events/events.js) — resuelto en runtime vía _setEvents()
  */
 import { State } from '../core/state.js';
@@ -59,6 +83,7 @@ import {
 } from '../core/constants.js';
 import { SVE_CRIT, SVE_WARN, SVE_INFO, SVE_ICONS } from '../features/validation/sve.js';
 import { FactCache } from '../features/fact-cache.js';
+import { CATALOGS } from '../features/catalogs/catalog-registry.js';
 
 let Events;
 /** Resuelve la dependencia circular UI ↔ Events — llamado una vez desde core/app.js */
@@ -74,11 +99,13 @@ let _tableSearch = '';
 // ── Correcciones — clasificación de incidencias (NUEVO, mockup jul-2026) ──
 // Reglas cuyo issue mapea 1:1 a UN solo campo editable — candidatas a
 // tarjeta de "corrección rápida" (input inline). Cualquier otra regla
-// CRÍTICA/ADVERTENCIA (dup_march, no_pdf, wtms_ambiguous, no_ventana,
-// no_pool, cat_dup) se muestra como tarjeta "Revisar", que abre el
-// drawer completo — no tienen un único campo+valor claro que resolver
-// con un input suelto. Ver features/validation/sve.js para el porqué
-// de cada field.
+// CRÍTICA/ADVERTENCIA (dup_march, no_pdf, wtms_ambiguous, cat_dup) se
+// muestra como tarjeta "Revisar", que abre el drawer completo — no
+// tienen un único campo+valor claro que resolver con un input suelto.
+// no_ventana/no_pool (CAMBIO jul-2026: ahora SVE_INFO, ver sve.js) ya
+// no llegan aquí — el filtro de severidad en _buildFixBuckets() las
+// excluye antes de clasificarlas. Ver features/validation/sve.js para
+// el porqué de cada field.
 const QUICKFIX_RULES = new Set(['missing', 'no_march', 'zero_tar', 'high_tar']);
 const QUICKFIX_FIELD_MAP = {
   'OPERADOR':   { key: 'OPERADOR',   label: 'Operador',   placeholder: 'Nombre del operador…' },
@@ -181,6 +208,24 @@ export const UI = {
     if (card)   card.classList.toggle('done', !!done);
     if (status) status.textContent = statusText;
     if (sub)    sub.textContent    = subText;
+  },
+
+  /**
+   * Alterna la animación de "procesando" (respiración) de una tarjeta
+   * de fuente — feedback visual de que la app sigue viva mientras lee
+   * un archivo (PDFs grandes o Excel pesados pueden tardar varios
+   * segundos). Puramente visual — toda la animación vive en CSS
+   * (.up-card.processing, ver index.html). Llamar con on=true al
+   * iniciar la lectura del archivo y on=false en un finally (éxito o
+   * error), para que nunca quede "respirando" indefinidamente.
+   * @param {string} key — 'pdf'|'xls'|'wtms'|'desp'
+   * @param {boolean} on
+   */
+  setSourceProcessing(key, on) {
+    const suffix = SOURCE_ID[key];
+    if (!suffix) return;
+    const card = document.getElementById('drop' + suffix);
+    if (card) card.classList.toggle('processing', !!on);
   },
 
   /** Agrega una nota adicional (ej. aviso de caché histórico) al sub-texto de una fuente, sin pisar el texto principal. */
@@ -544,6 +589,10 @@ export const UI = {
    * (no_cita) es siempre INFORMATIVA — nunca entra en `quick`/`review`,
    * se devuelve aparte en `info` y no cuenta para el contador de
    * "incidencias pendientes" (decisión confirmada con EduarDo).
+   * Desde jul-2026, no_ventana/no_pool también son INFORMATIVA (ver
+   * sve.js) y por lo tanto tampoco entran a `quick`/`review` — el
+   * filtro de severidad las excluye automáticamente aquí, sin lógica
+   * adicional.
    * @private
    */
   _buildFixBuckets() {
@@ -894,6 +943,77 @@ export const UI = {
     el.textContent = msg;
   },
 
+  /**
+   * Pinta el panel de administración fila-por-fila de un catálogo
+   * maestro (Ventana de Recibo / Pool Real) — tabla con todos los
+   * registros cargados + formulario de alta, mismo estilo visual que
+   * Licencias (reutiliza .cat-add-row/.cat-input/.cat-table-wrap/
+   * .cat-table/.cat-empty, sin CSS nuevo).
+   *
+   * GENÉRICO: las columnas mostradas y los inputs del formulario de
+   * alta se derivan de CATALOGS[catalogId].columns (catalog-registry.js)
+   * — agregar un catálogo maestro nuevo en el futuro no requiere tocar
+   * este método, solo su entrada en catalog-registry.js y un
+   * contenedor <div id="mc..Admin"> en index.html.
+   *
+   * El formulario de alta (inputs + botón "+ Agregar") se construye
+   * UNA sola vez por contenedor (guard vía container.dataset.built) —
+   * las llamadas posteriores (tras importar, agregar o eliminar) solo
+   * refrescan el <tbody>, para no perder lo que el usuario esté
+   * escribiendo en los inputs de alta si hay un refresh de fondo.
+   *
+   * @param {string} catalogId — 'ventanaRecibo' | 'poolReal'
+   */
+  renderCatalogAdmin(catalogId) {
+    const catalog = CATALOGS[catalogId];
+    if (!catalog) return;
+    const containerId = catalogId === 'ventanaRecibo' ? 'mcVentanaAdmin' : 'mcPoolAdmin';
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const cols = Object.keys(catalog.columns);
+
+    if (!container.dataset.built) {
+      container.innerHTML = `
+        <div class="cat-add-row">
+          ${cols.map(c => `<input class="cat-input" data-mc-field="${escH(c)}" placeholder="${escH(c)}" style="flex:1;min-width:110px">`).join('')}
+          <button class="btn btn-success btn-sm" data-mc-role="add">+ Agregar</button>
+        </div>
+        <div class="cat-table-wrap">
+          <table class="cat-table">
+            <thead><tr>${cols.map(c => `<th>${escH(c)}</th>`).join('')}<th></th></tr></thead>
+            <tbody data-mc-role="tbody"></tbody>
+          </table>
+        </div>
+        <div class="cat-status" data-mc-role="status"></div>`;
+      container.dataset.built = '1';
+    }
+
+    const rows  = State.catalogs[catalogId] || [];
+    const tbody = container.querySelector('[data-mc-role="tbody"]');
+    if (!tbody) return;
+
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="${cols.length + 1}"><div class="cat-empty">Sin registros — agrega uno o importa desde Excel</div></td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows.map(r => `
+      <tr>
+        ${cols.map(c => `<td class="td-op" title="${escH(r[c]||'')}">${escH(r[c]||'')}</td>`).join('')}
+        <td><button class="btn-del" data-mc-del="${escH(r._id||'')}">✕</button></td>
+      </tr>`).join('');
+  },
+
+  /** Escribe un mensaje de estado dentro del panel de administración de un catálogo maestro (add/delete). */
+  setCatalogAdminStatus(catalogId, msg, cls) {
+    const containerId = catalogId === 'ventanaRecibo' ? 'mcVentanaAdmin' : 'mcPoolAdmin';
+    const container = document.getElementById(containerId);
+    const el = container ? container.querySelector('[data-mc-role="status"]') : null;
+    if (!el) return;
+    el.className   = 'cat-status' + (cls ? ' ' + cls : '');
+    el.textContent = msg;
+  },
+
   // ── Cache History ──
   renderCacheHistory() {
     const summary  = FactCache.dateSummary();
@@ -1091,6 +1211,9 @@ export const UI = {
     UI.setSourceStatus('xls',  false, 'Arrastra o haz clic', 'Lee ambas pestañas automáticamente');
     UI.setSourceStatus('wtms', false, 'Arrastra o haz clic', 'Archivo .csv');
     UI.setSourceStatus('desp', false, 'Pega desde Excel',    'Copia RUTA · CASETA · WTMS · ID\'S MASTER');
+    UI.setSourceProcessing('pdf',  false);
+    UI.setSourceProcessing('xls',  false);
+    UI.setSourceProcessing('wtms', false);
 
     document.getElementById('pasteArea').value = '';
     document.getElementById('pasteSt').textContent = '';
