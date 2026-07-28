@@ -23,6 +23,20 @@
  *   'absdiff' — |a - b| — usado en RETIRO VS DESPACHO por regla de
  *               negocio explícita: no importa el signo, solo la magnitud.
  *
+ * AJUSTE (jul-2026 — identificación de datos faltantes en el archivo
+ * final): cuando un tiempo no se puede calcular porque falta uno (o
+ * ambos) de sus dos datos de entrada, computeTimes() ahora deja
+ * constancia de CUÁL dato faltó en nr._timeMissing[rule.out] — un
+ * mensaje corto tipo "Falta ENRAMPE" o "Falta RETIRO y HR. DESPACHO".
+ * Antes esta información se perdía por completo: la celda simplemente
+ * quedaba vacía (nr[rule.out] = '') sin ningún rastro de la causa.
+ * _timeMissing es exclusivamente para que features/export.js resalte
+ * la celda y agregue un comentario en el archivo final — no lo
+ * consume el SVE ni ningún otro módulo, y no afecta el caso de "orden
+ * invertido" (ambos datos presentes pero en el orden equivocado),
+ * que sigue reportándose únicamente vía el arreglo `anomalies` ya
+ * existente.
+ *
  * Dependencias:
  *   - getMapped (core/constants.js)
  *   - parseDateTime (utils/date.js)
@@ -56,15 +70,29 @@ function _fmtMinutes(mins) {
  * sus campos de fecha/hora (PDF, despacho, facturación) — ver el punto
  * de llamada en merge.js, al final del loop.
  *
- * @param {object} nr — fila final en construcción (mutada in-place)
+ * @param {object} nr — fila final en construcción (mutada in-place).
+ *   Además de nr[rule.out], escribe nr._timeMissing — ver nota de
+ *   cabecera "AJUSTE (jul-2026 — identificación de datos faltantes)".
  * @returns {Array<{rule:string, reason:'orden_invertido'|'duracion_anormal', minutes:number}>}
  */
 export function computeTimes(nr) {
   const anomalies = [];
+  // rule.out → mensaje corto de qué dato de entrada faltó — consumido
+  // únicamente por features/export.js para resaltar la celda en el
+  // archivo final (ver nota de cabecera). Se reinicia en cada corrida.
+  nr._timeMissing = {};
+
   for (const rule of TIME_RULES) {
     const dA = parseDateTime(getMapped(nr, rule.a));
     const dB = parseDateTime(getMapped(nr, rule.b));
-    if (!dA || !dB) { nr[rule.out] = ''; continue; }
+    if (!dA || !dB) {
+      nr[rule.out] = '';
+      const faltantes = [];
+      if (!dA) faltantes.push(rule.a.trim());
+      if (!dB) faltantes.push(rule.b.trim());
+      nr._timeMissing[rule.out] = `Falta ${faltantes.join(' y ')}`;
+      continue;
+    }
 
     let mins = Math.round((dA - dB) / 60000);
     if (rule.mode === 'absdiff') mins = Math.abs(mins);

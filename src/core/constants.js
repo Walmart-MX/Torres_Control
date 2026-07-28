@@ -21,14 +21,22 @@
  *
  * FIX (jul-2026) — columna DIA en minúsculas en el Excel exportado:
  *   COL_MAP['DIA'] leía nr['_DIA'] tal cual, sin normalizar. Si en
- *   algún punto de la app _DIA llega en minúsculas (por ejemplo, si se
- *   calculó alguna vez con Date.toLocaleDateString('es-MX',{weekday:
- *   'long'}), que en JS devuelve "lunes" en vez de "Lunes"), el Excel
- *   final terminaba mostrando el día sin capitalizar. Se fuerza la
- *   capitalización aquí mismo, en el único punto de lectura de esta
- *   columna — así queda protegido sin importar cómo se generó _DIA
- *   (merge.js ya lo arma bien vía DIA_NAMES, pero esto blinda contra
- *   cualquier fuente futura del valor).
+ *   algún punto de la app _DIA llega en minúsculas, el Excel final
+ *   terminaba mostrando el día sin capitalizar.
+ *
+ * AJUSTE (jul-2026 — archivo final): dos cambios solicitados sobre el
+ * archivo exportado, sin tocar ningún otro consumidor de estas
+ * constantes:
+ *   1) COL_MAP['DIA'] ahora exporta el nombre del día TOTALMENTE EN
+ *      MAYÚSCULAS ("LUNES" en vez de "Lunes"). Se retira _capitalize()
+ *      (quedaba sin otro uso) y se reemplaza por un toUpperCase()
+ *      directo — mismo único punto de lectura de esta columna.
+ *   2) INT_COLS gana 'ID IDA', 'ID RETORNO' y 'CARTA PORTE': el
+ *      exportador (features/export.js) ya sabe convertir cualquier
+ *      columna de INT_COLS a número real y aplicarle formato '0' —
+ *      agregar estas tres columnas al Set basta para que Excel las
+ *      reconozca como número sin necesidad del paso manual
+ *      "Convertir a número". No requiere ningún cambio en export.js.
  */
 import { State } from './state.js';
 
@@ -86,8 +94,14 @@ export const WORKTABLE_COLS = [
   'RUTA', 'OPERADOR', 'LIC.', 'TARIMAS', 'MARCHAMO 1', 'FAC.', 'TIENDA', 'TRACTOR ', 'REMOLQUE'
 ];
 
+// AJUSTE (jul-2026 — archivo final): se agregan 'ID IDA', 'ID RETORNO'
+// y 'CARTA PORTE' — ver nota de cabecera. El exportador (features/export.js)
+// ya convierte cualquier columna listada aquí a número real (parseInt)
+// y le aplica formato numérico '0'; no requiere ningún cambio adicional
+// ahí, solo esta entrada de configuración.
 export const INT_COLS      = new Set(['DET','RUTA','TARIMAS','CAJAS','CORTINA',
-  'MARCHAMO 1','MARCHAMO 2','MARCHAMO 3 ','MARCHAMO 4','MARCHAMO 5','FAC.','GLS DE EMB.','SW']);
+  'MARCHAMO 1','MARCHAMO 2','MARCHAMO 3 ','MARCHAMO 4','MARCHAMO 5','FAC.','GLS DE EMB.','SW',
+  'ID IDA','ID RETORNO','CARTA PORTE']);
 export const DATE_COLS     = new Set(['FECHA']);
 export const DATETIME_COLS = new Set(['HORA DE FACTURACION','HR. DESPACHO',
   'SALIDA DE CASETA ','CITA','SOLICITUD DE ENRAMPE','ENRAMPE','RETIRO']);
@@ -110,19 +124,12 @@ export const WTMS_ALIASES = {
   siguienteCarga: /^siguiente\s*carga$/i
 };
 
-/**
- * Capitaliza la primera letra y deja el resto en minúsculas — usado
- * exclusivamente por COL_MAP['DIA'] para blindar contra cualquier
- * fuente de _DIA que no llegue ya capitalizada. @private
- */
-function _capitalize(s) {
-  const v = String(s ?? '').trim();
-  return v ? v.charAt(0).toUpperCase() + v.slice(1).toLowerCase() : '';
-}
-
 export const COL_MAP = {
   'FECHA':                r => r['FECHA']       ?? '',
-  'DIA':                  r => _capitalize(r['_DIA']),
+  // AJUSTE (jul-2026 — archivo final): mayúsculas completas, ver nota
+  // de cabecera. Único punto de lectura de esta columna — merge.js
+  // (DIA_NAMES) sigue generando "Lunes"/"Martes"/etc. sin cambios.
+  'DIA':                  r => String(r['_DIA'] ?? '').trim().toUpperCase(),
   'SW':                   r => r['_SW']         ?? '',
   'ENTREGA':              r => r['SETEO']        ?? '',
   'ENT1':                 r => r['ENT1']         ?? '',
