@@ -10,14 +10,17 @@
  * la descarga del navegador, pero eso no es manipulación del DOM de la app).
  *
  * AJUSTES (jul-2026 — archivo final, ver detalle en cada bloque):
- *   1) FECHA — ya NO se hace ningún cálculo/ajuste de zona horaria.
- *      Se copia el mismo día que trae RUTEO NUEVO; solo se corrige la
- *      imprecisión de punto flotante con la que SheetJS a veces lee
- *      fechas (cellDates:true resuelve el serial a unos segundos antes
- *      de medianoche UTC en vez de exactamente medianoche) — eso era
- *      lo que producía el desfase de un día y la hora "23:59:56 p.m."
- *      en el archivo final. El formato de celda sigue siendo
- *      'DD/MM/YYYY' (sin hora) — ya estaba así, sin cambios ahí.
+ *   1) FECHA — SEGUNDO INTENTO. El primer intento seguía manipulando
+ *      un objeto Date (redondeo + lectura en UTC), pero ese objeto ya
+ *      viene ambiguo desde que SheetJS lo construye a partir del
+ *      serial de Excel — cualquier operación sobre él hereda esa
+ *      ambigüedad. Ahora getMapped(row,'FECHA') devuelve directamente
+ *      el TEXTO que Excel mostraba en la celda original de RUTEO NUEVO
+ *      (ver processors/excel.js → row._FECHA_TEXT, leído de `.w` de la
+ *      celda cruda, nunca de un Date). Aquí solo se separan los tres
+ *      números de ese texto (día/mes/año) y se arma un Date local con
+ *      esos mismos números — cero cálculo, cero zona horaria. El
+ *      formato de celda sigue siendo 'DD/MM/YYYY' (sin hora).
  *   2) ID IDA / ID RETORNO / CARTA PORTE — ahora forman parte de
  *      INT_COLS (core/constants.js). Este archivo YA convertía a
  *      número real cualquier columna de INT_COLS y le aplicaba formato
@@ -28,9 +31,9 @@
  *      alguno de sus dos datos de entrada, deja constancia en
  *      row._timeMissing[col] (ver time-engine.js). Aquí se usa esa
  *      información SOLO en el archivo final: la celda vacía se resalta
- *      con relleno ámbar y se le agrega un comentario de Excel con el
- *      detalle ("Falta ENRAMPE", etc.), sin afectar ningún otro cálculo
- *      ni pantalla de la app.
+ *      con relleno ámbar. NO se agrega comentario de Excel — se
+ *      retiró por estética (feedback jul-2026): solo el resaltado
+ *      visual, sin texto emergente.
  *
  * Dependencias:
  *   - State (core/state.js) — lee State.merged únicamente
@@ -55,6 +58,27 @@ import { TIME_RULES } from '../core/time-engine.js';
 const TIME_OUTPUT_COLS = new Set(TIME_RULES.map(r => r.out));
 
 /**
+ * Parsea el texto EXACTO de la celda FECHA (ej. "27/07/2026",
+ * "27-07-2026", "27.07.2026") en {dd, mm, yyyy} — pura extracción de
+ * dígitos en el orden DD/MM/YYYY, sin ningún cálculo ni interpretación
+ * de zona horaria. Devuelve null si el texto no trae un patrón
+ * reconocible (en cuyo caso el valor original se deja tal cual, sin
+ * inventar nada).
+ * @private
+ * @param {string} text
+ * @returns {{dd:number, mm:number, yyyy:number}|null}
+ */
+function _parseFechaTexto(text) {
+  const m = String(text).trim().match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+  if (!m) return null;
+  const dd = parseInt(m[1], 10);
+  const mm = parseInt(m[2], 10);
+  let yyyy = parseInt(m[3], 10);
+  if (yyyy < 100) yyyy += 2000;
+  return { dd, mm, yyyy };
+}
+
+/**
  * Construye el workbook Excel con una hoja "RUTEO UNIFICADO",
  * aplica estilos de encabezado y celda, anchos de columna, freeze
  * de primera fila, y dispara la descarga con nombre ruteo_base_YYYY-MM-DD.xlsx.
@@ -65,22 +89,21 @@ export function exportXLSX() {
     let val = getMapped(row, col);
     if (val === '' || val === null || val === undefined) return '';
     if (DATE_COLS.has(col)) {
+      // AJUSTE (jul-2026 — FECHA, segundo intento): val ya es el texto
+      // exacto de la celda original (ver processors/excel.js →
+      // row._FECHA_TEXT, vía COL_MAP['FECHA'] en constants.js). Se
+      // extraen sus tres números tal cual y se arma un Date local con
+      // ellos — ningún cálculo, ninguna conversión de zona horaria.
+      if (typeof val === 'string') {
+        const parsed = _parseFechaTexto(val);
+        if (parsed) return new Date(parsed.yyyy, parsed.mm - 1, parsed.dd);
+        return val; // texto no reconocido — se deja tal cual, sin inventar nada
+      }
+      // Respaldo — solo se usa si por algún motivo no se detectó la
+      // columna FECHA al leer el Excel (ver excel.js) y COL_MAP cayó a
+      // r['FECHA'], que en ese caso sigue siendo el Date de SheetJS.
       const d = val instanceof Date ? val : new Date(val);
-      if (isNaN(d.getTime())) return val;
-      // AJUSTE (jul-2026 — FECHA sin cálculo ni ajuste de zona horaria):
-      // se copia el mismo día que trae RUTEO NUEVO. Se redondea al día
-      // más cercano en UTC (corrige la imprecisión de punto flotante de
-      // SheetJS al leer fechas — el serial puede resolver a unos
-      // segundos antes de medianoche) y se leen los componentes SIEMPRE
-      // en UTC (nunca con getFullYear()/getMonth()/getDate() locales),
-      // para que el offset negativo de México (UTC-6) no recorra el
-      // día — mismo criterio que ya usa core/fiscal-calendar.js. El
-      // resultado es una fecha local a medianoche con exactamente el
-      // mismo año/mes/día que el Excel original — ningún cálculo,
-      // ninguna conversión, solo una copia fiel del valor.
-      const roundedMs = Math.round(d.getTime() / 86400000) * 86400000;
-      const u = new Date(roundedMs);
-      return new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate());
+      return isNaN(d.getTime()) ? val : new Date(d.getFullYear(), d.getMonth(), d.getDate());
     }
     if (DATETIME_COLS.has(col)) {
       if (val instanceof Date && !isNaN(val.getTime())) return val;
@@ -138,16 +161,17 @@ export function exportXLSX() {
       // cálculo de tiempos): SOLO en el archivo final. Si esta celda es
       // la salida de una regla de core/time-engine.js y el cálculo no
       // se pudo hacer por falta de dato de entrada, se resalta con
-      // relleno ámbar y se agrega un comentario de Excel indicando
-      // exactamente cuál dato faltó — sin afectar el valor ('' se deja
-      // igual) ni ningún otro cálculo o pantalla de la app.
+      // relleno ámbar — SIN comentario de Excel (se retiró por
+      // estética, feedback jul-2026). El detalle de qué faltó
+      // (row._timeMissing[col]) sigue calculándose en time-engine.js
+      // por si se necesita en otro lugar más adelante, pero aquí ya
+      // no se muestra como comentario, solo como resaltado visual.
       if (TIME_OUTPUT_COLS.has(col)) {
         const mergedRow     = State.merged[R - 1];
         const missingReason = mergedRow && mergedRow._timeMissing && mergedRow._timeMissing[col];
         if (missingReason) {
           ws[addr].s.fill = { patternType: 'solid', fgColor: { rgb: 'FDE68A' } };
           ws[addr].s.font = { ...ws[addr].s.font, color: { rgb: '92400E' }, bold: true };
-          ws[addr].c = [{ a: 'SmartDispatch', t: missingReason }];
         }
       }
     }
