@@ -9,10 +9,35 @@
  * No muta State. No toca el DOM directamente (XLSX.writeFile dispara
  * la descarga del navegador, pero eso no es manipulación del DOM de la app).
  *
+ * AJUSTES (jul-2026 — archivo final, ver detalle en cada bloque):
+ *   1) FECHA — ya NO se hace ningún cálculo/ajuste de zona horaria.
+ *      Se copia el mismo día que trae RUTEO NUEVO; solo se corrige la
+ *      imprecisión de punto flotante con la que SheetJS a veces lee
+ *      fechas (cellDates:true resuelve el serial a unos segundos antes
+ *      de medianoche UTC en vez de exactamente medianoche) — eso era
+ *      lo que producía el desfase de un día y la hora "23:59:56 p.m."
+ *      en el archivo final. El formato de celda sigue siendo
+ *      'DD/MM/YYYY' (sin hora) — ya estaba así, sin cambios ahí.
+ *   2) ID IDA / ID RETORNO / CARTA PORTE — ahora forman parte de
+ *      INT_COLS (core/constants.js). Este archivo YA convertía a
+ *      número real cualquier columna de INT_COLS y le aplicaba formato
+ *      '0' — no requirió ningún cambio de código aquí, solo la entrada
+ *      de configuración en constants.js.
+ *   3) Columnas de tiempo con datos faltantes — cuando
+ *      core/time-engine.js no pudo calcular un tiempo porque faltó
+ *      alguno de sus dos datos de entrada, deja constancia en
+ *      row._timeMissing[col] (ver time-engine.js). Aquí se usa esa
+ *      información SOLO en el archivo final: la celda vacía se resalta
+ *      con relleno ámbar y se le agrega un comentario de Excel con el
+ *      detalle ("Falta ENRAMPE", etc.), sin afectar ningún otro cálculo
+ *      ni pantalla de la app.
+ *
  * Dependencias:
  *   - State (core/state.js) — lee State.merged únicamente
  *   - BASE_ORDER, INT_COLS, DATE_COLS, DATETIME_COLS,
  *     COLS_PDF, COLS_DESP, COLS_FILL, getMapped (core/constants.js)
+ *   - TIME_RULES (core/time-engine.js) — nombres de columna cuyo valor
+ *     puede venir acompañado de row._timeMissing[col]
  *   - parseDateTime (utils/date.js) — convierte strings de fecha a Date
  *     para que SheetJS aplique el formato correcto
  *   - XLSX (SheetJS, global del CDN en index.html)
@@ -23,6 +48,11 @@ import {
   COLS_PDF, COLS_DESP, COLS_FILL, getMapped
 } from '../core/constants.js';
 import { parseDateTime } from '../utils/date.js';
+import { TIME_RULES } from '../core/time-engine.js';
+
+// Columnas de salida del motor de tiempos (core/time-engine.js) — las
+// únicas donde aplica el resaltado de "dato faltante" del archivo final.
+const TIME_OUTPUT_COLS = new Set(TIME_RULES.map(r => r.out));
 
 /**
  * Construye el workbook Excel con una hoja "RUTEO UNIFICADO",
@@ -36,7 +66,21 @@ export function exportXLSX() {
     if (val === '' || val === null || val === undefined) return '';
     if (DATE_COLS.has(col)) {
       const d = val instanceof Date ? val : new Date(val);
-      return isNaN(d.getTime()) ? val : new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      if (isNaN(d.getTime())) return val;
+      // AJUSTE (jul-2026 — FECHA sin cálculo ni ajuste de zona horaria):
+      // se copia el mismo día que trae RUTEO NUEVO. Se redondea al día
+      // más cercano en UTC (corrige la imprecisión de punto flotante de
+      // SheetJS al leer fechas — el serial puede resolver a unos
+      // segundos antes de medianoche) y se leen los componentes SIEMPRE
+      // en UTC (nunca con getFullYear()/getMonth()/getDate() locales),
+      // para que el offset negativo de México (UTC-6) no recorra el
+      // día — mismo criterio que ya usa core/fiscal-calendar.js. El
+      // resultado es una fecha local a medianoche con exactamente el
+      // mismo año/mes/día que el Excel original — ningún cálculo,
+      // ninguna conversión, solo una copia fiel del valor.
+      const roundedMs = Math.round(d.getTime() / 86400000) * 86400000;
+      const u = new Date(roundedMs);
+      return new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate());
     }
     if (DATETIME_COLS.has(col)) {
       if (val instanceof Date && !isNaN(val.getTime())) return val;
@@ -89,6 +133,23 @@ export function exportXLSX() {
         alignment: { vertical: 'center' },
         border: { bottom: { style: 'thin', color: { rgb: 'CCCCCC' } }, right: { style: 'thin', color: { rgb: 'CCCCCC' } } }
       };
+
+      // AJUSTE (jul-2026 — identificación de datos faltantes para el
+      // cálculo de tiempos): SOLO en el archivo final. Si esta celda es
+      // la salida de una regla de core/time-engine.js y el cálculo no
+      // se pudo hacer por falta de dato de entrada, se resalta con
+      // relleno ámbar y se agrega un comentario de Excel indicando
+      // exactamente cuál dato faltó — sin afectar el valor ('' se deja
+      // igual) ni ningún otro cálculo o pantalla de la app.
+      if (TIME_OUTPUT_COLS.has(col)) {
+        const mergedRow     = State.merged[R - 1];
+        const missingReason = mergedRow && mergedRow._timeMissing && mergedRow._timeMissing[col];
+        if (missingReason) {
+          ws[addr].s.fill = { patternType: 'solid', fgColor: { rgb: 'FDE68A' } };
+          ws[addr].s.font = { ...ws[addr].s.font, color: { rgb: '92400E' }, bold: true };
+          ws[addr].c = [{ a: 'SmartDispatch', t: missingReason }];
+        }
+      }
     }
   }
 
