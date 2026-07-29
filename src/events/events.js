@@ -36,6 +36,16 @@
  *   tras un reemplazo completo, para que la tabla fila-por-fila quede
  *   sincronizada con el Excel recién importado.
  *
+ * CAMBIO (Centro de Mantenimiento — Fase 2, jul-2026):
+ *   Se agregan loadMaintenanceCenter()/resolveIncident()/
+ *   toggleResolvedIncidents() — orquestación del panel nuevo de
+ *   Administración → Centro de Mantenimiento. Events es responsable de
+ *   ir a buscar los datos a IncidentStore y pasarlos a UI para pintar;
+ *   UI no importa Supabase directamente (mismo contrato que el resto
+ *   de la app — ver ui.js, cabecera). El sync propiamente dicho
+ *   (agrupar/persistir incidencias) ocurre en processors/merge.js tras
+ *   cada corrida, no aquí — este módulo solo LEE y resuelve.
+ *
  * FIX DE INTEGRIDAD DE DATOS (jul-2026) — handlePDFs():
  *   Antes se indexaba SIEMPRE `ruta + '|' + r.factura` y
  *   `ruta + '|D|' + r.destino` en State.pdfData, aunque factura/destino
@@ -71,6 +81,7 @@ import { exportXLSX } from '../features/export.js';
 import { addOperator, deleteOperator, importOperators } from '../features/catalog.js';
 import { DispatchHistory } from '../features/dispatch-history.js';
 import { CatalogStore } from '../features/catalogs/catalog-store.js';
+import { IncidentStore } from '../features/incidents/incident-store.js';
 
 export const Events = {
 
@@ -467,5 +478,62 @@ export const Events = {
       UI.setCatStatus(result.msg, result.cls);
       if (result.ok && State.merged.length) Events.triggerMerge();
     } catch (e) { UI.setCatStatus('Error: ' + e.message, 'err'); }
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // ── CENTRO DE MANTENIMIENTO (Fase 2, jul-2026) ──
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Carga las incidencias abiertas (ya ordenadas por prioridad, ver
+   * IncidentStore.listOpen()) y las pinta en el panel de
+   * Administración → Centro de Mantenimiento. Se llama cada vez que el
+   * usuario entra a ese sub-panel (ver app.js → adminNav listener) —
+   * los datos pueden haber cambiado desde la última corrida de merge,
+   * así que se refresca en cada visita en vez de cachear.
+   */
+  async loadMaintenanceCenter() {
+    UI.setMaintenanceStatus('Cargando…', 'ok');
+    try {
+      const incidents = await IncidentStore.listOpen();
+      UI.renderMaintenanceCenter(incidents);
+      UI.setMaintenanceStatus('', '');
+    } catch (e) {
+      UI.setMaintenanceStatus('Error: ' + e.message, 'err');
+    }
+  },
+
+  /**
+   * Marca una incidencia como resuelta manualmente (el usuario sabe
+   * que ya no va a repetirse aunque el sistema no lo detecte todavía —
+   * ej. corrección pendiente en el próximo Excel) y refresca el panel.
+   * @param {string} id — uuid de la incidencia en admin_incidents
+   */
+  async resolveIncident(id) {
+    UI.setMaintenanceStatus('Resolviendo…', 'ok');
+    try {
+      await IncidentStore.resolveManually(id, State.user);
+      await Events.loadMaintenanceCenter();
+    } catch (e) {
+      UI.setMaintenanceStatus('Error: ' + e.message, 'err');
+    }
+  },
+
+  /**
+   * Muestra/oculta la sección colapsable de incidencias resueltas.
+   * Se recarga desde Supabase cada vez que se abre (no se cachea) —
+   * mismo criterio que openHistory(): panel de baja frecuencia, el
+   * costo de una consulta extra es preferible a mostrar datos
+   * potencialmente obsoletos tras resolver una incidencia nueva.
+   */
+  async toggleResolvedIncidents() {
+    const wrap = document.getElementById('mcResolvedWrap');
+    if (!wrap) return;
+    const willShow = wrap.style.display === 'none';
+    wrap.style.display = willShow ? '' : 'none';
+    if (willShow) {
+      const resolved = await IncidentStore.listResolved();
+      UI.renderResolvedIncidents(resolved);
+    }
   }
 };

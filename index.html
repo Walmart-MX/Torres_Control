@@ -331,6 +331,12 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 .status-pill.warn{background:var(--amber-soft);color:var(--amber-deep)}
 .status-pill.crit{background:var(--red-soft);color:var(--red)}
 .status-pill.fixed{background:var(--blue-soft);color:var(--blue)}
+/* .status-pill.info — NUEVO (Centro de Mantenimiento, Fase 2, jul-2026):
+   reutiliza .status-pill (ya usado por el status de fila en Mesa de
+   Trabajo) para las etiquetas de prioridad "Baja" — ver
+   incident-engine.js → priorityTier(), que devuelve cls:'crit'/'warn'
+   para Alta/Media (ya cubiertas arriba) y cls:'info' para Baja. */
+.status-pill.info{background:var(--blue-soft);color:var(--blue)}
 .dim{color:var(--text-4);font-style:italic;font-size:11px}
 .row-edit-btn{
   width:26px;height:26px;border-radius:8px;background:var(--surface-3);color:var(--text-3);font-size:12px;
@@ -495,7 +501,9 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
    .cat-empty/.cat-status) ahora también las usa el panel genérico de
    Ventana de Recibo/Pool Real (ver #mcVentanaAdmin/#mcPoolAdmin más
    abajo y UI.renderCatalogAdmin() en ui.js) — mismo look & feel que
-   Licencias, sin CSS adicional. */
+   Licencias, sin CSS adicional. También el Centro de Mantenimiento
+   (ver #mcOpenTbody/#mcResolvedTbody) reutiliza .cat-table-wrap/
+   .cat-table/.cat-empty/.cat-status — mismo criterio. */
 .cat-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow-sm);overflow:hidden}
 .cat-badge-count{font-family:var(--mono);font-size:10px;font-weight:600;background:var(--green-bg);color:var(--green);border:1px solid var(--green-bd);border-radius:20px;padding:2px 9px}
 .cat-badge-count.warn{background:var(--orange-bg);color:var(--orange);border-color:var(--orange-bd)}
@@ -522,6 +530,16 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 .cat-status{font-family:var(--mono);font-size:10px;margin-top:8px}
 .cat-status.ok{color:var(--green)}
 .cat-status.err{color:var(--red)}
+
+/* ── Centro de Mantenimiento (Fase 2, jul-2026) ──
+   Tarjetas resumen — mismo lenguaje visual que .q-metric (Calidad),
+   pero deliberadamente una clase separada: son paneles independientes
+   que pueden evolucionar por separado sin arrastrarse cambios el uno
+   al otro. */
+.mc-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
+.mc-metric{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;box-shadow:var(--shadow-sm)}
+.mc-metric-val{font-family:var(--disp);font-weight:800;font-size:22px}
+.mc-metric-label{font-size:10.5px;color:var(--text-3);margin-top:2px}
 
 /* ══════════════════ EXPORTACIÓN ══════════════════ */
 .exp-stage{text-align:center;padding:20px 10px}
@@ -967,6 +985,7 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
           <button class="admin-nav-item" data-admin="ventana">🏬 Ventana de Recibo</button>
           <button class="admin-nav-item" data-admin="lic">🪪 Licencias</button>
           <button class="admin-nav-item" data-admin="cache">🗄️ Caché de facturas</button>
+          <button class="admin-nav-item" data-admin="maint">🩺 Centro de Mantenimiento</button>
           <button class="admin-nav-item" data-admin="hist">🗂️ Historial</button>
           <button class="admin-nav-item" data-admin="cfg">⚙️ Configuración</button>
         </div>
@@ -1043,6 +1062,44 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
             <div id="cacheHistList"></div>
             <div style="margin-top:10px;text-align:right">
               <button class="btn btn-danger-outline btn-sm" id="btnCacheHistClear">🗑 Limpiar caché histórico</button>
+            </div>
+          </div>
+
+          <!-- Centro de Mantenimiento (Fase 2, jul-2026) —
+               Incidencias administrativas persistentes: hoy solo
+               "registro faltante en catálogo" (Ventana de Recibo/Pool
+               Real), agrupadas, priorizadas automáticamente y con
+               resolución automática/manual. Contenido de #mcSummary y
+               #mcOpenTbody generado por UI.renderMaintenanceCenter(),
+               llamado por Events.loadMaintenanceCenter() cada vez que
+               se entra a este sub-panel (ver app.js). -->
+          <div class="admin-panel" data-admin-panel="maint">
+            <div class="admin-hd">
+              <h3>🩺 Centro de Mantenimiento</h3>
+              <p>Incidencias administrativas agrupadas — registros faltantes en catálogos maestros, con prioridad calculada automáticamente (frecuencia · rutas afectadas · antigüedad). Se resuelven solas cuando el catálogo ya cubre el registro, o puedes marcarlas manualmente.</p>
+            </div>
+
+            <div class="mc-metrics" id="mcSummary"><!-- generado por UI.renderMaintenanceCenter() --></div>
+
+            <div class="cat-table-wrap">
+              <table class="cat-table">
+                <thead><tr>
+                  <th>Prioridad</th><th>Origen</th><th>Detalle</th><th>Ocurrencias</th><th>Rutas</th>
+                  <th>Primera detección</th><th>Última detección</th><th></th>
+                </tr></thead>
+                <tbody id="mcOpenTbody"></tbody>
+              </table>
+            </div>
+            <div class="cat-status" id="mcMaintStatus"></div>
+
+            <div style="margin-top:16px">
+              <button class="btn btn-ghost btn-sm" id="btnMcToggleResolved">🗂️ Ver incidencias resueltas</button>
+              <div class="cat-table-wrap" id="mcResolvedWrap" style="display:none;margin-top:10px">
+                <table class="cat-table">
+                  <thead><tr><th>Origen</th><th>Detalle</th><th>Ocurrencias totales</th><th>Resuelto</th><th>Por</th></tr></thead>
+                  <tbody id="mcResolvedTbody"></tbody>
+                </table>
+              </div>
             </div>
           </div>
 

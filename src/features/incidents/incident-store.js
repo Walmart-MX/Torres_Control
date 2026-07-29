@@ -3,21 +3,38 @@
  * INCIDENT STORE — persistencia del Centro de Mantenimiento en Supabase
  * (tabla admin_incidents). Mismo patrón que catalog-store.js/
  * fact-cache.js: upsert por llave lógica, fire-and-forget desde el
- * caller, nunca bloquea el merge.
+ * caller (ver processors/merge.js), nunca bloquea el merge.
  *
  * ARQUITECTURA GENERALIZADA: este módulo no es específico de
  * catálogos — type/sourceId/keyName/keyValue son genéricos (ver
  * incident-types.js). Hoy el único productor es enrichRow() (misses de
- * Ventana de Recibo/Pool Real), pero cualquier módulo futuro puede
- * llamar a IncidentStore.sync() con su propio `type` sin tocar este
- * archivo.
+ * Ventana de Recibo/Pool Real, vía processors/merge.js), pero cualquier
+ * módulo futuro puede llamar a IncidentStore.sync() con su propio
+ * `type` sin tocar este archivo.
  *
- * AUTO-RESOLUCIÓN: sync(type, sourceIds, raw) recibe TODAS las fuentes
- * relevantes de la corrida — si una fuente no generó NINGÚN miss esta
- * vez, sus incidencias abiertas se resuelven todas (el catálogo ya las
- * cubre). Si generó algunos pero no otros, solo se resuelven los que
- * dejaron de aparecer — nunca se asume nada sobre fuentes que ni
- * siquiera se pasaron en sourceIds.
+ * CAMBIO DE DISEÑO respecto al boceto inicial (jul-2026) — semántica de
+ * occurrence_count: runMerge() se ejecuta muchas veces por sesión de
+ * captura (cada fuente cargada, cada edición de catálogo dispara
+ * Events.triggerMerge() de nuevo) — NO una vez al día. Si cada llamada
+ * a sync() sumara +1 por aparición, el contador se inflaría solo por
+ * reprocesar, rompiendo la premisa de la fórmula de prioridad
+ * (incident-engine.js): "frecuencia alta = señal confiable de un gap
+ * real". Se corrige contando pares distintos (ruta, día) — reprocesar
+ * la misma ruta el mismo día varias veces ya NO suma occurrence_count;
+ * una ruta nueva o un día nuevo sí. Se implementa comparando la fecha
+ * (slice a 10 caracteres, YYYY-MM-DD) ya guardada en affected_routes
+ * para esa ruta contra la fecha de hoy.
+ *
+ * AUTO-RESOLUCIÓN SEGURA: sync(type, sourceIds, raw) recibe SOLO los
+ * sourceIds de catálogos que el caller confirma que tienen datos
+ * cargados en este momento (ver processors/merge.js, filtro
+ * activeCatalogIds). Si un catálogo se vació por error, su sourceId
+ * queda fuera de sourceIds y sus incidencias abiertas NO se tocan —
+ * evita el riesgo ya documentado en el diseño de Fase 1 ("auto-
+ * resolución incorrecta si el catálogo se vacía por error"). Dentro de
+ * los sourceIds recibidos, cualquier incidencia abierta que ya no
+ * aparezca en `raw` de esta corrida se marca resuelta automáticamente
+ * — el catálogo ya la cubre.
  *
  * AFFECTED ROUTES: mapa { ruta: last_seen_iso }, podado a MAX_ROUTES
  * entradas (las más antiguas primero) para no crecer sin límite en
@@ -39,11 +56,15 @@ export const IncidentStore = {
   /**
    * Sincroniza las incidencias crudas de UNA corrida contra Supabase.
    * @param {string} type — clave de INCIDENT_TYPES (ej. 'catalog_miss')
-   * @param {string[]} sourceIds — todas las fuentes relevantes de este sync
+   * @param {string[]} sourceIds — SOLO las fuentes que el caller confirma
+   *   evaluadas en esta corrida (ej. catálogos con datos cargados) —
+   *   determina qué incidencias son elegibles para auto-resolución.
    * @param {Array<{sourceId:string, keyName:string, keyValue:string, ruta:string}>} raw
    * @returns {Promise<void>}
    */
   async sync(type, sourceIds, raw) {
+    if (!sourceIds || !sourceIds.length) return; // nada evaluado — no-op seguro
+
     const groups = groupRawIncidents(raw.map(r => ({ ...r, type })));
 
     const { data: openRows, error: openErr } = await sb.from(TABLE)
@@ -52,26 +73,41 @@ export const IncidentStore = {
 
     const openByKey = new Map(openRows.map(r => [`${r.type}||${r.source_id}||${r.key_name}||${r.key_value}`, r]));
     const nowIso = new Date().toISOString();
+    const today  = nowIso.slice(0, 10);
 
     const upserts = [];
     for (const [key, g] of groups) {
       const existing  = openByKey.get(key);
       const routesMap = existing ? { ...(existing.affected_routes || {}) } : {};
-      g.routes.forEach(r => { routesMap[r] = nowIso; });
+
+      // Solo cuentan como occurrence_count nuevo los pares (ruta, día)
+      // que NO estaban ya registrados hoy — ver nota de cabecera
+      // "CAMBIO DE DISEÑO". Reprocesar la misma ruta el mismo día no
+      // infla el contador; una ruta nueva o un día nuevo sí.
+      let newOccurrences = 0;
+      g.routes.forEach(ruta => {
+        const prevDate = routesMap[ruta] ? String(routesMap[ruta]).slice(0, 10) : null;
+        if (prevDate !== today) newOccurrences++;
+        routesMap[ruta] = nowIso;
+      });
+
+      // Poda del mapa visual — las entradas más antiguas primero.
+      // route_count NUNCA decrece por esto (se calcula sobre la unión
+      // completa, antes de podar).
+      const routeCount = new Set([
+        ...Object.keys(existing?.affected_routes || {}),
+        ...g.routes
+      ]).size;
 
       const entries = Object.entries(routesMap).sort((a, b) => a[1].localeCompare(b[1]));
       while (entries.length > MAX_ROUTES) entries.shift();
       const prunedMap = Object.fromEntries(entries);
 
-      const routeCount = existing
-        ? new Set([...Object.keys(existing.affected_routes || {}), ...g.routes]).size
-        : g.routes.size;
-
       upserts.push({
         id: existing?.id,
         type, source_id: g.sourceId, key_name: g.keyName, key_value: g.keyValue,
         status: 'open',
-        occurrence_count: (existing?.occurrence_count || 0) + g.count,
+        occurrence_count: (existing?.occurrence_count || 0) + newOccurrences,
         first_seen_at: existing?.first_seen_at || nowIso,
         last_seen_at: nowIso,
         affected_routes: prunedMap,
@@ -85,8 +121,9 @@ export const IncidentStore = {
       if (error) console.warn('[IncidentStore] Error guardando incidencias:', error.message);
     }
 
-    // Lo que sigue en openByKey ya no apareció en esta corrida → se
-    // resuelve automáticamente (el catálogo ya lo cubre).
+    // Lo que sigue en openByKey pertenece a un sourceId evaluado en
+    // esta corrida y ya no apareció → se resuelve automáticamente (el
+    // catálogo ya lo cubre).
     const autoResolveIds = [...openByKey.values()].map(r => r.id);
     if (autoResolveIds.length) {
       const { error } = await sb.from(TABLE)
@@ -97,7 +134,8 @@ export const IncidentStore = {
   },
 
   /**
-   * Lista incidencias abiertas ordenadas por prioridad (descendente).
+   * Lista incidencias abiertas, con prioridad recalculada al vuelo,
+   * ordenadas de mayor a menor prioridad.
    * @param {string} [type]
    * @returns {Promise<Array<object>>}
    */
@@ -109,6 +147,22 @@ export const IncidentStore = {
     return data
       .map(r => ({ ...r, priority: computePriority(r) }))
       .sort((a, b) => b.priority - a.priority);
+  },
+
+  /**
+   * Lista incidencias resueltas (más recientes primero) — histórico
+   * para el panel colapsable del Centro de Mantenimiento.
+   * @param {string} [type]
+   * @param {number} [limit=50]
+   * @returns {Promise<Array<object>>}
+   */
+  async listResolved(type, limit = 50) {
+    let q = sb.from(TABLE).select('*').eq('status', 'resolved')
+      .order('resolved_at', { ascending: false }).limit(limit);
+    if (type) q = q.eq('type', type);
+    const { data, error } = await q;
+    if (error) { console.warn('[IncidentStore] Error listando resueltas:', error.message); return []; }
+    return data;
   },
 
   /** Marca una incidencia como resuelta manualmente. */

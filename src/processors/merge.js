@@ -76,6 +76,21 @@
  *   1. State.factData (concentrado del Excel recién cargado)
  *   2. FactCache.lookup() como fallback (concentrado de días anteriores)
  *
+ * CAMBIO (Centro de Mantenimiento — Fase 2, jul-2026):
+ *   Los "misses" de enrichRow() (r._enrichMisses) ya no se descartan al
+ *   final de cada corrida — se acumulan en catalogMissesRaw y, tras el
+ *   loop, se sincronizan con el Centro de Mantenimiento vía
+ *   IncidentStore.sync() (fire-and-forget, mismo patrón que
+ *   FactCache.persist() — nunca bloquea el merge).
+ *
+ *   activeCatalogIds — SOLO se incluyen catálogos que tienen datos
+ *   cargados en State.catalogs en este momento. Esto es deliberado (ver
+ *   incident-store.js, nota de cabecera "AUTO-RESOLUCIÓN SEGURA"): si
+ *   un catálogo se vació por error, su sourceId queda fuera de la
+ *   sincronización y sus incidencias abiertas NO se auto-resuelven por
+ *   error — solo se auto-resuelven incidencias de catálogos que
+ *   realmente se evaluaron esta corrida.
+ *
  * Dependencias:
  *   - State (core/state.js) — lee varias propiedades, escribe State.merged,
  *     State.catalogIndices, State.catalogDuplicates
@@ -86,6 +101,9 @@
  *   - buildIndices, enrichRow (features/catalogs/enrichment-engine.js)
  *   - getSW (core/fiscal-calendar.js)
  *   - computeTimes (core/time-engine.js)
+ *   - IncidentStore (features/incidents/incident-store.js) — sync del
+ *     Centro de Mantenimiento
+ *   - INCIDENT_TYPES (features/incidents/incident-types.js)
  */
 import { State } from '../core/state.js';
 import { COL_RUTA, COL_DETTE_E, COL_DETTE_F, COL_FACT, MAX_MARCH } from '../core/constants.js';
@@ -94,6 +112,8 @@ import { normOp } from '../utils/format.js';
 import { buildIndices, enrichRow } from '../features/catalogs/enrichment-engine.js';
 import { getSW } from '../core/fiscal-calendar.js';
 import { computeTimes } from '../core/time-engine.js';
+import { IncidentStore } from '../features/incidents/incident-store.js';
+import { INCIDENT_TYPES } from '../features/incidents/incident-types.js';
 
 /** Nombres de día en español para la columna DIA — derivados de FECHA. @private */
 const DIA_NAMES = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
@@ -102,8 +122,9 @@ const DIA_NAMES = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','S
  * Ejecuta el merge completo. No hace nada si falta el Excel o no hay
  * ningún PDF cargado (guard clause idéntica al original).
  * Efecto secundario: reemplaza State.merged con el resultado del cruce,
- * y refresca State.catalogIndices/State.catalogDuplicates (usados por
- * sve.js, regla N).
+ * refresca State.catalogIndices/State.catalogDuplicates (usados por
+ * sve.js, regla N), y sincroniza el Centro de Mantenimiento con los
+ * misses de catálogo de esta corrida (ver nota de cabecera).
  */
 export function runMerge() {
   if (!State.xlsData || State.pdfData.size === 0) return;
@@ -115,6 +136,11 @@ export function runMerge() {
   const { indices, duplicates } = buildIndices(State.catalogs);
   State.catalogIndices    = indices;
   State.catalogDuplicates = duplicates;
+
+  // Acumulador de misses de catálogo de ESTA corrida — alimenta el
+  // sync con el Centro de Mantenimiento al final del loop (ver nota de
+  // cabecera "CAMBIO (Centro de Mantenimiento — Fase 2)").
+  const catalogMissesRaw = [];
 
   for (const row of State.xlsData) {
     const ruta    = String(row[COL_RUTA]    || '').trim();
@@ -247,8 +273,12 @@ export function runMerge() {
     // ── Enrichment de catálogos maestros (Ventana de Recibo / Pool Real) ──
     // No-op seguro si el catálogo correspondiente aún no se ha importado
     // (ver enrichment-engine.js). Los "misses" alimentan las reglas SVE
-    // L/M (no_ventana/no_pool).
+    // L/M (no_ventana/no_pool) Y, desde jul-2026, el Centro de
+    // Mantenimiento (ver catalogMissesRaw más abajo).
     nr._enrichMisses = enrichRow(nr, row, indices);
+    nr._enrichMisses.forEach(m => {
+      catalogMissesRaw.push({ sourceId: m.catalog, keyName: m.index, keyValue: m.val, ruta });
+    });
 
     // ── Motor de tiempos — SIEMPRE al final del loop, requiere que nr
     // ya tenga resueltos todos sus campos de fecha/hora (PDF, despacho,
@@ -257,4 +287,15 @@ export function runMerge() {
 
     State.merged.push(nr);
   }
+
+  // ── Sync con el Centro de Mantenimiento (Fase 2, jul-2026) ──
+  // Fire-and-forget — nunca bloquea el merge ni la UI (mismo patrón que
+  // FactCache.persist() en events.js). activeCatalogIds SOLO incluye
+  // catálogos con datos cargados ahora mismo — ver nota de cabecera
+  // "AUTO-RESOLUCIÓN SEGURA" en incident-store.js: si un catálogo está
+  // vacío, sus incidencias abiertas quedan intactas en vez de
+  // auto-resolverse por error.
+  const activeCatalogIds = Object.keys(State.catalogs).filter(id => (State.catalogs[id] || []).length > 0);
+  IncidentStore.sync(INCIDENT_TYPES.catalog_miss.id, activeCatalogIds, catalogMissesRaw)
+    .catch(e => console.warn('[Merge] No se pudo sincronizar el Centro de Mantenimiento:', e.message));
 }

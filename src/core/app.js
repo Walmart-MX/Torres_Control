@@ -39,6 +39,15 @@
  *   sola vez (guard por dataset.built) — igual patrón que el resto de
  *   la app usa para tablas dinámicas (ver mainTbody/fixList/catTbody).
  *
+ * CAMBIO (Centro de Mantenimiento — Fase 2, jul-2026):
+ *   El listener de adminNav gana una línea: al entrar al sub-panel
+ *   'maint' se dispara Events.loadMaintenanceCenter() — igual criterio
+ *   que Historial (Events.openHistory()), que también refresca sus
+ *   datos cada vez que se abre en vez de cachear. Se agregan dos
+ *   listeners nuevos: resolver una incidencia individual (delegado
+ *   sobre #mcOpenTbody, mismo patrón que #catTbody/#mainTbody) y
+ *   mostrar/ocultar el histórico de resueltas (#btnMcToggleResolved).
+ *
  * Dependencias: todos los módulos de la aplicación.
  */
 import { State } from './state.js';
@@ -243,14 +252,20 @@ export async function init() {
   });
 
   // ── Administración — navegación entre sub-paneles (Pool Real,
-  // Ventana de Recibo, Licencias, Caché de facturas, Historial,
-  // Configuración). Reemplaza los acordeones .cat-toggle y las
-  // pestañas .ref-tabs de las fases anteriores — ver nota de cabecera. ──
+  // Ventana de Recibo, Licencias, Caché de facturas, Centro de
+  // Mantenimiento, Historial, Configuración). Reemplaza los acordeones
+  // .cat-toggle y las pestañas .ref-tabs de las fases anteriores — ver
+  // nota de cabecera. ──
   document.getElementById('adminNav').addEventListener('click', e => {
     const btn = e.target.closest('.admin-nav-item');
     if (!btn) return;
     document.querySelectorAll('.admin-nav-item').forEach(b => b.classList.toggle('active', b === btn));
     document.querySelectorAll('.admin-panel').forEach(p => p.classList.toggle('active', p.dataset.adminPanel === btn.dataset.admin));
+    // Centro de Mantenimiento (Fase 2, jul-2026) — se refresca cada vez
+    // que se entra al panel, mismo criterio que Historial
+    // (Events.openHistory()): datos pueden haber cambiado desde la
+    // última corrida de merge, mejor traerlos frescos que cachear.
+    if (btn.dataset.admin === 'maint') Events.loadMaintenanceCenter();
   });
   document.getElementById('mcVentanaFile').addEventListener('change', function() {
     Events.importMasterCatalog('ventanaRecibo', this.files[0]); this.value = '';
@@ -277,6 +292,18 @@ export async function init() {
     if (!btn) return;
     Events.delOp(btn.dataset.delOp);
   });
+
+  // ── Administración — Centro de Mantenimiento (Fase 2, jul-2026) ──
+  // Resolver una incidencia individual, delegado sobre la tabla —
+  // mismo patrón que #catTbody/#mainTbody (las filas se regeneran en
+  // cada render, un solo listener en el contenedor cubre todas). ──
+  document.getElementById('mcOpenTbody').addEventListener('click', e => {
+    const btn = e.target.closest('[data-mc-resolve]');
+    if (!btn) return;
+    if (!confirm('¿Marcar esta incidencia como resuelta manualmente? Esta acción no se puede deshacer.')) return;
+    Events.resolveIncident(btn.dataset.mcResolve);
+  });
+  document.getElementById('btnMcToggleResolved').addEventListener('click', () => Events.toggleResolvedIncidents());
 
   // ── Administración — Historial y Configuración (accesos directos;
   // mismo mecanismo que ya usan el ícono 🗂️ y el chip de usuario del

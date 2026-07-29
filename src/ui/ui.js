@@ -63,6 +63,20 @@
  *   .cat-table-wrap/.cat-table/.cat-empty/.cat-status ya definidas para
  *   Licencias — mismo look & feel, sin CSS nuevo.
  *
+ * CAMBIO (Centro de Mantenimiento — Fase 2, jul-2026):
+ *   Se agregan renderMaintenanceCenter()/renderResolvedIncidents()/
+ *   setMaintenanceStatus() — panel nuevo en Administración que muestra
+ *   las incidencias administrativas persistentes (hoy: registros
+ *   faltantes en catálogos maestros) agrupadas y priorizadas. UI NO
+ *   llama a IncidentStore directamente (mismo contrato que el resto de
+ *   la app: Events va a buscar los datos y se los pasa a UI ya
+ *   resueltos) — solo importa priorityTier/INCIDENT_TYPES de
+ *   features/incidents/, que son funciones/tablas puras de
+ *   presentación, sin acceso a red (mismo precedente que ya existe con
+ *   SVE_ICONS/SVE_CRIT importados de features/validation/sve.js).
+ *   _mcCoverage() reutiliza State.merged/State.catalogs ya en memoria —
+ *   es un cálculo en vivo, no se persiste ni se pide a Supabase.
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - escH (utils/dom.js)
@@ -73,6 +87,10 @@
  *   - FactCache (features/fact-cache.js)
  *   - CATALOGS (features/catalogs/catalog-registry.js) — metadata de
  *     columnas para renderCatalogAdmin()
+ *   - priorityTier (features/incidents/incident-engine.js) — función
+ *     pura de presentación para el Centro de Mantenimiento
+ *   - INCIDENT_TYPES (features/incidents/incident-types.js) — describe()
+ *     de cada incidencia para el Centro de Mantenimiento
  *   - Events (events/events.js) — resuelto en runtime vía _setEvents()
  */
 import { State } from '../core/state.js';
@@ -84,6 +102,8 @@ import {
 import { SVE_CRIT, SVE_WARN, SVE_INFO, SVE_ICONS } from '../features/validation/sve.js';
 import { FactCache } from '../features/fact-cache.js';
 import { CATALOGS } from '../features/catalogs/catalog-registry.js';
+import { priorityTier } from '../features/incidents/incident-engine.js';
+import { INCIDENT_TYPES } from '../features/incidents/incident-types.js';
 
 let Events;
 /** Resuelve la dependencia circular UI ↔ Events — llamado una vez desde core/app.js */
@@ -1009,6 +1029,131 @@ export const UI = {
     const containerId = catalogId === 'ventanaRecibo' ? 'mcVentanaAdmin' : 'mcPoolAdmin';
     const container = document.getElementById(containerId);
     const el = container ? container.querySelector('[data-mc-role="status"]') : null;
+    if (!el) return;
+    el.className   = 'cat-status' + (cls ? ' ' + cls : '');
+    el.textContent = msg;
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // ── CENTRO DE MANTENIMIENTO (Fase 2, jul-2026) ──
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Cobertura en vivo de un catálogo maestro — % de filas del último
+   * merge que SÍ encontraron su registro en el catálogo. Devuelve null
+   * si el catálogo está vacío (nunca importado) o si no hay merge
+   * todavía — en ambos casos mostrar un porcentaje sería engañoso (ver
+   * decisión de diseño en el análisis previo: "cobertura transitoria,
+   * calculada en vivo, no una serie histórica persistida").
+   * @private
+   * @param {string} catalogId
+   * @returns {number|null}
+   */
+  _mcCoverage(catalogId) {
+    const loaded = (State.catalogs[catalogId] || []).length;
+    const total  = State.merged.length;
+    if (!loaded || !total) return null;
+    let missing = 0;
+    State.merged.forEach(r => {
+      if ((r._enrichMisses || []).some(m => m.catalog === catalogId)) missing++;
+    });
+    return Math.round((1 - missing / total) * 100);
+  },
+
+  /**
+   * Pinta el Centro de Mantenimiento — tarjetas resumen por catálogo
+   * (incidencias abiertas + cobertura en vivo, ver _mcCoverage) y la
+   * tabla de incidencias abiertas, ya ordenada por prioridad
+   * (IncidentStore.listOpen() la entrega así). La prioridad se
+   * recalcula en cada lectura — nunca se persiste — por lo que siempre
+   * refleja la antigüedad real al momento de abrir el panel.
+   * @param {Array<object>} incidents — salida de IncidentStore.listOpen()
+   */
+  renderMaintenanceCenter(incidents) {
+    const summaryEl = document.getElementById('mcSummary');
+    const tbody     = document.getElementById('mcOpenTbody');
+    if (!summaryEl || !tbody) return;
+
+    // ── Tarjetas resumen — una por catálogo registrado, más el total ──
+    const bySource = new Map();
+    incidents.forEach(i => bySource.set(i.source_id, (bySource.get(i.source_id) || 0) + 1));
+
+    const cards = Object.values(CATALOGS).map(cat => {
+      const openCount = bySource.get(cat.id) || 0;
+      const coverage  = UI._mcCoverage(cat.id);
+      const covTxt    = coverage === null ? '—' : coverage + '%';
+      return `
+        <div class="mc-metric">
+          <div class="mc-metric-val">${openCount}</div>
+          <div class="mc-metric-label">${escH(cat.label)} · incidencias abiertas</div>
+          <div class="mc-metric-label">Cobertura del último procesamiento: ${covTxt}</div>
+        </div>`;
+    });
+    cards.push(`
+      <div class="mc-metric">
+        <div class="mc-metric-val">${incidents.length}</div>
+        <div class="mc-metric-label">Total de incidencias abiertas</div>
+      </div>`);
+    summaryEl.innerHTML = cards.join('');
+
+    // ── Tabla de incidencias abiertas ──
+    if (!incidents.length) {
+      tbody.innerHTML = '<tr><td colspan="8"><div class="cat-empty">Sin incidencias abiertas — todos los catálogos están al día.</div></td></tr>';
+      return;
+    }
+
+    const fmtDateShort = iso => iso ? new Date(iso).toLocaleDateString('es-MX', { day:'2-digit', month:'2-digit', year:'2-digit' }) : '—';
+
+    tbody.innerHTML = incidents.map(inc => {
+      const tier   = priorityTier(inc.priority);
+      const type   = INCIDENT_TYPES[inc.type];
+      const desc   = type ? type.describe({ sourceId: inc.source_id, keyName: inc.key_name, keyValue: inc.key_value }) : `${inc.key_name}: ${inc.key_value}`;
+      const routes = Object.keys(inc.affected_routes || {});
+      const routesTitle = routes.slice(-10).join(', ');
+      return `
+        <tr>
+          <td><span class="status-pill ${tier.cls}">${tier.label}</span></td>
+          <td>${escH(CATALOGS[inc.source_id]?.label || inc.source_id)}</td>
+          <td class="td-op" title="${escH(desc)}">${escH(desc)}</td>
+          <td>${inc.occurrence_count}</td>
+          <td title="${escH(routesTitle)}">${inc.route_count}</td>
+          <td>${fmtDateShort(inc.first_seen_at)}</td>
+          <td>${fmtDateShort(inc.last_seen_at)}</td>
+          <td><button class="btn btn-ghost btn-xs" data-mc-resolve="${escH(inc.id)}">✓ Resolver</button></td>
+        </tr>`;
+    }).join('');
+  },
+
+  /**
+   * Pinta la sección colapsable de incidencias resueltas — histórico
+   * de auditoría, sin acción disponible (ya están cerradas).
+   * @param {Array<object>} list — salida de IncidentStore.listResolved()
+   */
+  renderResolvedIncidents(list) {
+    const tbody = document.getElementById('mcResolvedTbody');
+    if (!tbody) return;
+    if (!list.length) {
+      tbody.innerHTML = '<tr><td colspan="5"><div class="cat-empty">Sin incidencias resueltas todavía.</div></td></tr>';
+      return;
+    }
+    const fmtDateShort = iso => iso ? new Date(iso).toLocaleDateString('es-MX', { day:'2-digit', month:'2-digit', year:'2-digit' }) : '—';
+    tbody.innerHTML = list.map(inc => {
+      const type = INCIDENT_TYPES[inc.type];
+      const desc = type ? type.describe({ sourceId: inc.source_id, keyName: inc.key_name, keyValue: inc.key_value }) : `${inc.key_name}: ${inc.key_value}`;
+      return `
+        <tr>
+          <td>${escH(CATALOGS[inc.source_id]?.label || inc.source_id)}</td>
+          <td class="td-op" title="${escH(desc)}">${escH(desc)}</td>
+          <td>${inc.occurrence_count}</td>
+          <td>${fmtDateShort(inc.resolved_at)}</td>
+          <td>${escH(inc.resolved_by || '—')}</td>
+        </tr>`;
+    }).join('');
+  },
+
+  /** Escribe un mensaje de estado en el panel del Centro de Mantenimiento. */
+  setMaintenanceStatus(msg, cls) {
+    const el = document.getElementById('mcMaintStatus');
     if (!el) return;
     el.className   = 'cat-status' + (cls ? ' ' + cls : '');
     el.textContent = msg;

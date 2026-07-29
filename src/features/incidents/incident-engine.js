@@ -16,6 +16,12 @@
  * operativo directo; la antigüedad pesa menos porque sola no distingue
  * "sigue activo" de "casi resuelto pero nadie lo cerró".
  *
+ * NOTA sobre occurrence_count (ver incident-store.js para el detalle
+ * completo): NO cuenta "veces que se corrió el merge" — cuenta pares
+ * distintos (ruta, día) en que la llave apareció como faltante. Así,
+ * reprocesar la misma ruta varias veces en una sesión de captura no
+ * infla artificialmente la prioridad.
+ *
  * La prioridad NUNCA se persiste como valor fijo — se recalcula en cada
  * lectura (incident-store.js → listOpen()), porque depende de la
  * antigüedad, que cambia sin ninguna escritura nueva.
@@ -67,7 +73,9 @@ export function computePriority(incident) {
   return Math.round(raw * 100);
 }
 
-/** Convierte un score 0-100 a nivel visual para la UI. */
+/** Convierte un score 0-100 a nivel visual para la UI — reutiliza las
+ *  mismas clases que .status-pill (ok/warn/crit) ya usa la Mesa de
+ *  Trabajo, más 'info' para prioridad baja. */
 export function priorityTier(score) {
   if (score >= 66) return { key: 'alta',  label: 'Alta',  cls: 'crit' };
   if (score >= 33) return { key: 'media', label: 'Media', cls: 'warn' };
