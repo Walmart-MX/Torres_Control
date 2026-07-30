@@ -35,6 +35,63 @@
  *   mismo bloque — principio de "máxima recuperación de información
  *   confiable, mínima intervención manual".
  *
+ * FIX (jul-2026) — "bug del marchamo ausente por completo":
+ *   El fix anterior (párrafo de arriba) resolvía el caso "hay un token
+ *   de marchamo, pero tiene formato inválido". Quedaba sin cubrir un
+ *   caso distinto y real: una entrega que NO TIENE NINGÚN token de
+ *   marchamo en la línea de encabezado (posición vacía, no inválida).
+ *   ROW_RE seguía exigiendo el grupo del marchamo como OBLIGATORIO
+ *   (`(\S+)$`, sin '?') — si esa posición venía vacía, el regex
+ *   COMPLETO fallaba, y con él se perdían factura, tarimas y destino,
+ *   aunque sí existieran en el PDF (caso reportado: Ruta 5205, Entrega
+ *   6154001 — factura y cita presentes en el PDF, solo faltaba
+ *   marchamo). La entrega terminaba marcada como 'dette_sin_pdf'
+ *   ("¿se quedó por ocupación?") en vez de simplemente "sin marchamo".
+ *
+ *   Se vuelve opcional el grupo de marchamo en ROW_RE — mismo criterio
+ *   que CONT_RE (línea de continuación) ya aplicaba en su grupo 2.
+ *   _pushMarchamo() ya maneja `undefined` de forma segura (early
+ *   return sin tocar marchamos ni marchamoIssues), así que no requiere
+ *   ningún cambio adicional. Efecto: la entrega se matchea con
+ *   normalidad (OPERADOR/LIC./FAC_PDF/CITA se resuelven igual que en
+ *   las demás entregas de la ruta) y MARCHAMO 1 queda vacío — lo cual
+ *   activa la regla SVE 'no_march' (quick-fix de un solo campo), no
+ *   'dette_sin_pdf'.
+ *
+ * FIX (jul-2026) — "falso positivo por HUB repetido físicamente":
+ *   Efecto colateral del fix anterior. Un HUB puede aparecer impreso
+ *   varias veces dentro del MISMO PDF de una ruta individual (mismo
+ *   destino repetido), pero físicamente es UNA sola entrega — solo el
+ *   primer bloque trae marchamos, las repeticiones llegan sin ellos.
+ *
+ *   Antes del fix "marchamo opcional", esas repeticiones sin marchamo
+ *   simplemente no matcheaban ROW_RE — un dedupe implícito y
+ *   accidental, pero funcional (solo un rawRow por destino llegaba a
+ *   result). Con el marchamo opcional, TODAS las repeticiones matchean
+ *   y generan su propio rawRow con el mismo `destino`; luego
+ *   events.js → handlePDFs() los indexa bajo la MISMA clave
+ *   (`ruta|D|destino`) en State.pdfData — el último `.set()` gana. Si
+ *   el bloque sin marchamos se procesaba después del que sí los tenía,
+ *   pisaba al correcto → falso 'no_march' (caso reportado: Ruta 5106,
+ *   Entrega 6154000).
+ *
+ *   Se agrega _dedupeByDestino() — consolida bloques que comparten
+ *   `destino` en UNA sola entrega, quedándose con los marchamos de
+ *   cualquiera de las repeticiones que sí los traiga. Se aplica SOLO
+ *   donde consolidar es seguro:
+ *     - Ruta individual (rama `else` de parsePDF) — un HUB repetido es
+ *       una sola entrega real, debe consolidarse.
+ *     - PDF unificado con destinos DISTINTOS (rama `else` de
+ *       `isUnified`, sameDestino === false) — un HUB puede repetirse
+ *       ahí también, mismo criterio.
+ *   NO se aplica cuando `sameDestino === true` (PDF unificado de dos
+ *   rutas con el MISMO destino compartido): ahí la repetición del
+ *   destino representa DOS entregas reales, una por cada ruta — el
+ *   split por mitad (`mid = Math.ceil(rawRows.length / 2)`) depende de
+ *   que esa repetición se conserve intacta. Tocar esa rama rompería la
+ *   lógica de rutas combinadas — confirmado con EduarDo, deliberadamente
+ *   fuera del alcance de este fix.
+ *
  * FIX (jul-2026) — HR. DESPACHO con fecha invertida:
  *   El sello "Impreso/enviado por fax" del PDF imprime la fecha en
  *   formato inglés MM-DD-YYYY (confirmado con muestra real:
@@ -166,6 +223,51 @@ function _pushMarchamo(raw, marchamos, issues) {
 }
 
 /**
+ * Consolida bloques de PDF que repiten el mismo `destino` dentro de UNA
+ * SOLA entrega física — caso real confirmado con EduarDo: un HUB que la
+ * plataforma WTMS imprime varias veces en el mismo PDF, pero solo la
+ * primera aparición trae marchamos; las repeticiones llegan sin ellos.
+ *
+ * Antes del fix "marchamo opcional" en ROW_RE (jul-2026), los bloques
+ * repetidos SIN marchamo simplemente no matcheaban el regex — dedupe
+ * implícito por diseño accidental. Ahora que el marchamo es opcional,
+ * todos matchean y generan un rawRow independiente cada uno; sin este
+ * consolidado, el último bloque (típicamente sin marchamos) pisaba en
+ * State.pdfData al que sí los tenía (events.js → handlePDFs() indexa
+ * por ruta+destino, último .set() gana) — falso positivo de "sin
+ * marchamo principal" (regla SVE no_march).
+ *
+ * NO se aplica al caso de rutas COMBINADAS con destino compartido (ver
+ * `sameDestino` en parsePDF): ahí la repetición del mismo destino SÍ
+ * representa dos entregas reales, una por cada ruta del PDF unificado
+ * — deben conservarse separadas para el split por mitad.
+ * @private
+ * @param {Array<{destino:string, factura:string, tarimas:string, marchamos:string[], marchamoIssues:Array}>} list
+ * @returns {Array<object>} misma forma, un elemento por destino único
+ */
+function _dedupeByDestino(list) {
+  const byKey = new Map();
+  const order = [];
+  for (const r of list) {
+    // Sin destino → nunca colisiona (Symbol único por entrada), no hay
+    // nada que consolidar en ese caso.
+    const key = r.destino || Symbol();
+    if (!byKey.has(key)) {
+      byKey.set(key, { ...r, marchamos: [...r.marchamos], marchamoIssues: [...r.marchamoIssues] });
+      order.push(key);
+      continue;
+    }
+    const existing = byKey.get(key);
+    // Conserva factura/tarimas del primer bloque (idénticos entre
+    // repeticiones del mismo HUB); toma los marchamos de cualquiera de
+    // las repeticiones que sí los traiga.
+    if (!existing.marchamos.length && r.marchamos.length) existing.marchamos = [...r.marchamos];
+    if (r.marchamoIssues.length) existing.marchamoIssues.push(...r.marchamoIssues);
+  }
+  return order.map(k => byKey.get(k));
+}
+
+/**
  * Interpreta las líneas extraídas por pdfExtract() según el formato
  * específico de los PDFs de carga de Walmart CeDis, y produce un array
  * de rows estructurados — uno por cada destino/factura encontrado.
@@ -216,26 +318,14 @@ export function parsePDF({ lines, annots }, filename) {
 
   // Los grupos de factura/tarimas se validan por su propia forma
   // (4659xxxxxx / dígitos) — independientes entre sí. El grupo del
-  // marchamo de encabezado ahora es \S+ (cualquier token no vacío):
-  // reconoce la POSICIÓN del campo sin exigirle el formato todavía —
-  // la validación de formato se hace aparte en _pushMarchamo(). Así,
-  // un marchamo con longitud incorrecta ya NO impide capturar factura
-  // y tarimas, que son campos independientes y válidos.
-// ANTES
-//const ROW_RE  = /^CeDis\s+(?:TIENDA|HUB)\s+\S+\s+\d+\s+(4659\d{6})\s+(\d+)\s+\d+\s+\d+\s+\d+\s+[\d.]+\s+(\S+)$/;
-
-// DESPUÉS
-// FIX (jul-2026) — ver "bug del marchamo ausente por completo": antes
-// el grupo de marchamo era obligatorio (\S+ sin '?'), así que una
-// entrega SIN NINGÚN token de marchamo (no un formato inválido, sino
-// literalmente ausente) hacía fallar el regex COMPLETO — factura,
-// tarimas y destino se perdían aunque sí existieran en el PDF. Se
-// vuelve opcional, igual que ya lo era en CONT_RE (grupo 2). Cuando
-// rm[3] llega undefined, _pushMarchamo() ya lo maneja de forma segura
-// (String(undefined||'').trim() === '' → early return, no entra ni a
-// marchamos ni a marchamoIssues) — cero marchamos capturados, que es
-// exactamente el estado correcto: "no hay marchamo", no "es inválido".
-const ROW_RE  = /^CeDis\s+(?:TIENDA|HUB)\s+\S+\s+\d+\s+(4659\d{6})\s+(\d+)\s+\d+\s+\d+\s+\d+\s+[\d.]+(?:\s+(\S+))?$/;
+  // marchamo de encabezado ahora es \S+ OPCIONAL — ver nota de
+  // cabecera "FIX (jul-2026) — bug del marchamo ausente por
+  // completo": antes era obligatorio, así que una entrega SIN NINGÚN
+  // token de marchamo (no inválido, simplemente ausente) hacía fallar
+  // el regex COMPLETO y con él se perdían factura/tarimas/destino. La
+  // validación de formato de lo que SÍ se capture se sigue haciendo
+  // aparte en _pushMarchamo().
+  const ROW_RE  = /^CeDis\s+(?:TIENDA|HUB)\s+\S+\s+\d+\s+(4659\d{6})\s+(\d+)\s+\d+\s+\d+\s+\d+\s+[\d.]+(?:\s+(\S+))?$/;
   // Mismo criterio para el marchamo de continuación (grupo 2, opcional):
   // \S+ en vez de \d{5,6} — el destino (grupo 1) siempre se captura
   // aunque el marchamo que lo acompañe sea inválido.
@@ -259,7 +349,9 @@ const ROW_RE  = /^CeDis\s+(?:TIENDA|HUB)\s+\S+\s+\d+\s+(4659\d{6})\s+(\d+)\s+\d+
       const marchamos = [], marchamoIssues = [];
 
       // Marchamo de encabezado — validado de forma independiente,
-      // nunca invalida factura/tarimas ya capturados arriba.
+      // nunca invalida factura/tarimas ya capturados arriba. rm[3]
+      // puede venir undefined (grupo opcional) — _pushMarchamo() lo
+      // maneja de forma segura (early return, no agrega nada).
       _pushMarchamo(rm[3], marchamos, marchamoIssues);
 
       let destino = ''; i++;
@@ -292,6 +384,10 @@ const ROW_RE  = /^CeDis\s+(?:TIENDA|HUB)\s+\S+\s+\d+\s+(4659\d{6})\s+(\d+)\s+\d+
     const destinos    = [...new Set(rawRows.map(r => r.destino).filter(Boolean))];
     const sameDestino = destinos.length <= 1;
     if (sameDestino) {
+      // Sin dedupe aquí — ver _dedupeByDestino(), nota de cabecera: en
+      // rutas combinadas con destino compartido, la repetición del
+      // mismo destino representa DOS entregas reales (una por ruta);
+      // el split por mitad depende de que rawRows llegue intacto.
       const mid = Math.ceil(rawRows.length / 2);
       const grupos = [rawRows.slice(0, mid), rawRows.slice(mid)];
       rutas.forEach((ruta, idx) => {
@@ -303,12 +399,21 @@ const ROW_RE  = /^CeDis\s+(?:TIENDA|HUB)\s+\S+\s+\d+\s+(4659\d{6})\s+(\d+)\s+\d+
         result.push({ ruta, operador, destino: grupo[0].destino, factura: grupo[0].factura, tarimas, marchamos, marchamoIssues, cita: '', hrDespacho });
       });
     } else {
-      for (const r of rawRows) {
+      // NUEVO (jul-2026) — destinos distintos dentro de un PDF unificado
+      // también pueden repetirse físicamente (ej. un HUB entre varias
+      // entregas normales de las dos rutas) — mismo criterio que la
+      // rama de ruta individual, ver _dedupeByDestino().
+      const deduped = _dedupeByDestino(rawRows);
+      for (const r of deduped) {
         result.push({ ruta: baseName, operador, destino: r.destino, factura: r.factura, tarimas: r.tarimas, marchamos: r.marchamos, marchamoIssues: r.marchamoIssues || [], cita: '', hrDespacho });
       }
     }
   } else {
-    for (const r of rawRows) {
+    // NUEVO (jul-2026) — ruta individual: un HUB repetido físicamente en
+    // el PDF es UNA sola entrega real — ver _dedupeByDestino(), nota de
+    // cabecera "FIX (jul-2026) — falso positivo por HUB repetido".
+    const deduped = _dedupeByDestino(rawRows);
+    for (const r of deduped) {
       result.push({ ruta: rutas[0], operador, destino: r.destino, factura: r.factura, tarimas: r.tarimas, marchamos: r.marchamos, marchamoIssues: r.marchamoIssues || [], cita: '', hrDespacho });
     }
   }
