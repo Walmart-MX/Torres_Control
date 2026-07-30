@@ -106,8 +106,13 @@ export const EditSystem = {
       tableRows[idx].scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
-    const rutaVal = String(row['RUTA']||'').trim();
-    document.getElementById('editDrawerRuta').textContent = 'Ruta ' + rutaVal;
+    const rutaVal  = String(row['RUTA']||'').trim();
+// NUEVO (jul-2026): row['DETTE'] viene intacto del Excel (merge.js hace
+// nr = {...row, ...}), no requiere getMapped ni import nuevo. Se agrega
+// al mismo badge existente — sin tocar index.html ni ningún otro caller.
+const detteVal = String(row['DETTE']||'').trim();
+document.getElementById('editDrawerRuta').textContent =
+  'Ruta ' + rutaVal + (detteVal ? ' · Entrega ' + detteVal : '');
     document.getElementById('editChangeBadge').style.display = 'none';
 
     const critFields = new Set(
