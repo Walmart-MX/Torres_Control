@@ -39,6 +39,27 @@ export const State = {
   // diagnóstico de la corrida actual en memoria.
   pdfOrphans: [],
 
+  // Entregas confirmadas por el usuario como "no se van a realizar" (ej.
+  // se quedaron por ocupación y ya no tienen bloque en el PDF) — ver
+  // features/validation/sve.js regla 'dette_sin_pdf' y
+  // events.js → confirmExcludedDette(). Clave: "ruta||dette" (mismo
+  // campo DETTE que usa sve.js vía getMapped(r,'DET')). Se excluyen POR
+  // COMPLETO en processors/merge.js — nunca llegan a State.merged, así
+  // que jamás se pintan, generan incidencia, exportan, ni se guardan en
+  // el historial de Supabase: el archivo final y el historial quedan
+  // automáticamente fieles a la decisión del usuario, sin tocar
+  // export.js ni dispatch-history.js. Se reinicia en UI.resetAll().
+  //
+  // LIMITACIÓN CONOCIDA (confirmada con EduarDo, jul-2026): vive SOLO
+  // en memoria de la sesión — si se recarga la página a medio día
+  // operativo, la exclusión se pierde y la entrega reaparece en el
+  // próximo merge (habría que volver a confirmarla). Es irreversible
+  // una vez exportado: la entrega desaparece del Excel y del historial
+  // de Supabase sin dejar rastro de auditoría — si en el futuro se
+  // necesita trazabilidad de "qué se excluyó y por qué", requeriría una
+  // tabla de auditoría aparte (fuera del alcance de este cambio).
+  excludedDettes: new Set(),
+
   // Session
   user: localStorage.getItem('sd_user') || '',
   theme: localStorage.getItem('sd_theme') || 'light',

@@ -48,6 +48,20 @@
  *   sobre #mcOpenTbody, mismo patrón que #catTbody/#mainTbody) y
  *   mostrar/ocultar el histórico de resueltas (#btnMcToggleResolved).
  *
+ * CAMBIO (jul-2026 — confirmación de entregas sin PDF, "se quedó por
+ * ocupación"):
+ *   handleFixCardClick() gana un manejo nuevo, ANTES del de
+ *   saveBtn/reviewBtn: el botón ".fix-confirm-btn" que
+ *   UI._fixCardConfirm() genera para la regla SVE 'dette_sin_pdf' (ver
+ *   sve.js). Pide confirmación explícita vía diálogo nativo (la acción
+ *   es irreversible una vez exportado: elimina la fila por completo
+ *   del Excel final y del historial de Supabase — ver
+ *   processors/merge.js) y, si se confirma, delega en
+ *   Events.confirmExcludedDette(ruta, dette). Mismo contenedor
+ *   (#fixList/#fixInfoList) y mismo listener delegado que ya existía —
+ *   no se agrega ningún listener nuevo al DOM, solo una rama más
+ *   dentro del handler compartido.
+ *
  * Dependencias: todos los módulos de la aplicación.
  */
 import { State } from './state.js';
@@ -222,8 +236,21 @@ export async function init() {
   const btnGoFix = document.getElementById('btnGoFix');
   if (btnGoFix) btnGoFix.addEventListener('click', () => goStep('fix'));
 
-  // ── Correcciones — tarjetas de corrección rápida y "Revisar" ──
+  // ── Correcciones — tarjetas de corrección rápida, confirmación y "Revisar" ──
   const handleFixCardClick = e => {
+    // NUEVO (jul-2026) — ver nota de cabecera "CAMBIO (jul-2026 —
+    // confirmación de entregas sin PDF...)". Debe ir ANTES del check de
+    // saveBtn: .fix-confirm-btn vive en la misma tarjeta que
+    // .fix-review-btn (ver ui.js → _fixCardConfirm()), así que el orden
+    // de los closest() importa para no confundirlos.
+    const confirmBtn = e.target.closest('.fix-confirm-btn');
+    if (confirmBtn) {
+      const ruta  = confirmBtn.dataset.confirmRuta;
+      const dette = confirmBtn.dataset.confirmDette;
+      if (!confirm(`¿Confirmas que la entrega ${dette || '—'} de la ruta ${ruta} NO se realizará?\n\nSe eliminará por completo del archivo final y del historial de Supabase — esta acción no se puede deshacer una vez exportado el día.`)) return;
+      Events.confirmExcludedDette(ruta, dette);
+      return;
+    }
     const saveBtn = e.target.closest('.fix-save');
     if (saveBtn) {
       const card  = saveBtn.closest('.fix-card');
