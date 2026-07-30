@@ -10,17 +10,17 @@
  * la descarga del navegador, pero eso no es manipulación del DOM de la app).
  *
  * AJUSTES (jul-2026 — archivo final, ver detalle en cada bloque):
- *   1) FECHA — SEGUNDO INTENTO. El primer intento seguía manipulando
- *      un objeto Date (redondeo + lectura en UTC), pero ese objeto ya
- *      viene ambiguo desde que SheetJS lo construye a partir del
- *      serial de Excel — cualquier operación sobre él hereda esa
- *      ambigüedad. Ahora getMapped(row,'FECHA') devuelve directamente
- *      el TEXTO que Excel mostraba en la celda original de RUTEO NUEVO
- *      (ver processors/excel.js → row._FECHA_TEXT, leído de `.w` de la
- *      celda cruda, nunca de un Date). Aquí solo se separan los tres
- *      números de ese texto (día/mes/año) y se arma un Date local con
- *      esos mismos números — cero cálculo, cero zona horaria. El
- *      formato de celda sigue siendo 'DD/MM/YYYY' (sin hora).
+ *   1) FECHA — TERCER intento (ver processors/excel.js para el
+ *      historial completo de por qué los dos anteriores fallaron: un
+ *      Date de SheetJS ya nace ambiguo, y el texto formateado `.w`
+ *      depende de un orden día/mes que no siempre es el esperado).
+ *      getMapped(row,'FECHA') ahora devuelve, en el caso normal, un
+ *      objeto {dd,mm,yyyy} ya decodificado directamente del serial
+ *      numérico de la celda (XLSX.SSF.parse_date_code, sin texto, sin
+ *      Date, sin zona horaria — ver excel.js). Aquí solo se arma un
+ *      Date local con esos tres números — cero cálculo adicional. Los
+ *      respaldos (texto o Date) se mantienen por si la celda original
+ *      no era numérica. Formato de celda: 'DD/MM/YYYY' (sin hora).
  *   2) ID IDA / ID RETORNO / CARTA PORTE — ahora forman parte de
  *      INT_COLS (core/constants.js). Este archivo YA convertía a
  *      número real cualquier columna de INT_COLS y le aplicaba formato
@@ -31,9 +31,8 @@
  *      alguno de sus dos datos de entrada, deja constancia en
  *      row._timeMissing[col] (ver time-engine.js). Aquí se usa esa
  *      información SOLO en el archivo final: la celda vacía se resalta
- *      con relleno ámbar. NO se agrega comentario de Excel — se
- *      retiró por estética (feedback jul-2026): solo el resaltado
- *      visual, sin texto emergente.
+ *      con relleno ámbar. Sin comentario de Excel — se retiró por
+ *      estética (feedback jul-2026): solo el resaltado visual.
  *
  * Dependencias:
  *   - State (core/state.js) — lee State.merged únicamente
@@ -58,12 +57,11 @@ import { TIME_RULES } from '../core/time-engine.js';
 const TIME_OUTPUT_COLS = new Set(TIME_RULES.map(r => r.out));
 
 /**
- * Parsea el texto EXACTO de la celda FECHA (ej. "27/07/2026",
- * "27-07-2026", "27.07.2026") en {dd, mm, yyyy} — pura extracción de
- * dígitos en el orden DD/MM/YYYY, sin ningún cálculo ni interpretación
- * de zona horaria. Devuelve null si el texto no trae un patrón
- * reconocible (en cuyo caso el valor original se deja tal cual, sin
- * inventar nada).
+ * Respaldo — parsea texto formateado tipo "27/07/2026" en {dd,mm,yyyy}
+ * asumiendo orden día/mes. Solo se usa cuando la celda original de
+ * FECHA no era numérica (ver processors/excel.js → r['_FECHA_TEXT']).
+ * El caso normal (celda numérica real) ya no pasa por aquí — usa
+ * directamente r['_FECHA_DMY'], decodificado del serial sin ambigüedad.
  * @private
  * @param {string} text
  * @returns {{dd:number, mm:number, yyyy:number}|null}
@@ -89,19 +87,22 @@ export function exportXLSX() {
     let val = getMapped(row, col);
     if (val === '' || val === null || val === undefined) return '';
     if (DATE_COLS.has(col)) {
-      // AJUSTE (jul-2026 — FECHA, segundo intento): val ya es el texto
-      // exacto de la celda original (ver processors/excel.js →
-      // row._FECHA_TEXT, vía COL_MAP['FECHA'] en constants.js). Se
-      // extraen sus tres números tal cual y se arma un Date local con
-      // ellos — ningún cálculo, ninguna conversión de zona horaria.
+      // Caso normal (jul-2026, tercer intento): val es el objeto
+      // {dd,mm,yyyy} ya decodificado del serial crudo de la celda
+      // (ver processors/excel.js → r['_FECHA_DMY']). Se arma un Date
+      // local directo con esos números — cero cálculo, cero zona
+      // horaria, cero ambigüedad de orden.
+      if (val && typeof val === 'object' && !(val instanceof Date) && 'dd' in val) {
+        return new Date(val.yyyy, val.mm - 1, val.dd);
+      }
+      // Respaldo — la celda no era numérica: texto formateado.
       if (typeof val === 'string') {
         const parsed = _parseFechaTexto(val);
         if (parsed) return new Date(parsed.yyyy, parsed.mm - 1, parsed.dd);
         return val; // texto no reconocido — se deja tal cual, sin inventar nada
       }
-      // Respaldo — solo se usa si por algún motivo no se detectó la
-      // columna FECHA al leer el Excel (ver excel.js) y COL_MAP cayó a
-      // r['FECHA'], que en ese caso sigue siendo el Date de SheetJS.
+      // Último respaldo — Date de SheetJS (solo si no se detectó la
+      // columna FECHA al leer el Excel, ver excel.js).
       const d = val instanceof Date ? val : new Date(val);
       return isNaN(d.getTime()) ? val : new Date(d.getFullYear(), d.getMonth(), d.getDate());
     }
@@ -161,11 +162,7 @@ export function exportXLSX() {
       // cálculo de tiempos): SOLO en el archivo final. Si esta celda es
       // la salida de una regla de core/time-engine.js y el cálculo no
       // se pudo hacer por falta de dato de entrada, se resalta con
-      // relleno ámbar — SIN comentario de Excel (se retiró por
-      // estética, feedback jul-2026). El detalle de qué faltó
-      // (row._timeMissing[col]) sigue calculándose en time-engine.js
-      // por si se necesita en otro lugar más adelante, pero aquí ya
-      // no se muestra como comentario, solo como resaltado visual.
+      // relleno ámbar — SIN comentario de Excel.
       if (TIME_OUTPUT_COLS.has(col)) {
         const mergedRow     = State.merged[R - 1];
         const missingReason = mergedRow && mergedRow._timeMissing && mergedRow._timeMissing[col];
