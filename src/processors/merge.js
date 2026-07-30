@@ -6,9 +6,9 @@
  *
  * A diferencia de pdf.js / excel.js / paste.js, esta función NO es pura:
  * lee State.xlsData, State.pdfData, State.factData, State.despData,
- * State.catalog, State.catalogs, State.wtmsData directamente, y escribe
- * el resultado en State.merged. Es intencional — preserva exactamente
- * el comportamiento original.
+ * State.catalog, State.catalogs, State.wtmsData, State.excludedDettes
+ * directamente, y escribe el resultado en State.merged. Es intencional
+ * — preserva exactamente el comportamiento original.
  *
  * Estrategia de match PDF (en orden de prioridad):
  *   1. ruta + factura del Excel (match específico)
@@ -35,16 +35,47 @@
  *       mismo objeto bajo dos claves: factura y destino).
  *     - Si hay EXACTAMENTE un candidato → se usa (caso legítimo y
  *       frecuente: ruta de una sola entrega, sin ambigüedad posible).
- *     - Si hay MÁS DE UNO y ninguno matcheó específicamente → NO se
- *       adivina. pdfRow queda null, la entrega se marca
- *       nr['_pdfAmbiguous'] = true, y features/validation/sve.js
- *       reporta la incidencia CRÍTICA 'pdf_ambiguous' en vez de
- *       inventar una correspondencia.
+ *     - Si hay MÁS DE UNO → ver FIX (jul-2026 — distinción ambigüedad
+ *       real vs entrega ausente) más abajo.
  *
  *   Complementa el fix en events.js → handlePDFs(), que ahora evita
  *   indexar claves vacías en State.pdfData (factura/destino '') — esa
  *   colisión de claves vacías era la otra vía por la que un match
  *   "específico" podía terminar apuntando al bloque equivocado.
+ *
+ * FIX (jul-2026 — distinción "ambigüedad real" vs "entrega ausente del
+ * PDF"): antes, CUALQUIER caso con más de un bloque de PDF candidato
+ * para la ruta (y sin match específico) se reportaba como
+ * 'pdf_ambiguous', aunque el DETTE de la fila en cuestión simplemente
+ * NO existiera en ningún bloque del PDF — caso real confirmado con
+ * EduarDo: una entrega se queda por ocupación y ya no se genera su
+ * bloque en el PDF (el PDF lo emite la misma plataforma WTMS, así que
+ * si la entrega ya no va, el PDF nunca la trae). Ese caso NO es una
+ * ambigüedad — no hay nada que "adivinar entre varios candidatos", la
+ * entrega sencillamente no está. Se distingue verificando si el DETTE
+ * buscado aparece como `destino` en alguno de los bloques candidatos
+ * de esa ruta:
+ *   - Si SÍ aparece entre los destinos → ambigüedad real (más de un
+ *     bloque podría corresponder, no se puede determinar cuál). Sigue
+ *     reportándose como 'pdf_ambiguous' (CRÍTICA, bloquea exportación)
+ *     — sin cambios en ese comportamiento.
+ *   - Si NO aparece → la entrega no está en el PDF, punto. Se marca
+ *     nr['_pdfDetteAusente'] = true y sve.js la reporta aparte (regla
+ *     'dette_sin_pdf', ADVERTENCIA) con opción de que el usuario
+ *     confirme la exclusión — ver bloque de exclusión más abajo.
+ *
+ * NUEVO (jul-2026 — exclusión de entregas confirmadas como "no se
+ * realizarán"): cuando el usuario confirma desde Correcciones que una
+ * entrega marcada 'dette_sin_pdf' efectivamente no se va a realizar
+ * (ver events.js → confirmExcludedDette()), su clave "ruta||dette" se
+ * agrega a State.excludedDettes. Esta función la filtra AL INICIO del
+ * loop, antes de construir cualquier campo — la fila NUNCA llega a
+ * State.merged. Esto es deliberado: features/export.js y
+ * features/dispatch-history.js leen State.merged directamente y sin
+ * ningún filtro adicional, así que excluir aquí garantiza que el
+ * Excel final y el historial de Supabase queden automáticamente
+ * fieles a la decisión del usuario — sin duplicar la lógica de
+ * exclusión en esos dos módulos.
  *
  * FIX (jul-2026) — motores existentes que nunca se invocaban:
  *   Tres módulos ya escritos y correctos (enrichment-engine.js,
@@ -61,7 +92,10 @@
  *   TIEMPO EN PATIO y la regla SVE 'time_anomaly' tampoco funcionaban.
  *
  *   Orden dentro del loop (importa):
- *     1. Resolver PDF (con el fix de ambigüedad) / factura / despacho
+ *     0. Filtrar entregas excluidas (State.excludedDettes) — antes de
+ *        cualquier otro paso.
+ *     1. Resolver PDF (con el fix de ambigüedad/ausencia) / factura /
+ *        despacho
  *     2. Cruce WTMS (Status.ID'S MASTER == WTMS.ID de la carga) →
  *        nr['_CARTA_PORTE'] / nr['_ID_RETORNO']
  *     3. Calendario fiscal sobre row['FECHA'] → nr['_DIA'] / nr['_SW']
@@ -145,30 +179,49 @@ export function runMerge() {
   for (const row of State.xlsData) {
     const ruta    = String(row[COL_RUTA]    || '').trim();
     const detteF  = String(row[COL_DETTE_F] || '').trim();
+    const detteE  = String(row[COL_DETTE_E] || '').trim();
     const factXls = String(row[COL_FACT]    || '').trim();
 
-    let pdfRow = null, pdfMatchType = 'none', pdfAmbiguous = false;
+    // ── Exclusión de entregas confirmadas como "no se van a realizar" ──
+    // Ver core/state.js → excludedDettes. La entrega NUNCA llega a
+    // State.merged — garantiza que tabla, SVE, exportación e historial
+    // de Supabase queden consistentes sin tocar esos módulos. Se
+    // compara contra detteE, el mismo campo que sve.js lee vía
+    // getMapped(r,'DET') (DET → row['DETTE'], ver COL_MAP en
+    // constants.js) para construir la clave del issue 'dette_sin_pdf'.
+    if (State.excludedDettes.has(ruta + '||' + detteE)) continue;
+
+    let pdfRow = null, pdfMatchType = 'none', pdfAmbiguous = false, pdfDetteAusente = false;
     if (factXls) { const r = State.pdfData.get(ruta + '|' + factXls); if (r) { pdfRow = r; pdfMatchType = 'specific'; } }
     if (!pdfRow && detteF) { const r = State.pdfData.get(ruta + '|D|' + detteF); if (r) { pdfRow = r; pdfMatchType = 'specific'; } }
-    if (!pdfRow) {
-      const detteE = String(row[COL_DETTE_E] || '').trim();
-      if (detteE) { const r = State.pdfData.get(ruta + '|D|' + detteE); if (r) { pdfRow = r; pdfMatchType = 'specific'; } }
-    }
+    if (!pdfRow && detteE) { const r = State.pdfData.get(ruta + '|D|' + detteE); if (r) { pdfRow = r; pdfMatchType = 'specific'; } }
     // Fallback seguro — ver nota de cabecera "FIX DE INTEGRIDAD DE DATOS".
-    // Solo se activa cuando NO hay ambigüedad posible.
+    // Solo se activa cuando NO hay match específico.
     if (!pdfRow && ruta) {
-      const seen = new Set(), candidates = [];
+      const seen = new Set(), candidates = [], destinosEnPdf = new Set();
       for (const [, v] of State.pdfData) {
-        if (v.ruta === ruta && !seen.has(v)) { seen.add(v); candidates.push(v); }
+        if (v.ruta === ruta && !seen.has(v)) { seen.add(v); candidates.push(v); destinosEnPdf.add(v.destino); }
       }
       if (candidates.length === 1) {
         pdfRow = candidates[0];
         pdfMatchType = 'fallback';
       } else if (candidates.length > 1) {
-        // Múltiples bloques de PDF candidatos para esta ruta y ninguno
-        // matcheó específicamente por factura/DETTE — no hay forma de
-        // saber cuál corresponde a esta entrega. NUNCA se adivina.
-        pdfAmbiguous = true;
+        // FIX (jul-2026 — distinción "ambigüedad real" vs "entrega
+        // ausente del PDF") — ver nota de cabecera para el detalle
+        // completo. Se verifica si el DETTE de ESTA fila aparece como
+        // destino en alguno de los bloques candidatos de la ruta.
+        const detteBuscado = detteF || detteE;
+        if (detteBuscado && destinosEnPdf.has(detteBuscado)) {
+          // El DETTE sí está en el PDF, pero en más de un bloque sin
+          // match específico — no hay forma de saber cuál corresponde.
+          // NUNCA se adivina.
+          pdfAmbiguous = true;
+        } else {
+          // El DETTE de esta fila no aparece en ningún bloque del PDF
+          // de la ruta — no es ambigüedad, la entrega simplemente no
+          // está. Ver features/validation/sve.js, regla 'dette_sin_pdf'.
+          pdfDetteAusente = true;
+        }
       }
     }
 
@@ -192,11 +245,18 @@ export function runMerge() {
     // 'pdf_ambiguous') y disponible para diagnóstico/exportación futura.
     // false en el caso normal (match específico, fallback seguro, o
     // simplemente sin PDF de ningún tipo para esta ruta). Cubre el caso
-    // "no se encontró NINGÚN bloque de PDF con certeza" — distinto del
-    // caso "sí se encontró el bloque, pero un campo puntual (marchamo)
-    // no validó", que se maneja campo por campo vía _marchamoIssues,
-    // ver bloque if(pdfRow){...} más abajo.
-    nr['_pdfAmbiguous'] = pdfAmbiguous;
+    // "existen varios bloques y ninguno corresponde con certeza" —
+    // distinto de 'pdfDetteAusente' (ningún bloque corresponde, punto) y
+    // distinto de "sí se encontró el bloque, pero un campo puntual
+    // (marchamo) no validó", que se maneja campo por campo vía
+    // _marchamoIssues, ver bloque if(pdfRow){...} más abajo.
+    nr['_pdfAmbiguous']     = pdfAmbiguous;
+    // Marca de integridad — leída por sve.js (regla 'dette_sin_pdf').
+    // true cuando ningún bloque de PDF de la ruta corresponde a esta
+    // entrega (caso real: entrega retirada por ocupación, el PDF —
+    // generado por la misma plataforma WTMS — nunca la trae). Ver nota
+    // de cabecera "FIX (jul-2026 — distinción...)" para el detalle.
+    nr['_pdfDetteAusente'] = pdfDetteAusente;
 
     if (pdfRow) {
       nr['OPERADOR'] = pdfRow.operador;
