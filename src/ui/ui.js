@@ -77,6 +77,21 @@
  *   _mcCoverage() reutiliza State.merged/State.catalogs ya en memoria —
  *   es un cálculo en vivo, no se persiste ni se pide a Supabase.
  *
+ * CAMBIO (jul-2026 — regla 'dette_sin_pdf' y tarjeta de confirmación):
+ *   Se agrega CONFIRM_RULES (Set) y _fixCardConfirm() — una tercera
+ *   variante de tarjeta en Correcciones, distinta de quick (input) y
+ *   review (abre drawer): esta pide una DECISIÓN binaria ("¿esta
+ *   entrega se va a realizar o no?") en vez de un valor de campo.
+ *   _buildFixBuckets() ahora devuelve un tercer bucket `confirm`, que
+ *   se suma al total de incidencias pendientes en renderFixList(),
+ *   renderQualityScreen() y showCelebrate() (los tres puntos que ya
+ *   calculaban `quick.length + review.length`). El botón "✓ No se
+ *   realizará" de la tarjeta dispara Events.confirmExcludedDette() (ver
+ *   core/app.js, listener de #fixList/#fixInfoList) — la eliminación
+ *   real de la fila ocurre en processors/merge.js, UI solo dispara la
+ *   acción y vuelve a pintar tras el resultado (mismo patrón que
+ *   EditSystem.quickFix()).
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - escH (utils/dom.js)
@@ -127,6 +142,15 @@ let _tableSearch = '';
 // excluye antes de clasificarlas. Ver features/validation/sve.js para
 // el porqué de cada field.
 const QUICKFIX_RULES = new Set(['missing', 'no_march', 'zero_tar', 'high_tar']);
+// Reglas que no piden un valor de campo sino una DECISIÓN — "¿confirmas
+// o revisas?" — NUEVO (jul-2026, ver sve.js regla 'dette_sin_pdf').
+// Renderizadas con _fixCardConfirm() en vez de quick/review. Se separan
+// de QUICKFIX_RULES/el resto de "review" porque ninguna de esas dos
+// tarjetas tiene sentido aquí: no hay un campo+valor que capturar
+// (quick) ni tampoco es simplemente "abrir el drawer y corregir a mano"
+// (review) — es una confirmación binaria que dispara la eliminación
+// completa de la entrega (ver events.js → confirmExcludedDette()).
+const CONFIRM_RULES = new Set(['dette_sin_pdf']);
 const QUICKFIX_FIELD_MAP = {
   'OPERADOR':   { key: 'OPERADOR',   label: 'Operador',   placeholder: 'Nombre del operador…' },
   'LIC.':       { key: '_LIC',       label: 'Licencia',   placeholder: 'Número de licencia…' },
@@ -535,8 +559,8 @@ export const UI = {
     ringArc.style.strokeDashoffset = String(CIRC * (1 - quality / 100));
     if (ringNum) ringNum.textContent = quality + '%';
 
-    const { quick, review } = UI._buildFixBuckets();
-    const currentTotal = quick.length + review.length;
+    const { quick, review, confirm } = UI._buildFixBuckets();
+    const currentTotal = quick.length + review.length + confirm.length;
     const resolved = _fixPeakTotal !== null ? Math.max(0, _fixPeakTotal - currentTotal) : 0;
     const total = State.merged.length;
 
@@ -604,27 +628,29 @@ export const UI = {
 
   /**
    * Clasifica las incidencias accionables (CRÍTICA/ADVERTENCIA) de
-   * State.sveIssues en "corrección rápida" (un campo editable claro) vs
-   * "revisar" (todo lo demás — necesita el drawer completo). CITA
-   * (no_cita) es siempre INFORMATIVA — nunca entra en `quick`/`review`,
+   * State.sveIssues en "corrección rápida" (un campo editable claro),
+   * "confirmar" (una decisión binaria, ver CONFIRM_RULES) o "revisar"
+   * (todo lo demás — necesita el drawer completo). CITA (no_cita) es
+   * siempre INFORMATIVA — nunca entra en `quick`/`review`/`confirm`,
    * se devuelve aparte en `info` y no cuenta para el contador de
    * "incidencias pendientes" (decisión confirmada con EduarDo).
    * Desde jul-2026, no_ventana/no_pool también son INFORMATIVA (ver
-   * sve.js) y por lo tanto tampoco entran a `quick`/`review` — el
-   * filtro de severidad las excluye automáticamente aquí, sin lógica
-   * adicional.
+   * sve.js) y por lo tanto tampoco entran a `quick`/`review`/`confirm`
+   * — el filtro de severidad las excluye automáticamente aquí, sin
+   * lógica adicional.
    * @private
    */
   _buildFixBuckets() {
     const issues = State.sveIssues || [];
-    const quick = [], review = [];
+    const quick = [], review = [], confirm = [];
     issues.forEach(issue => {
       if (issue.sev !== SVE_CRIT && issue.sev !== SVE_WARN) return;
+      if (CONFIRM_RULES.has(issue.rule)) { confirm.push(issue); return; }
       const canQuickFix = QUICKFIX_RULES.has(issue.rule) && QUICKFIX_FIELD_MAP[issue.field] && issue.rowIds && issue.rowIds.length;
       (canQuickFix ? quick : review).push(issue);
     });
     const info = issues.filter(i => i.rule === 'no_cita');
-    return { quick, review, info };
+    return { quick, review, confirm, info };
   },
 
   /** Tarjeta de corrección rápida — input inline + Guardar. @private */
@@ -659,6 +685,34 @@ export const UI = {
       </div>`;
   },
 
+  /**
+   * Tarjeta "confirmar exclusión" — NUEVO (jul-2026, ver sve.js regla
+   * 'dette_sin_pdf'). La entrega no tiene NINGÚN bloque de PDF y
+   * probablemente no se va a realizar (ej. se quedó por ocupación).
+   * Dos acciones:
+   *   - "✓ No se realizará" → dispara Events.confirmExcludedDette(),
+   *     que elimina la fila POR COMPLETO de State.merged (y por lo
+   *     tanto del Excel final y del historial de Supabase — ver
+   *     processors/merge.js). El listener real y su confirm() de
+   *     seguridad viven en core/app.js (mismo patrón que el resto de
+   *     los botones de #fixList).
+   *   - "🔍 Revisar" → abre el drawer completo, por si el usuario
+   *     prefiere verificar manualmente antes de decidir.
+   * @private
+   */
+  _fixCardConfirm(issue) {
+    const dette  = issue.dette ? `<div class="fix-dette">Entrega ${escH(issue.dette)}</div>` : '';
+    const rowIds = escH(JSON.stringify(issue.rowIds || []));
+    return `
+      <div class="fix-card warn fix-card-confirm">
+        <div class="fix-ruta">${escH(issue.ruta || '—')}${dette}</div>
+        <div class="fix-field-info"><div class="fix-field-label">Sin PDF</div><div class="fix-field-desc">${escH(issue.desc)}</div></div>
+        <div class="fix-input-wrap"></div>
+        <button class="fix-confirm-btn" data-confirm-ruta="${escH(issue.ruta)}" data-confirm-dette="${escH(issue.dette)}">✓ No se realizará</button>
+        <button class="fix-review-btn" data-locate-ruta="${escH(issue.ruta)}" data-locate-field="${escH(issue.field)}" data-locate-ids="${rowIds}">🔍 Revisar</button>
+      </div>`;
+  },
+
   /** Pinta la pantalla completa de Correcciones — contador, barra de progreso, lista de tarjetas y la sección aparte de Cita. */
   renderFixList() {
     const list      = document.getElementById('fixList');
@@ -687,8 +741,8 @@ export const UI = {
       return;
     }
 
-    const { quick, review, info } = UI._buildFixBuckets();
-    const total = quick.length + review.length;
+    const { quick, review, confirm, info } = UI._buildFixBuckets();
+    const total = quick.length + review.length + confirm.length;
 
     if (_fixPeakTotal === null || total > _fixPeakTotal) _fixPeakTotal = total;
     const pct = _fixPeakTotal > 0 ? Math.round((1 - total / _fixPeakTotal) * 100) : (total === 0 ? 100 : 0);
@@ -705,7 +759,9 @@ export const UI = {
       if (emptySub) emptySub.textContent = 'Ya no quedan incidencias pendientes — continúa al Dashboard de Calidad.';
     } else {
       empty.classList.remove('show');
-      list.innerHTML = quick.map(i => UI._fixCardQuick(i)).join('') + review.map(i => UI._fixCardReview(i)).join('');
+      list.innerHTML = quick.map(i => UI._fixCardQuick(i)).join('')
+        + confirm.map(i => UI._fixCardConfirm(i)).join('')
+        + review.map(i => UI._fixCardReview(i)).join('');
     }
 
     if (infoWrap) {
@@ -898,8 +954,8 @@ export const UI = {
     const overlay = document.getElementById('celebrateOverlay');
     if (!overlay) return;
     const total = State.merged.length;
-    const { quick, review } = UI._buildFixBuckets();
-    const currentTotal = quick.length + review.length;
+    const { quick, review, confirm } = UI._buildFixBuckets();
+    const currentTotal = quick.length + review.length + confirm.length;
     const resolved = _fixPeakTotal !== null ? Math.max(0, _fixPeakTotal - currentTotal) : 0;
 
     const rutasEl = document.getElementById('celebrateRutas');
@@ -1345,6 +1401,7 @@ export const UI = {
     State.factData = new Map();
     State.despData = new Map();
     State.wtmsData = new Map();   // FIX: faltaba en el reset original — bug latente desde que se agregó WTMS
+    State.excludedDettes = new Set();
     State.merged   = [];
     State.sveIssues = [];
     State.sveHasCritical = false;
