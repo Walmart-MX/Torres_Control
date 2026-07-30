@@ -221,7 +221,21 @@ export function parsePDF({ lines, annots }, filename) {
   // la validación de formato se hace aparte en _pushMarchamo(). Así,
   // un marchamo con longitud incorrecta ya NO impide capturar factura
   // y tarimas, que son campos independientes y válidos.
-  const ROW_RE  = /^CeDis\s+(?:TIENDA|HUB)\s+\S+\s+\d+\s+(4659\d{6})\s+(\d+)\s+\d+\s+\d+\s+\d+\s+[\d.]+\s+(\S+)$/;
+// ANTES
+const ROW_RE  = /^CeDis\s+(?:TIENDA|HUB)\s+\S+\s+\d+\s+(4659\d{6})\s+(\d+)\s+\d+\s+\d+\s+\d+\s+[\d.]+\s+(\S+)$/;
+
+// DESPUÉS
+// FIX (jul-2026) — ver "bug del marchamo ausente por completo": antes
+// el grupo de marchamo era obligatorio (\S+ sin '?'), así que una
+// entrega SIN NINGÚN token de marchamo (no un formato inválido, sino
+// literalmente ausente) hacía fallar el regex COMPLETO — factura,
+// tarimas y destino se perdían aunque sí existieran en el PDF. Se
+// vuelve opcional, igual que ya lo era en CONT_RE (grupo 2). Cuando
+// rm[3] llega undefined, _pushMarchamo() ya lo maneja de forma segura
+// (String(undefined||'').trim() === '' → early return, no entra ni a
+// marchamos ni a marchamoIssues) — cero marchamos capturados, que es
+// exactamente el estado correcto: "no hay marchamo", no "es inválido".
+const ROW_RE  = /^CeDis\s+(?:TIENDA|HUB)\s+\S+\s+\d+\s+(4659\d{6})\s+(\d+)\s+\d+\s+\d+\s+\d+\s+[\d.]+(?:\s+(\S+))?$/;
   // Mismo criterio para el marchamo de continuación (grupo 2, opcional):
   // \S+ en vez de \d{5,6} — el destino (grupo 1) siempre se captura
   // aunque el marchamo que lo acompañe sea inválido.
