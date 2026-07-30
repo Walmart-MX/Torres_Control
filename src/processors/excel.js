@@ -3,25 +3,35 @@
  * Lectura del Excel macro: hoja RUTEO NUEVO (rutas del día) y hoja
  * CONCENTRADO FACTURAS (datos de facturación) si existe.
  *
- * AJUSTE (jul-2026 — FECHA del archivo final):
- *   El intento anterior de corregir la columna FECHA manipulaba el
- *   objeto Date que entrega `cellDates:true` (redondeo + lectura en
- *   UTC). Eso seguía sin ser confiable: un Date construido por SheetJS
- *   a partir de un serial de Excel es en sí mismo ambiguo (puede venir
- *   anclado en UTC, con un instante que no es exactamente medianoche
- *   por imprecisión de punto flotante) — cualquier operación sobre ese
- *   objeto hereda esa ambigüedad, sin importar qué tan cuidadosa sea.
+ * AJUSTE (jul-2026 — FECHA del archivo final, TERCER intento):
+ *   Intento 1: manipular el objeto Date de `cellDates:true` (redondeo +
+ *   lectura UTC) — seguía ambiguo porque ese Date ya nace ambiguo.
+ *   Intento 2: usar el texto formateado `.w` de la celda (ej.
+ *   "29/07/2026") asumiendo orden DÍA/MES — resultó ser el problema
+ *   real: `.w` lo genera SheetJS a partir del CÓDIGO de formato guardado
+ *   en el archivo (ej. "m/d/yyyy"), que muchas veces está en inglés
+ *   (mes/día) aunque Excel lo muestre en pantalla como día/mes según el
+ *   regional del sistema — SheetJS no hace esa relocalización, así que
+ *   asumir un orden fijo era una apuesta que a veces perdía (mes
+ *   inválido → JavaScript "rodaba" el calendario meses/años hacia
+ *   adelante, el bug que se vio con la fecha saltando a 2028).
  *
- *   La única forma de garantizar "copiar exactamente el mismo valor,
- *   sin ningún cálculo ni interpretación" es leer el TEXTO que Excel ya
- *   muestra en la celda — la propiedad `.w` de SheetJS (el valor
- *   formateado, idéntico a lo que ve un humano al abrir RUTEO NUEVO) —
- *   en vez de su valor numérico/Date interpretado. Se guarda en
- *   `row._FECHA_TEXT`, un campo NUEVO que NO reemplaza `row['FECHA']`
- *   (ese sigue siendo el Date que ya consume
- *   core/fiscal-calendar.js/merge.js para calcular SW/DIA — no se toca
- *   esa lógica). `_FECHA_TEXT` lo consume ÚNICAMENTE
- *   core/constants.js → COL_MAP['FECHA'], para el archivo final.
+ *   AHORA (intento 3, definitivo): se lee el número de serie CRUDO de
+ *   la celda (`cell.v`, un entero/decimal sin ninguna interpretación de
+ *   texto ni de zona horaria) y se decodifica con
+ *   `XLSX.SSF.parse_date_code()` — la misma función interna que usa
+ *   SheetJS para construir los objetos Date de `cellDates:true`, pero
+ *   aquí se usa DIRECTO, devolviendo {y, m, d} sin pasar nunca por un
+ *   objeto Date de JavaScript. Cero ambigüedad de zona horaria, cero
+ *   ambigüedad de orden día/mes (el serial de Excel no tiene orden —
+ *   es un conteo de días, no texto). Se guarda en
+ *   `row._FECHA_DMY = { dd, mm, yyyy }`.
+ *
+ *   Si la celda NO es numérica (fue capturada como texto puro en el
+ *   Excel), se guarda además `row._FECHA_TEXT` como respaldo de mejor
+ *   esfuerzo — ver core/constants.js / features/export.js.
+ *   `row['FECHA']` (el Date que usa fiscal-calendar.js/merge.js para
+ *   SW/DIA) no se toca — sigue igual que siempre.
  *
  * Dependencias:
  *   - XLSX (SheetJS, cargado globalmente desde el CDN en index.html)
@@ -59,19 +69,30 @@ export async function processXLS(file) {
   const wsRuteo = wb.Sheets[ruteoName];
   const raw     = XLSX.utils.sheet_to_json(wsRuteo, { defval: '' });
 
-  // ── FECHA — texto EXACTO tal como lo muestra Excel (ver nota de
-  // cabecera "AJUSTE (jul-2026 — FECHA del archivo final)"). Se busca
-  // la columna FECHA en la fila de encabezados y se lee `.w` (valor
-  // formateado) directamente de la celda cruda — nunca se pasa por un
-  // objeto Date ni por ningún cálculo. row['FECHA'] (el Date que ya
-  // usa fiscal-calendar.js/merge.js para SW/DIA) queda intacto.
-  const headerRow  = XLSX.utils.sheet_to_json(wsRuteo, { header: 1 })[0] || [];
+  // ── FECHA — decodificada del serial crudo de la celda (ver nota de
+  // cabecera "AJUSTE (jul-2026 — FECHA del archivo final, TERCER
+  // intento)"). Se ubica la columna FECHA en el encabezado y se lee
+  // `cell.v`/`cell.t` directo de la celda cruda del worksheet — nunca
+  // el texto formateado, nunca un objeto Date.
+  const headerRow   = XLSX.utils.sheet_to_json(wsRuteo, { header: 1 })[0] || [];
   const fechaColIdx = headerRow.findIndex(h => String(h || '').trim().toUpperCase() === 'FECHA');
   if (fechaColIdx > -1) {
     for (let i = 0; i < raw.length; i++) {
       const addr = XLSX.utils.encode_cell({ r: i + 1, c: fechaColIdx });
       const cell = wsRuteo[addr];
-      if (cell && cell.w) raw[i]['_FECHA_TEXT'] = String(cell.w).trim();
+      if (!cell) continue;
+      if (cell.t === 'n' && typeof cell.v === 'number') {
+        // Celda de fecha real (serial numérico de Excel) — se decodifica
+        // con el propio algoritmo de SheetJS (ya resuelve el bug del año
+        // 1900 de Excel), sin texto localizado y sin objeto Date.
+        const dc = XLSX.SSF.parse_date_code(cell.v);
+        if (dc) raw[i]['_FECHA_DMY'] = { dd: dc.d, mm: dc.m, yyyy: dc.y };
+      } else if (cell.w) {
+        // Respaldo — la celda no es numérica (texto capturado a mano).
+        // Se guarda el texto tal cual para intentar parsearlo en el
+        // export (ver features/export.js), mejor esfuerzo.
+        raw[i]['_FECHA_TEXT'] = String(cell.w).trim();
+      }
     }
   }
 
