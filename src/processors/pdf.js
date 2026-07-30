@@ -222,7 +222,7 @@ export function parsePDF({ lines, annots }, filename) {
   // un marchamo con longitud incorrecta ya NO impide capturar factura
   // y tarimas, que son campos independientes y válidos.
 // ANTES
-const ROW_RE  = /^CeDis\s+(?:TIENDA|HUB)\s+\S+\s+\d+\s+(4659\d{6})\s+(\d+)\s+\d+\s+\d+\s+\d+\s+[\d.]+\s+(\S+)$/;
+//const ROW_RE  = /^CeDis\s+(?:TIENDA|HUB)\s+\S+\s+\d+\s+(4659\d{6})\s+(\d+)\s+\d+\s+\d+\s+\d+\s+[\d.]+\s+(\S+)$/;
 
 // DESPUÉS
 // FIX (jul-2026) — ver "bug del marchamo ausente por completo": antes
