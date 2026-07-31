@@ -60,6 +60,15 @@
  *   ningún filtro adicional. La confirmación de seguridad (diálogo
  *   nativo) vive en core/app.js, mismo patrón que deleteCatalogRow().
  *
+ * CAMBIO (jul-2026 — regla SVE 'integrity'/K, descuento de exclusiones):
+ *   triggerMerge() ahora pasa State.excludedCount como tercer argumento
+ *   a runSVE() (ver features/validation/sve.js) — permite que la regla K
+ *   descuente del conteo esperado las entregas excluidas confirmadas en
+ *   ESTA corrida de runMerge() (ver processors/merge.js), evitando una
+ *   alerta crítica falsa cuando la diferencia se explica por completo
+ *   por una exclusión legítima (ej. DETTE cancelada y confirmada por el
+ *   usuario). No cambia ningún otro comportamiento de triggerMerge().
+ *
  * FIX DE INTEGRIDAD DE DATOS (jul-2026) — handlePDFs():
  *   Antes se indexaba SIEMPRE `ruta + '|' + r.factura` y
  *   `ruta + '|D|' + r.destino` en State.pdfData, aunque factura/destino
@@ -325,7 +334,12 @@ export const Events = {
     UI.setActionsEnabled(true);
     setTimeout(() => {
       const screenCount = State.xlsData ? State.xlsData.length : 0;
-      const sveResult = runSVE(State.merged, screenCount);
+      // CAMBIO (jul-2026): se pasa State.excludedCount (calculado en
+      // runMerge(), ver processors/merge.js) para que la regla K de
+      // sve.js pueda descontar las exclusiones confirmadas de ESTA
+      // corrida antes de comparar — ver nota de cabecera de este
+      // archivo y de features/validation/sve.js.
+      const sveResult = runSVE(State.merged, screenCount, State.excludedCount);
       if (sveResult) {
         State.sveIssues = sveResult.issues;
         UI.renderSVE(sveResult.issues, sveResult.quality, sveResult.nCrit, sveResult.nWarn, sveResult.nInfo, sveResult.nPass);
