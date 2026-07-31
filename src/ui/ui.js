@@ -110,7 +110,7 @@
  * CAMBIO (jul-2026 — captura dinámica de hasta 5 marchamos):
  *   La regla SVE 'no_march' ganaba antes una tarjeta "quick" genérica
  *   con UN solo input (mapeado siempre a MARCHAMO 1) — insuficiente
- *   quie una entrega real puede traer hasta 5 marchamos. Se agrega:
+ *   ya que una entrega real puede traer hasta 5 marchamos. Se agrega:
  *     - MULTI_RULES (Set) — reglas que necesitan MÁS de un campo
  *       dinámico en vez de un input fijo. Hoy solo 'no_march'. Se
  *       evalúa ANTES que QUICKFIX_RULES en _buildFixBuckets(), que
@@ -184,7 +184,12 @@ let _tableSearch = '';
 // no llegan aquí — el filtro de severidad en _buildFixBuckets() las
 // excluye antes de clasificarlas. Ver features/validation/sve.js para
 // el porqué de cada field.
-const QUICKFIX_RULES = new Set(['missing', 'no_march', 'zero_tar', 'high_tar']);
+// CAMBIO (jul-2026): 'no_march' se RETIRA de este set — ahora vive en
+// MULTI_RULES (ver abajo) y se renderiza con _fixCardMarchamo(), no con
+// la tarjeta quick de un solo input. MULTI_RULES se evalúa ANTES que
+// este set en _buildFixBuckets(), así que aunque quedara aquí sería
+// código muerto — se retira por limpieza.
+const QUICKFIX_RULES = new Set(['missing', 'zero_tar', 'high_tar']);
 // Reglas que no piden un valor de campo sino una DECISIÓN — "¿confirmas
 // o revisas?" — NUEVO (jul-2026, ver sve.js regla 'dette_sin_pdf').
 // Renderizadas con _fixCardConfirm() en vez de quick/review. Se separan
@@ -194,11 +199,17 @@ const QUICKFIX_RULES = new Set(['missing', 'no_march', 'zero_tar', 'high_tar']);
 // (review) — es una confirmación binaria que dispara la eliminación
 // completa de la entrega (ver events.js → confirmExcludedDette()).
 const CONFIRM_RULES = new Set(['dette_sin_pdf']);
+// Reglas que necesitan MÁS de un campo dinámico en vez de un input fijo
+// — NUEVO (jul-2026, captura de hasta 5 marchamos). Renderizadas con
+// _fixCardMarchamo() en vez de quick/review/confirm. Se evalúa ANTES
+// que QUICKFIX_RULES en _buildFixBuckets() — cualquier regla aquí nunca
+// llega a la clasificación quick, sin importar si también apareciera
+// en QUICKFIX_RULES por error.
+const MULTI_RULES = new Set(['no_march']);
 const QUICKFIX_FIELD_MAP = {
   'OPERADOR':   { key: 'OPERADOR',   label: 'Operador',   placeholder: 'Nombre del operador…' },
   'LIC.':       { key: '_LIC',       label: 'Licencia',   placeholder: 'Número de licencia…' },
   'TARIMAS':    { key: 'TARIMAS',    label: 'Tarimas',    placeholder: 'Cantidad de tarimas…' },
-  'MARCHAMO 1': { key: 'MARCHAMO 1', label: 'Marchamo 1', placeholder: 'Número de marchamo…' },
   'CITA':       { key: 'CITA',       label: 'Cita',       placeholder: 'DD/MM/AAAA HH:MM' },
 };
 // Calidad inicial de ESTA sesión de corrección (antes de cualquier
@@ -602,8 +613,8 @@ export const UI = {
     ringArc.style.strokeDashoffset = String(CIRC * (1 - quality / 100));
     if (ringNum) ringNum.textContent = quality + '%';
 
-    const { quick, review, confirm } = UI._buildFixBuckets();
-    const currentTotal = quick.length + review.length + confirm.length;
+    const { quick, review, confirm, multi } = UI._buildFixBuckets();
+    const currentTotal = quick.length + review.length + confirm.length + multi.length;
     const resolved = _fixPeakTotal !== null ? Math.max(0, _fixPeakTotal - currentTotal) : 0;
     const total = State.merged.length;
 
@@ -672,28 +683,34 @@ export const UI = {
   /**
    * Clasifica las incidencias accionables (CRÍTICA/ADVERTENCIA) de
    * State.sveIssues en "corrección rápida" (un campo editable claro),
-   * "confirmar" (una decisión binaria, ver CONFIRM_RULES) o "revisar"
-   * (todo lo demás — necesita el drawer completo). CITA (no_cita) es
-   * siempre INFORMATIVA — nunca entra en `quick`/`review`/`confirm`,
+   * "múltiple" (varios campos dinámicos, ver MULTI_RULES), "confirmar"
+   * (una decisión binaria, ver CONFIRM_RULES) o "revisar" (todo lo
+   * demás — necesita el drawer completo). CITA (no_cita) es siempre
+   * INFORMATIVA — nunca entra en `quick`/`multi`/`review`/`confirm`,
    * se devuelve aparte en `info` y no cuenta para el contador de
    * "incidencias pendientes" (decisión confirmada con EduarDo).
    * Desde jul-2026, no_ventana/no_pool también son INFORMATIVA (ver
-   * sve.js) y por lo tanto tampoco entran a `quick`/`review`/`confirm`
-   * — el filtro de severidad las excluye automáticamente aquí, sin
-   * lógica adicional.
+   * sve.js) y por lo tanto tampoco entran a estos buckets — el filtro
+   * de severidad las excluye automáticamente aquí, sin lógica adicional.
+   *
+   * ORDEN DE EVALUACIÓN (importa): CONFIRM_RULES → MULTI_RULES →
+   * QUICKFIX_RULES → review (todo lo demás). 'no_march' se evalúa en
+   * MULTI_RULES ANTES de llegar al chequeo de QUICKFIX_RULES — ver
+   * nota de cabecera "CAMBIO (jul-2026 — captura dinámica...)".
    * @private
    */
   _buildFixBuckets() {
     const issues = State.sveIssues || [];
-    const quick = [], review = [], confirm = [];
+    const quick = [], review = [], confirm = [], multi = [];
     issues.forEach(issue => {
       if (issue.sev !== SVE_CRIT && issue.sev !== SVE_WARN) return;
       if (CONFIRM_RULES.has(issue.rule)) { confirm.push(issue); return; }
+      if (MULTI_RULES.has(issue.rule) && issue.rowIds && issue.rowIds.length) { multi.push(issue); return; }
       const canQuickFix = QUICKFIX_RULES.has(issue.rule) && QUICKFIX_FIELD_MAP[issue.field] && issue.rowIds && issue.rowIds.length;
       (canQuickFix ? quick : review).push(issue);
     });
     const info = issues.filter(i => i.rule === 'no_cita');
-    return { quick, review, confirm, info };
+    return { quick, review, confirm, multi, info };
   },
 
   /** Tarjeta de corrección rápida — input inline + Guardar. @private */
@@ -753,6 +770,59 @@ export const UI = {
         <div class="fix-input-wrap"></div>
         <button class="fix-confirm-btn" data-confirm-ruta="${escH(issue.ruta)}" data-confirm-dette="${escH(issue.dette)}">✓ No se realizará</button>
         <button class="fix-review-btn" data-locate-ruta="${escH(issue.ruta)}" data-locate-field="${escH(issue.field)}" data-locate-ids="${rowIds}">🔍 Revisar</button>
+      </div>`;
+  },
+
+  /**
+   * Tarjeta de captura dinámica de marchamos — NUEVO (jul-2026, ver
+   * nota de cabecera "CAMBIO (jul-2026 — captura dinámica...)"). A
+   * diferencia de _fixCardQuick(), no mapea a un único campo fijo:
+   * arranca con un input y permite agregar hasta 5 (uno por cada
+   * posición MARCHAMO 1-5 que esté realmente vacía en la fila).
+   *
+   * Los slots ofrecidos se calculan a partir de la fila real en
+   * State.merged (rowIds[0] — todas las filas del grupo comparten la
+   * misma entrega física, ver merge.js) — SOLO se ofrecen posiciones
+   * vacías, nunca se le da al usuario la opción de sobreescribir un
+   * marchamo que el PDF ya extrajo correctamente en otra posición
+   * (ej. MARCHAMO 1 vacío pero MARCHAMO 2 ya tiene dato válido).
+   *
+   * data-fix-slots guarda el orden completo de slots disponibles (JSON)
+   * — el botón "+ Agregar marchamo" (ver core/app.js →
+   * handleFixCardClick) lo usa para saber cuál es el siguiente campo a
+   * revelar, sin necesidad de volver a consultar State.
+   * @private
+   */
+  _fixCardMarchamo(issue) {
+    const dette   = issue.dette ? `<div class="fix-dette">Entrega ${escH(issue.dette)}</div>` : '';
+    const rowIds  = issue.rowIds || [];
+    const rowIdsAttr = escH(JSON.stringify(rowIds));
+
+    const sampleRow = rowIds.length ? State.merged.find(r => r._rowId === rowIds[0]) : null;
+    const emptySlots = [];
+    for (let m = 1; m <= 5; m++) {
+      const key = 'MARCHAMO ' + m;
+      if (!sampleRow || !String(sampleRow[key] || '').trim()) emptySlots.push(key);
+    }
+    // Respaldo — la regla no_march exige MARCHAMO 1 vacío, así que
+    // emptySlots nunca debería quedar vacío, pero por robustez nunca
+    // se deja la tarjeta sin al menos un campo capturable.
+    if (!emptySlots.length) emptySlots.push('MARCHAMO 1');
+
+    const firstSlot = emptySlots[0];
+    return `
+      <div class="fix-card warn fix-card-marchamo" data-fix-rowids="${rowIdsAttr}" data-fix-slots="${escH(JSON.stringify(emptySlots))}">
+        <div class="fix-ruta">${escH(issue.ruta || '—')}${dette}</div>
+        <div class="fix-field-info"><div class="fix-field-label">Marchamos</div><div class="fix-field-desc">${escH(issue.desc)}</div></div>
+        <div class="fix-marchamo-wrap">
+          <div class="fix-marchamo-rows" data-fix-role="rows">
+            <div class="fix-marchamo-row" data-slot="${escH(firstSlot)}">
+              <input class="fix-input fix-marchamo-input" data-field="${escH(firstSlot)}" placeholder="Número de marchamo…">
+            </div>
+          </div>
+          ${emptySlots.length > 1 ? `<button type="button" class="fix-marchamo-add" data-fix-role="add-marchamo">+ Agregar marchamo</button>` : ''}
+        </div>
+        <button type="button" class="fix-save-marchamo" data-fix-role="save-marchamo">✓ Guardar</button>
       </div>`;
   },
 
@@ -823,8 +893,8 @@ export const UI = {
       return;
     }
 
-    const { quick, review, confirm, info } = UI._buildFixBuckets();
-    const total = quick.length + review.length + confirm.length;
+    const { quick, review, confirm, multi, info } = UI._buildFixBuckets();
+    const total = quick.length + review.length + confirm.length + multi.length;
 
     if (_fixPeakTotal === null || total > _fixPeakTotal) _fixPeakTotal = total;
     const pct = _fixPeakTotal > 0 ? Math.round((1 - total / _fixPeakTotal) * 100) : (total === 0 ? 100 : 0);
@@ -842,6 +912,7 @@ export const UI = {
     } else {
       empty.classList.remove('show');
       list.innerHTML = quick.map(i => UI._fixCardQuick(i)).join('')
+        + multi.map(i => UI._fixCardMarchamo(i)).join('')
         + confirm.map(i => UI._fixCardConfirm(i)).join('')
         + review.map(i => UI._fixCardReview(i)).join('');
     }
@@ -1036,8 +1107,8 @@ export const UI = {
     const overlay = document.getElementById('celebrateOverlay');
     if (!overlay) return;
     const total = State.merged.length;
-    const { quick, review, confirm } = UI._buildFixBuckets();
-    const currentTotal = quick.length + review.length + confirm.length;
+    const { quick, review, confirm, multi } = UI._buildFixBuckets();
+    const currentTotal = quick.length + review.length + confirm.length + multi.length;
     const resolved = _fixPeakTotal !== null ? Math.max(0, _fixPeakTotal - currentTotal) : 0;
 
     const rutasEl = document.getElementById('celebrateRutas');
