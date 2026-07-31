@@ -60,6 +60,16 @@ export const State = {
   // tabla de auditoría aparte (fuera del alcance de este cambio).
   excludedDettes: new Set(),
 
+  // Contador de entregas excluidas (State.excludedDettes) que efectivamente
+  // se filtraron en LA CORRIDA MÁS RECIENTE de runMerge() — NUEVO (jul-2026,
+  // ver sve.js regla 'integrity'/K). Se recalcula desde cero en cada
+  // runMerge(); nunca se lee excludedDettes.size directamente para esto
+  // porque ese Set puede acumular claves de días operativos anteriores que
+  // ya no aplican al Excel cargado ahora — solo cuenta lo que se excluyó
+  // AHORA, para poder explicar honestamente una discrepancia entre el
+  // conteo del Excel y State.merged sin generar una falsa alarma crítica.
+  excludedCount: 0,
+
   // Session
   user: localStorage.getItem('sd_user') || '',
   theme: localStorage.getItem('sd_theme') || 'light',

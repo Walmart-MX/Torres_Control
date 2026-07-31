@@ -62,6 +62,15 @@
  *   no se agrega ningún listener nuevo al DOM, solo una rama más
  *   dentro del handler compartido.
  *
+ * CAMBIO (jul-2026 — botón "Continuar a Exportación" tricolor):
+ *   Se agrega el listener de #btnFixContinue (ver index.html/ui.js) —
+ *   navega a la pantalla Exportación con goStep('export'), mismo
+ *   mecanismo que btnGoQuality/btnGoTable. El color/estado del botón
+ *   ya lo gobierna UI._updateFixContinueBtn() (llamado desde
+ *   renderFixList()); este listener solo maneja la navegación, nunca
+ *   bloquea el click — el gate real de exportación sigue viviendo,
+ *   sin cambios, en la pantalla Exportación.
+ *
  * Dependencias: todos los módulos de la aplicación.
  */
 import { State } from './state.js';
@@ -271,6 +280,12 @@ export async function init() {
   // ── Correcciones — "Todo corregido" → Dashboard de Calidad (alias) ──
   const btnGoQuality = document.getElementById('btnGoQuality');
   if (btnGoQuality) btnGoQuality.addEventListener('click', () => goStep('quality'));
+
+  // ── Correcciones — "Continuar a Exportación" tricolor (NUEVO, jul-2026) ──
+  // Ver nota de cabecera. Nunca bloquea la navegación — solo informa el
+  // estado; el gate real de exportación sigue viviendo en la pantalla
+  // Exportación, sin cambios.
+  document.getElementById('btnFixContinue')?.addEventListener('click', () => goStep('export'));
 
   // ── Exportación — modal de celebración ──
   document.getElementById('btnCelebrateClose')?.addEventListener('click', () => {
