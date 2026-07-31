@@ -446,6 +446,34 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
   }
   .fix-confirm-btn:hover{filter:brightness(1.1);transform:translateY(-1px)}
 
+/* ── Captura dinámica de marchamos (hasta 5) — NUEVO (jul-2026) ──
+   Tarjeta especial para la regla 'no_march' (ver ui.js →
+   _fixCardMarchamo()/MULTI_RULES). Arranca con un input, revela más
+   con "+ Agregar marchamo" hasta el máximo de posiciones vacías
+   (nunca más de 5), cada uno con su propio "✕" para quitarlo. La
+   interacción vive en core/app.js → handleFixCardClick(). */
+.fix-card-marchamo{align-items:flex-start}
+.fix-marchamo-wrap{flex:1;min-width:220px;display:flex;flex-direction:column;gap:8px}
+.fix-marchamo-rows{display:flex;flex-direction:column;gap:6px}
+.fix-marchamo-row{display:flex;align-items:center;gap:6px}
+.fix-marchamo-row .fix-input{flex:1}
+.fix-marchamo-remove{
+  width:26px;height:26px;flex-shrink:0;border-radius:8px;background:var(--surface-3);color:var(--text-3);
+  font-size:11px;display:flex;align-items:center;justify-content:center;transition:all .15s;
+}
+.fix-marchamo-remove:hover{background:var(--red-soft);color:var(--red)}
+.fix-marchamo-add{
+  align-self:flex-start;font-size:11px;font-weight:700;color:var(--amber-deep);background:none;
+  padding:4px 2px;transition:opacity .15s;
+}
+.fix-marchamo-add:hover:not(:disabled){text-decoration:underline}
+.fix-marchamo-add:disabled{opacity:.35;cursor:not-allowed;text-decoration:none}
+.fix-save-marchamo{
+  background:var(--green);color:#fff;padding:8px 16px;border-radius:9px;font-size:11.5px;font-weight:700;
+  display:flex;align-items:center;gap:6px;transition:all .15s;flex-shrink:0;align-self:flex-start;
+}
+.fix-save-marchamo:hover{filter:brightness(1.1);transform:translateY(-1px)}
+
 
 
 .fix-empty{text-align:center;padding:60px 20px;display:none}
