@@ -72,6 +72,27 @@ export async function processXLS(file) {
   // encabezado y se lee la celda cruda del worksheet directamente.
   const headerRow   = XLSX.utils.sheet_to_json(wsRuteo, { header: 1 })[0] || [];
   const fechaColIdx = headerRow.findIndex(h => String(h || '').trim().toUpperCase() === 'FECHA');
+
+  // ─────────────────────────────────────────────────────────────
+  // [FECHA DEBUG] — bloque TEMPORAL, retirar cuando se confirme la causa.
+  // Imprime las primeras 5 filas (no solo la primera) para ver si el
+  // problema es uniforme o varía fila por fila.
+  console.log('[FECHA DEBUG] fechaColIdx:', fechaColIdx, '— headerRow:', headerRow);
+  if (fechaColIdx > -1) {
+    for (let i = 0; i < Math.min(5, raw.length); i++) {
+      const addr = XLSX.utils.encode_cell({ r: i + 1, c: fechaColIdx });
+      const cell = wsRuteo[addr];
+      console.log(`[FECHA DEBUG] fila ${i} (${addr}):`, {
+        t: cell && cell.t,
+        v: cell && cell.v,
+        w: cell && cell.w,
+        v_getTime: cell && cell.v instanceof Date ? cell.v.getTime() : null,
+        v_ISOlocal: cell && cell.v instanceof Date ? cell.v.toString() : null
+      });
+    }
+  }
+  // ─────────────────────────────────────────────────────────────
+
   if (fechaColIdx > -1) {
     for (let i = 0; i < raw.length; i++) {
       const addr = XLSX.utils.encode_cell({ r: i + 1, c: fechaColIdx });
