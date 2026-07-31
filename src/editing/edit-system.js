@@ -23,6 +23,15 @@
  *        de inmediato si la corrección resolvió o no la incidencia,
  *        sin esperar a la siguiente acción del usuario.
  *
+ * CAMBIO (jul-2026 — regla SVE 'integrity'/K, descuento de exclusiones):
+ *   _revalidateAfterEdit() ahora pasa State.excludedCount como tercer
+ *   argumento a runSVE() (ver features/validation/sve.js), igual que
+ *   Events.triggerMerge() (ver events.js). State.excludedCount ya está
+ *   actualizado por la corrida de runMerge() más reciente —
+ *   _revalidateAfterEdit() solo re-valida tras una edición, no vuelve
+ *   a correr el merge, así que lee el valor correcto sin necesidad de
+ *   recalcularlo aquí.
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - escH (utils/dom.js)
@@ -258,7 +267,10 @@ document.getElementById('editDrawerRuta').textContent =
     UI.updateStats();
 
     const screenCount = State.xlsData ? State.xlsData.length : 0;
-    const sveResult = runSVE(State.merged, screenCount);
+    // CAMBIO (jul-2026): se pasa State.excludedCount, igual que
+    // Events.triggerMerge() — ver nota de cabecera de este archivo y
+    // de features/validation/sve.js (regla K).
+    const sveResult = runSVE(State.merged, screenCount, State.excludedCount);
     if (sveResult) {
       State.sveIssues = sveResult.issues;
       UI.renderSVE(sveResult.issues, sveResult.quality, sveResult.nCrit, sveResult.nWarn, sveResult.nInfo, sveResult.nPass);
