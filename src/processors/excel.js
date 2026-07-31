@@ -3,35 +3,27 @@
  * Lectura del Excel macro: hoja RUTEO NUEVO (rutas del día) y hoja
  * CONCENTRADO FACTURAS (datos de facturación) si existe.
  *
- * AJUSTE (jul-2026 — FECHA del archivo final, TERCER intento):
- *   Intento 1: manipular el objeto Date de `cellDates:true` (redondeo +
- *   lectura UTC) — seguía ambiguo porque ese Date ya nace ambiguo.
- *   Intento 2: usar el texto formateado `.w` de la celda (ej.
- *   "29/07/2026") asumiendo orden DÍA/MES — resultó ser el problema
- *   real: `.w` lo genera SheetJS a partir del CÓDIGO de formato guardado
- *   en el archivo (ej. "m/d/yyyy"), que muchas veces está en inglés
- *   (mes/día) aunque Excel lo muestre en pantalla como día/mes según el
- *   regional del sistema — SheetJS no hace esa relocalización, así que
- *   asumir un orden fijo era una apuesta que a veces perdía (mes
- *   inválido → JavaScript "rodaba" el calendario meses/años hacia
- *   adelante, el bug que se vio con la fecha saltando a 2028).
+ * DIAGNÓSTICO TEMPORAL (jul-2026 — FECHA del archivo final):
+ *   Después de tres intentos con el mismo resultado erróneo exacto
+ *   (06/05/2028), la explicación más probable es que la detección de
+ *   la columna FECHA en el encabezado NUNCA está encontrando la
+ *   columna (fechaColIdx = -1) — lo que significa que _FECHA_DMY y
+ *   _FECHA_TEXT nunca se llegan a asignar, y el archivo final sigue
+ *   cayendo en el camino ORIGINAL (el que ya tenía el bug desde el
+ *   principio), sin importar cuántas veces se cambie la lógica de
+ *   parseo — porque esa lógica nunca se ejecuta.
  *
- *   AHORA (intento 3, definitivo): se lee el número de serie CRUDO de
- *   la celda (`cell.v`, un entero/decimal sin ninguna interpretación de
- *   texto ni de zona horaria) y se decodifica con
- *   `XLSX.SSF.parse_date_code()` — la misma función interna que usa
- *   SheetJS para construir los objetos Date de `cellDates:true`, pero
- *   aquí se usa DIRECTO, devolviendo {y, m, d} sin pasar nunca por un
- *   objeto Date de JavaScript. Cero ambigüedad de zona horaria, cero
- *   ambigüedad de orden día/mes (el serial de Excel no tiene orden —
- *   es un conteo de días, no texto). Se guarda en
- *   `row._FECHA_DMY = { dd, mm, yyyy }`.
+ *   Este archivo agrega un console.log TEMPORAL que imprime:
+ *     - El encabezado completo detectado (headerRow)
+ *     - El índice de columna encontrado para "FECHA" (fechaColIdx)
+ *     - La celda cruda (tipo, valor, texto formateado) de la primera
+ *       fila de datos en esa columna
  *
- *   Si la celda NO es numérica (fue capturada como texto puro en el
- *   Excel), se guarda además `row._FECHA_TEXT` como respaldo de mejor
- *   esfuerzo — ver core/constants.js / features/export.js.
- *   `row['FECHA']` (el Date que usa fiscal-calendar.js/merge.js para
- *   SW/DIA) no se toca — sigue igual que siempre.
+ *   INSTRUCCIONES: carga tu Excel como siempre, abre la consola del
+ *   navegador (F12 → pestaña "Console") ANTES de soltar el archivo, y
+ *   copia/pega aquí el bloque que empieza con "[FECHA DEBUG]". Con eso
+ *   sabremos con certeza qué está pasando, en vez de seguir adivinando.
+ *   Este bloque de diagnóstico se retira en cuanto se confirme la causa.
  *
  * Dependencias:
  *   - XLSX (SheetJS, cargado globalmente desde el CDN en index.html)
@@ -69,28 +61,39 @@ export async function processXLS(file) {
   const wsRuteo = wb.Sheets[ruteoName];
   const raw     = XLSX.utils.sheet_to_json(wsRuteo, { defval: '' });
 
-  // ── FECHA — decodificada del serial crudo de la celda (ver nota de
-  // cabecera "AJUSTE (jul-2026 — FECHA del archivo final, TERCER
-  // intento)"). Se ubica la columna FECHA en el encabezado y se lee
-  // `cell.v`/`cell.t` directo de la celda cruda del worksheet — nunca
-  // el texto formateado, nunca un objeto Date.
+  // ── FECHA — con diagnóstico temporal (ver nota de cabecera). ──
   const headerRow   = XLSX.utils.sheet_to_json(wsRuteo, { header: 1 })[0] || [];
   const fechaColIdx = headerRow.findIndex(h => String(h || '').trim().toUpperCase() === 'FECHA');
+
+  // ─────────────────────────────────────────────────────────────
+  // [FECHA DEBUG] — bloque temporal, retirar cuando se confirme la causa
+  console.log('[FECHA DEBUG] Hoja detectada como RUTEO NUEVO:', ruteoName);
+  console.log('[FECHA DEBUG] headerRow completo:', headerRow);
+  console.log('[FECHA DEBUG] fechaColIdx encontrado:', fechaColIdx);
+  if (fechaColIdx > -1) {
+    const addr0 = XLSX.utils.encode_cell({ r: 1, c: fechaColIdx });
+    const cell0 = wsRuteo[addr0];
+    console.log('[FECHA DEBUG] addr primera fila de datos:', addr0);
+    console.log('[FECHA DEBUG] celda cruda completa:', cell0);
+    console.log('[FECHA DEBUG]   cell.t (tipo):', cell0 && cell0.t);
+    console.log('[FECHA DEBUG]   cell.v (valor crudo):', cell0 && cell0.v);
+    console.log('[FECHA DEBUG]   cell.w (texto formateado):', cell0 && cell0.w);
+  } else {
+    console.log('[FECHA DEBUG] ⚠ No se encontró "FECHA" en el encabezado — por eso el fix nunca se aplica.');
+  }
+  console.log('[FECHA DEBUG] raw[0][\'FECHA\'] (lo que ya lee sheet_to_json normal):', raw[0] && raw[0]['FECHA']);
+  console.log('[FECHA DEBUG] typeof raw[0][\'FECHA\']:', raw[0] && typeof raw[0]['FECHA']);
+  // ─────────────────────────────────────────────────────────────
+
   if (fechaColIdx > -1) {
     for (let i = 0; i < raw.length; i++) {
       const addr = XLSX.utils.encode_cell({ r: i + 1, c: fechaColIdx });
       const cell = wsRuteo[addr];
       if (!cell) continue;
       if (cell.t === 'n' && typeof cell.v === 'number') {
-        // Celda de fecha real (serial numérico de Excel) — se decodifica
-        // con el propio algoritmo de SheetJS (ya resuelve el bug del año
-        // 1900 de Excel), sin texto localizado y sin objeto Date.
         const dc = XLSX.SSF.parse_date_code(cell.v);
         if (dc) raw[i]['_FECHA_DMY'] = { dd: dc.d, mm: dc.m, yyyy: dc.y };
       } else if (cell.w) {
-        // Respaldo — la celda no es numérica (texto capturado a mano).
-        // Se guarda el texto tal cual para intentar parsearlo en el
-        // export (ver features/export.js), mejor esfuerzo.
         raw[i]['_FECHA_TEXT'] = String(cell.w).trim();
       }
     }
