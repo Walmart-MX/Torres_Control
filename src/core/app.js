@@ -71,6 +71,22 @@
  *   bloquea el click — el gate real de exportación sigue viviendo,
  *   sin cambios, en la pantalla Exportación.
  *
+ * CAMBIO (jul-2026 — captura dinámica de hasta 5 marchamos):
+ *   handleFixCardClick() gana tres manejos nuevos para la tarjeta
+ *   .fix-card-marchamo (ver ui.js → _fixCardMarchamo()/MULTI_RULES):
+ *   "+ Agregar marchamo" (revela el siguiente input, hasta el máximo
+ *   de slots vacíos que trae la tarjeta en data-fix-slots), "✕" por
+ *   fila agregada (la quita y reactiva el botón de agregar si estaba
+ *   deshabilitado por haber llegado al máximo), y "✓ Guardar" (junta
+ *   los valores no vacíos de todos los inputs de la tarjeta y llama a
+ *   EditSystem.quickFixMulti()). Los tres viven en el mismo listener
+ *   delegado que ya existía sobre #fixList/#fixInfoList — ningún
+ *   listener nuevo agregado al DOM. Deliberadamente usan clases CSS
+ *   propias (.fix-marchamo-add/.fix-marchamo-remove/.fix-save-
+ *   marchamo) distintas de .fix-save/.fix-review-btn para no colisionar
+ *   con los checks existentes de esas clases más abajo en el mismo
+ *   handler.
+ *
  * Dependencias: todos los módulos de la aplicación.
  */
 import { State } from './state.js';
@@ -258,6 +274,61 @@ export async function init() {
       const dette = confirmBtn.dataset.confirmDette;
       if (!confirm(`¿Confirmas que la entrega ${dette || '—'} de la ruta ${ruta} NO se realizará?\n\nSe eliminará por completo del archivo final y del historial de Supabase — esta acción no se puede deshacer una vez exportado el día.`)) return;
       Events.confirmExcludedDette(ruta, dette);
+      return;
+    }
+    // NUEVO (jul-2026) — ver nota de cabecera "CAMBIO (jul-2026 —
+    // captura dinámica de hasta 5 marchamos)". Los tres checks de la
+    // tarjeta .fix-card-marchamo van ANTES de .fix-save/.fix-review-btn
+    // por prolijidad, aunque no colisionan (clases CSS distintas).
+    const addMarchBtn = e.target.closest('[data-fix-role="add-marchamo"]');
+    if (addMarchBtn) {
+      const card     = addMarchBtn.closest('.fix-card-marchamo');
+      const rowsWrap = card.querySelector('[data-fix-role="rows"]');
+      const slots    = JSON.parse(card.dataset.fixSlots || '[]');
+      const current  = rowsWrap.querySelectorAll('.fix-marchamo-row').length;
+      if (current >= slots.length) return; // ya se alcanzó el máximo de slots vacíos disponibles
+      const nextSlot = slots[current];
+      const row = document.createElement('div');
+      row.className = 'fix-marchamo-row';
+      row.dataset.slot = nextSlot;
+      row.innerHTML =
+        `<input class="fix-input fix-marchamo-input" data-field="${nextSlot}" placeholder="Número de marchamo…">` +
+        `<button type="button" class="fix-marchamo-remove" data-fix-role="remove-marchamo">✕</button>`;
+      rowsWrap.appendChild(row);
+      row.querySelector('input').focus();
+      if (current + 1 >= slots.length) addMarchBtn.disabled = true;
+      return;
+    }
+    const removeMarchBtn = e.target.closest('[data-fix-role="remove-marchamo"]');
+    if (removeMarchBtn) {
+      const card = removeMarchBtn.closest('.fix-card-marchamo');
+      removeMarchBtn.closest('.fix-marchamo-row').remove();
+      // Al liberar un slot, el botón "+ Agregar" (si estaba
+      // deshabilitado por haber llegado al máximo) vuelve a habilitarse.
+      const addBtn = card.querySelector('[data-fix-role="add-marchamo"]');
+      if (addBtn) addBtn.disabled = false;
+      return;
+    }
+    const saveMarchBtn = e.target.closest('[data-fix-role="save-marchamo"]');
+    if (saveMarchBtn) {
+      const card   = saveMarchBtn.closest('.fix-card-marchamo');
+      const inputs = card.querySelectorAll('.fix-marchamo-input');
+      const fields = {};
+      inputs.forEach(inp => {
+        const val = inp.value.trim();
+        if (val) fields[inp.dataset.field] = val;
+      });
+      if (!Object.keys(fields).length) {
+        // Ningún campo capturado — no hay nada que guardar. Se marca el
+        // primer input como pista visual (mismo patrón que fix-input-
+        // error de la tarjeta quick), sin bloquear ni exigir un mínimo:
+        // los campos siguen siendo opcionales, esto es solo feedback.
+        const first = card.querySelector('.fix-marchamo-input');
+        if (first) { first.focus(); first.classList.add('fix-input-error'); }
+        return;
+      }
+      const rowIds = JSON.parse(card.dataset.fixRowids || '[]');
+      EditSystem.quickFixMulti(rowIds, fields);
       return;
     }
     const saveBtn = e.target.closest('.fix-save');
