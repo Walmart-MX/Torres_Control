@@ -32,6 +32,14 @@
  *   a correr el merge, así que lee el valor correcto sin necesidad de
  *   recalcularlo aquí.
  *
+ * CAMBIO (jul-2026 — captura dinámica de hasta 5 marchamos):
+ *   Se agrega quickFixMulti(rowIds, fields) — hermano de quickFix()
+ *   pero aplica VARIOS campos a la vez con un timestamp compartido
+ *   (ver ui.js → _fixCardMarchamo()/MULTI_RULES). Reutiliza
+ *   applyFieldEdit() por cada campo, así que la propagación de
+ *   licencia y el recálculo de _wtmsAmbiguous (si aplicaran) siguen
+ *   siendo el único lugar que los define — sin duplicar lógica.
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - escH (utils/dom.js)
@@ -302,6 +310,37 @@ document.getElementById('editDrawerRuta').textContent =
     const applied = EditSystem.applyFieldEdit(rowIds, field, val);
     if (applied) EditSystem._revalidateAfterEdit();
     return applied;
+  },
+
+  /**
+   * Punto de entrada de la tarjeta de "corrección múltiple" en
+   * Correcciones — NUEVO (jul-2026, captura dinámica de hasta 5
+   * marchamos, ver ui.js → _fixCardMarchamo()/MULTI_RULES). Hermano de
+   * quickFix(), pero aplica VARIOS campos a la vez con un solo
+   * timestamp compartido — reutiliza applyFieldEdit() por cada campo,
+   * sin duplicar la lógica de propagación/auditoría que ya vive ahí.
+   *
+   * Campos vacíos se ignoran por completo (nunca llegan a
+   * applyFieldEdit) — consistente con "todos los campos son
+   * opcionales" del requerimiento de captura de marchamos. Solo se
+   * revalida una vez al final, aunque se hayan aplicado varios campos.
+   *
+   * @param {string[]} rowIds — _rowId de las filas a editar
+   * @param {Object<string,string>} fields — { 'MARCHAMO 1': '12345', 'MARCHAMO 2': '67890', ... }
+   *   claves = nombre de campo en State.merged, valores = texto capturado por el usuario
+   * @returns {boolean} true si se aplicó al menos un cambio real
+   */
+  quickFixMulti(rowIds, fields) {
+    const ts = new Date().toLocaleString('es-MX');
+    let appliedAny = false;
+    Object.entries(fields || {}).forEach(([field, rawVal]) => {
+      const val = String(rawVal || '').trim();
+      if (!val) return; // campo vacío — se ignora, nunca se envía a applyFieldEdit
+      const applied = EditSystem.applyFieldEdit(rowIds, field, val, { ts });
+      if (applied) appliedAny = true;
+    });
+    if (appliedAny) EditSystem._revalidateAfterEdit();
+    return appliedAny;
   },
 
   saveAndRevalidate() {
