@@ -388,6 +388,23 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 .fix-progress-track{flex:1;min-width:160px;height:6px;border-radius:100px;background:var(--surface-3);overflow:hidden}
 .fix-progress-fill{height:100%;border-radius:100px;background:linear-gradient(90deg,var(--red),var(--amber),var(--green));transition:width .5s ease}
 
+/* ── Botón "Continuar a Exportación" tricolor — NUEVO (jul-2026) ──
+   Vive en la cabecera de Correcciones (#fix-hd), a la derecha del
+   contador/barra de progreso. Su color/texto se calculan en
+   UI._updateFixContinueBtn() (ui.js) a partir de State.sveHasCritical/
+   sveHasWarnings — el mismo criterio que ya usa exportGate. NUNCA
+   bloquea el click: es puramente informativo, el gate real que impide
+   exportar con críticos sigue viviendo en la pantalla Exportación. */
+.fix-continue-btn{
+  margin-left:auto;font-size:12.5px;padding:11px 20px;border-radius:10px;font-weight:700;
+  color:#fff;transition:all .15s;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;
+}
+.fix-continue-btn:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.07)}
+.fix-continue-btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important}
+.fix-continue-btn.ok{background:var(--green)}
+.fix-continue-btn.warn{background:var(--amber);color:#1A0F00}
+.fix-continue-btn.crit{background:var(--red)}
+
 .fix-list{display:flex;flex-direction:column;gap:10px}
 .fix-card{
   display:flex;align-items:center;gap:16px;padding:14px 18px;background:var(--surface);
@@ -882,6 +899,11 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
           <div class="fix-counter-label">incidencias pendientes</div>
         </div>
         <div class="fix-progress-track"><div class="fix-progress-fill" id="fixProgress" style="width:0%"></div></div>
+        <!-- Botón tricolor "Continuar a Exportación" — NUEVO (jul-2026).
+             Color/texto gobernados por UI._updateFixContinueBtn() (ui.js),
+             llamada desde renderFixList(). Nunca bloquea la navegación —
+             es informativo; el gate real vive en la pantalla Exportación. -->
+        <button class="fix-continue-btn ok" id="btnFixContinue" disabled>Continuar a Exportación →</button>
       </div>
 
       <div class="fix-list" id="fixList"></div>
