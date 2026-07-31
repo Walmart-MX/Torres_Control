@@ -92,6 +92,49 @@
  *   acción y vuelve a pintar tras el resultado (mismo patrón que
  *   EditSystem.quickFix()).
  *
+ * CAMBIO (jul-2026 — botón "Continuar a Exportación" tricolor):
+ *   Se agrega _updateFixContinueBtn() — NUEVO. Pinta un botón fijo en
+ *   la cabecera de Correcciones (#btnFixContinue, ver index.html) cuyo
+ *   color/texto reflejan el estado real de las incidencias, reusando
+ *   exactamente el mismo criterio que ya gobierna exportGate/
+ *   renderExportScreen (State.sveHasCritical/sveHasWarnings) — ninguna
+ *   fuente de verdad nueva. Este botón NUNCA bloquea la navegación: el
+ *   gate real que impide exportar con críticos sigue viviendo en la
+ *   pantalla Exportación (renderSVE()/setActionsEnabled()), sin
+ *   cambios — su único propósito es que el usuario decida
+ *   conscientemente si continúa o vuelve a revisar. Se invoca desde
+ *   renderFixList(), que ya se llama en todos los momentos relevantes
+ *   (triggerMerge, _revalidateAfterEdit, resetAll) — no se agrega
+ *   ningún call-site nuevo.
+ *
+ * CAMBIO (jul-2026 — captura dinámica de hasta 5 marchamos):
+ *   La regla SVE 'no_march' ganaba antes una tarjeta "quick" genérica
+ *   con UN solo input (mapeado siempre a MARCHAMO 1) — insuficiente
+ *   quie una entrega real puede traer hasta 5 marchamos. Se agrega:
+ *     - MULTI_RULES (Set) — reglas que necesitan MÁS de un campo
+ *       dinámico en vez de un input fijo. Hoy solo 'no_march'. Se
+ *       evalúa ANTES que QUICKFIX_RULES en _buildFixBuckets(), que
+ *       gana un cuarto bucket `multi`.
+ *     - _fixCardMarchamo(issue) — tarjeta nueva: arranca con 1 input,
+ *       botón "+ Agregar marchamo" revela más (hasta 5), cada uno con
+ *       su propio "✕" para quitarlo. Los slots ofrecidos
+ *       (MARCHAMO 1..5) se calculan a partir de State.merged en el
+ *       momento de renderizar — SOLO se ofrecen las posiciones que
+ *       están vacías en la fila real, nunca se sobreescribe un
+ *       marchamo que el PDF ya capturó correctamente en otra posición.
+ *     - El guardado usa EditSystem.quickFixMulti() (editing/edit-
+ *       system.js) — aplica varios campos a la vez con un solo
+ *       timestamp compartido, reutilizando applyFieldEdit() por cada
+ *       uno (misma auditoría/propagación que quickFix(), sin duplicar
+ *       lógica). Los inputs vacíos se ignoran por completo — nunca se
+ *       envían a applyFieldEdit(), consistente con "todos los campos
+ *       son opcionales".
+ *   La interacción de agregar/quitar filas y el listener del botón
+ *   "✓ Guardar" de esta tarjeta viven en core/app.js
+ *   (handleFixCardClick), mismo contenedor delegado que ya manejaba
+ *   las otras variantes de tarjeta — no se agrega ningún listener
+ *   nuevo al DOM.
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - escH (utils/dom.js)
@@ -713,6 +756,40 @@ export const UI = {
       </div>`;
   },
 
+  /**
+   * Actualiza color y texto del botón "Continuar a Exportación" de
+   * Correcciones — NUEVO (jul-2026). Reutiliza exactamente el mismo
+   * criterio que ya gobierna exportGate/renderExportScreen
+   * (State.sveHasCritical/sveHasWarnings) — ninguna fuente de verdad
+   * nueva. Este botón NUNCA bloquea la navegación: el gate real que
+   * impide exportar con críticos sigue viviendo en la pantalla
+   * Exportación (renderSVE()/setActionsEnabled()), sin cambios. Su
+   * único propósito es que el usuario decida conscientemente si
+   * continúa o vuelve a revisar.
+   * @private
+   */
+  _updateFixContinueBtn() {
+    const btn = document.getElementById('btnFixContinue');
+    if (!btn) return;
+    if (!State.merged.length) {
+      btn.className = 'fix-continue-btn ok';
+      btn.disabled  = true;
+      btn.textContent = 'Continuar a Exportación →';
+      return;
+    }
+    btn.disabled = false;
+    if (State.sveHasCritical) {
+      btn.className   = 'fix-continue-btn crit';
+      btn.textContent = '⚠ Continuar a Exportación (pendientes críticos) →';
+    } else if (State.sveHasWarnings) {
+      btn.className   = 'fix-continue-btn warn';
+      btn.textContent = '⚠ Continuar a Exportación (con advertencias) →';
+    } else {
+      btn.className   = 'fix-continue-btn ok';
+      btn.textContent = '✓ Continuar a Exportación →';
+    }
+  },
+
   /** Pinta la pantalla completa de Correcciones — contador, barra de progreso, lista de tarjetas y la sección aparte de Cita. */
   renderFixList() {
     const list      = document.getElementById('fixList');
@@ -725,6 +802,11 @@ export const UI = {
     const infoWrap  = document.getElementById('fixInfoSection');
     const infoList  = document.getElementById('fixInfoList');
     if (!list || !counter || !progress) return;
+
+    // NUEVO (jul-2026) — ver nota de cabecera. Se actualiza en cada
+    // paso por este método (cubre triggerMerge, _revalidateAfterEdit,
+    // resetAll — todos los puntos que ya llaman renderFixList()).
+    UI._updateFixContinueBtn();
 
     const { ok } = Events ? Events.checkSources() : { ok: true };
 
@@ -1402,6 +1484,7 @@ export const UI = {
     State.despData = new Map();
     State.wtmsData = new Map();   // FIX: faltaba en el reset original — bug latente desde que se agregó WTMS
     State.excludedDettes = new Set();
+    State.excludedCount  = 0;
     State.merged   = [];
     State.sveIssues = [];
     State.sveHasCritical = false;
