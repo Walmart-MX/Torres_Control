@@ -89,9 +89,16 @@ export async function processXLS(file) {
         raw[i]['_FECHA_DMY'] = { dd: safe.getDate(), mm: safe.getMonth() + 1, yyyy: safe.getFullYear() };
       } else if (cell.t === 'n' && typeof cell.v === 'number') {
         // Respaldo — celda con serial numérico puro (sin tipo 'd').
-        // Se decodifica con el propio algoritmo de SheetJS, sin texto
-        // ni ambigüedad de orden día/mes.
-        const dc = XLSX.SSF.parse_date_code(cell.v);
+        // MISMO problema de imprecisión de punto flotante que en la
+        // rama 'd' de arriba: el serial casi nunca es un entero exacto
+        // (ej. 46237.99995 en vez de 46238). XLSX.SSF.parse_date_code()
+        // trunca la parte entera — sin redondear primero, un serial a
+        // punto de cumplir el día siguiente se decodifica como el día
+        // ANTERIOR completo (justo el bug de "un día antes" detectado).
+        // Se redondea al entero más cercano ANTES de decodificar —
+        // elimina el margen sin importar su dirección, igual que el
+        // desplazamiento +12h de la rama 'd'.
+        const dc = XLSX.SSF.parse_date_code(Math.round(cell.v));
         if (dc) raw[i]['_FECHA_DMY'] = { dd: dc.d, mm: dc.m, yyyy: dc.y };
       } else if (cell.w) {
         // Último respaldo — celda de texto puro (sin valor de fecha
