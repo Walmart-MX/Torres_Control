@@ -41,7 +41,7 @@
  *   screenCount) recibe el conteo como PARÁMETRO — ver detalle abajo en
  *   la regla K.
  *
- * CAMBIO (integridad de datos — jul-2026, "bug del marchamo heredado"):
+ * CAMBIO (jul-2026 — integridad de datos, "bug del marchamo heredado"):
  *   Se detectó que un marchamo con formato inválido en el PDF podía
  *   provocar que la entrega heredara marchamo Y factura de OTRA entrega
  *   de la misma ruta (ver processors/merge.js y processors/pdf.js para
@@ -129,6 +129,28 @@
  *       ui.js → CONFIRM_RULES / _fixCardConfirm() y
  *       events.js → confirmExcludedDette()).
  *
+ * CAMBIO (jul-2026 — regla K, mensaje de discrepancia y descuento de
+ * exclusiones confirmadas):
+ *   1) "rutas" → "entregas": el conteo real que compara esta regla es
+ *      de FILAS de RUTEO NUEVO (State.xlsData.length, una fila = una
+ *      entrega) contra State.merged.length — nunca fue un conteo de
+ *      rutas (una ruta puede tener varias entregas). El mensaje ahora
+ *      refleja lo que realmente se está comparando.
+ *   2) Se agrega el parámetro `excludedCount` (ver core/state.js →
+ *      State.excludedCount, calculado en processors/merge.js): cuando
+ *      el usuario confirma que una entrega sin PDF "no se realizará"
+ *      (ver events.js → confirmExcludedDette()), esa entrega se filtra
+ *      deliberadamente ANTES de llegar a State.merged — antes, la
+ *      regla K no lo sabía y generaba una alerta CRÍTICA falsa
+ *      ("discrepancia") justo en el caso que EduarDo describe como
+ *      normal y esperado (DETTE cancelada y confirmada). Ahora se
+ *      descuenta excludedCount de screenCount antes de comparar: si la
+ *      diferencia se explica POR COMPLETO por exclusiones confirmadas,
+ *      no se genera ninguna incidencia. Si sigue habiendo una
+ *      diferencia no explicada, la alerta crítica se conserva sin
+ *      cambios — sigue siendo la señal correcta de un problema real
+ *      (ej. recarga de página a medio proceso).
+ *
  * Dependencias:
  *   - State (core/state.js) — lee rows ya vía parámetro, pero escribe
  *     State.sveHasCritical / sveHasWarnings / sveLastQuality
@@ -152,17 +174,26 @@ export const SVE_ICONS = {
  * Ejecuta las reglas de validación sobre las rows del merge.
  *
  * @param {Array<object>} rows — normalmente State.merged
- * @param {number} [screenCount] — conteo de rutas que el caller
+ * @param {number} [screenCount] — conteo de entregas que el caller
  *   considera "lo que muestra la pantalla" (típicamente
- *   State.xlsData.length) — usado únicamente por la regla K
- *   (integridad UI vs memoria). Si se omite, la regla K no se evalúa.
+ *   State.xlsData.length, una fila de RUTEO NUEVO = una entrega) —
+ *   usado únicamente por la regla K (integridad UI vs memoria). Si se
+ *   omite, la regla K no se evalúa.
+ * @param {number} [excludedCount] — NUEVO (jul-2026): entregas
+ *   excluidas por el usuario (ver Events.confirmExcludedDette /
+ *   State.excludedCount) que se filtraron en ESTA corrida de
+ *   runMerge() antes de llegar a `rows`. Se resta de screenCount antes
+ *   de comparar contra rows.length — una diferencia que se explica por
+ *   completo con exclusiones confirmadas ya NO es una discrepancia
+ *   real, es el comportamiento esperado (ver core/state.js →
+ *   excludedCount).
  * @returns {null|{
  *   issues: Array<object>,
  *   quality: number,
  *   nCrit: number, nWarn: number, nInfo: number, nPass: number
  * }} — null si rows está vacío (el caller debe llamar UI.resetSVE() en ese caso)
  */
-export function runSVE(rows, screenCount) {
+export function runSVE(rows, screenCount, excludedCount) {
   if (!rows || !rows.length) return null;
 
   const raw = [];
@@ -558,11 +589,25 @@ export function runSVE(rows, screenCount) {
 
   // K: Integridad "pantalla" vs memoria — ver nota de cabecera "Fix regla K".
   // screenCount llega como parámetro (antes se leía de #bdgXLS en el DOM).
-  if (screenCount && screenCount !== rows.length)
-    rawAdd(SVE_CRIT,'integrity','','CONTEO',
-      `Discrepancia: se esperaban ${screenCount} rutas del Excel, memoria contiene ${rows.length}.`,
-      'Recarga la página y vuelve a procesar los archivos.',
-      `Excel:${screenCount}/MEM:${rows.length}`);
+  // CAMBIO (jul-2026): 1) "rutas" → "entregas" en el mensaje (ver nota de
+  // cabecera "CAMBIO (jul-2026 — regla K...)"; 2) se descuentan las
+  // exclusiones confirmadas por el usuario en ESTA corrida (excludedCount,
+  // ver merge.js/state.js) antes de comparar — una DETTE cancelada y
+  // confirmada por el usuario reduce legítimamente el conteo esperado; no
+  // es un error del sistema y no debe bloquear la exportación con una
+  // alerta crítica falsa.
+  if (screenCount) {
+    const expected = screenCount - (excludedCount || 0);
+    if (expected !== rows.length) {
+      const exclNote = excludedCount
+        ? ` (${screenCount} del Excel − ${excludedCount} excluida${excludedCount > 1 ? 's' : ''} confirmada${excludedCount > 1 ? 's' : ''})`
+        : '';
+      rawAdd(SVE_CRIT,'integrity','','CONTEO',
+        `Discrepancia: se esperaban ${expected} entrega${expected !== 1 ? 's' : ''}${exclNote}, memoria contiene ${rows.length}.`,
+        'Recarga la página y vuelve a procesar los archivos.',
+        `Excel:${expected}/MEM:${rows.length}`);
+    }
+  }
 
   // ── DEDUP ENGINE ──
   const seen = new Set();
