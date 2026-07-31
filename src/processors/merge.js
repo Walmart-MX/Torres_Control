@@ -77,6 +77,20 @@
  * fieles a la decisión del usuario — sin duplicar la lógica de
  * exclusión en esos dos módulos.
  *
+ * CAMBIO (jul-2026 — contador de exclusiones para la regla SVE
+ * 'integrity'/K): se agrega State.excludedCount, reiniciado a 0 al
+ * inicio de cada runMerge() e incrementado cada vez que el filtro de
+ * excludedDettes descarta una fila EN ESTA CORRIDA. No se reutiliza
+ * State.excludedDettes.size directamente para esto porque ese Set
+ * puede acumular claves de días operativos anteriores que ya no
+ * aplican al Excel cargado ahora — excludedCount solo cuenta lo que
+ * se excluyó AHORA. Consumido por features/validation/sve.js (regla K)
+ * vía el nuevo parámetro de runSVE(rows, screenCount, excludedCount) —
+ * ver events.js/edit-system.js. No cambia en absoluto la lógica de
+ * QUÉ filas se excluyen ni cómo se exportan — es puramente informativo
+ * para que el SVE pueda explicar una discrepancia de conteo legítima
+ * (DETTE cancelada y confirmada) sin generar una alerta crítica falsa.
+ *
  * FIX (jul-2026) — motores existentes que nunca se invocaban:
  *   Tres módulos ya escritos y correctos (enrichment-engine.js,
  *   fiscal-calendar.js) más el cruce con el Reporte WTMS nunca se
@@ -127,7 +141,7 @@
  *
  * Dependencias:
  *   - State (core/state.js) — lee varias propiedades, escribe State.merged,
- *     State.catalogIndices, State.catalogDuplicates
+ *     State.catalogIndices, State.catalogDuplicates, State.excludedCount
  *   - COL_RUTA, COL_DETTE_E, COL_DETTE_F, COL_FACT, MAX_MARCH (core/constants.js)
  *   - FactCache (features/fact-cache.js) — fallback de facturas históricas
  *   - normOp (utils/format.js) — normaliza el nombre de operador para
@@ -157,12 +171,16 @@ const DIA_NAMES = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','S
  * ningún PDF cargado (guard clause idéntica al original).
  * Efecto secundario: reemplaza State.merged con el resultado del cruce,
  * refresca State.catalogIndices/State.catalogDuplicates (usados por
- * sve.js, regla N), y sincroniza el Centro de Mantenimiento con los
- * misses de catálogo de esta corrida (ver nota de cabecera).
+ * sve.js, regla N), State.excludedCount (usado por sve.js, regla K), y
+ * sincroniza el Centro de Mantenimiento con los misses de catálogo de
+ * esta corrida (ver nota de cabecera).
  */
 export function runMerge() {
   if (!State.xlsData || State.pdfData.size === 0) return;
   State.merged = [];
+  // Reiniciado en cada corrida — ver nota de cabecera "CAMBIO (jul-2026
+  // — contador de exclusiones...)".
+  State.excludedCount = 0;
 
   // Índices de catálogos maestros — UNA VEZ por corrida, no por fila
   // (ver enrichment-engine.js). También detecta llaves duplicadas
@@ -189,7 +207,14 @@ export function runMerge() {
     // compara contra detteE, el mismo campo que sve.js lee vía
     // getMapped(r,'DET') (DET → row['DETTE'], ver COL_MAP en
     // constants.js) para construir la clave del issue 'dette_sin_pdf'.
-    if (State.excludedDettes.has(ruta + '||' + detteE)) continue;
+    if (State.excludedDettes.has(ruta + '||' + detteE)) {
+      // CAMBIO (jul-2026) — ver nota de cabecera "contador de
+      // exclusiones". No cambia el comportamiento de filtrado, solo
+      // deja constancia de cuántas filas se excluyeron en ESTA corrida
+      // para que sve.js (regla K) pueda descontarlas honestamente.
+      State.excludedCount++;
+      continue;
+    }
 
     let pdfRow = null, pdfMatchType = 'none', pdfAmbiguous = false, pdfDetteAusente = false;
     if (factXls) { const r = State.pdfData.get(ruta + '|' + factXls); if (r) { pdfRow = r; pdfMatchType = 'specific'; } }
