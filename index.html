@@ -451,12 +451,19 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
    _fixCardMarchamo()/MULTI_RULES). Arranca con un input, revela más
    con "+ Agregar marchamo" hasta el máximo de posiciones vacías
    (nunca más de 5), cada uno con su propio "✕" para quitarlo. La
-   interacción vive en core/app.js → handleFixCardClick(). */
+   interacción vive en core/app.js → handleFixCardClick().
+   AJUSTE (jul-2026 — feedback estético): un marchamo son máximo 6
+   caracteres — el input NO debe estirarse a lo ancho de la tarjeta
+   como el resto de los campos de texto libre (Operador, Cita, etc.).
+   .fix-marchamo-rows ahora es fila (flex-wrap), cada input tiene un
+   ancho fijo y compacto en vez de heredar flex:1 de .fix-input. */
 .fix-card-marchamo{align-items:flex-start}
-.fix-marchamo-wrap{flex:1;min-width:220px;display:flex;flex-direction:column;gap:8px}
-.fix-marchamo-rows{display:flex;flex-direction:column;gap:6px}
-.fix-marchamo-row{display:flex;align-items:center;gap:6px}
-.fix-marchamo-row .fix-input{flex:1}
+.fix-marchamo-wrap{display:flex;flex-direction:column;gap:8px;flex:0 1 auto}
+.fix-marchamo-rows{display:flex;flex-wrap:wrap;gap:8px}
+.fix-marchamo-row{display:inline-flex;align-items:center;gap:4px}
+.fix-marchamo-row .fix-input.fix-marchamo-input{
+  flex:0 0 auto;width:104px;text-align:center;letter-spacing:.03em;padding:8px 10px;
+}
 .fix-marchamo-remove{
   width:26px;height:26px;flex-shrink:0;border-radius:8px;background:var(--surface-3);color:var(--text-3);
   font-size:11px;display:flex;align-items:center;justify-content:center;transition:all .15s;
@@ -787,7 +794,7 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
     <section class="screen active" data-screen="prep">
       <div class="screen-hd">
         <div>
-          <div class="eyebrow">Paso 1 de 5</div>
+          <div class="eyebrow">Paso 1 de 3</div>
           <div class="screen-title">Preparación del día operativo</div>
           <div class="screen-sub">Carga las 4 fuentes del día — SmartDispatch valida y cruza todo automáticamente.</div>
         </div>
@@ -866,7 +873,11 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
       </div>
 
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-bottom:26px">
-        <button class="btn btn-amber" id="btnGoTable">Continuar a la Mesa de Trabajo →</button>
+        <!-- CAMBIO (jul-2026 — Etapa 4): navega directo a Correcciones,
+             ver core/app.js (listener de #btnGoTable) y la nota de
+             cabecera "simplificación del flujo, Etapa 4". El id del
+             botón se conserva tal cual para minimizar el diff en JS. -->
+        <button class="btn btn-amber" id="btnGoTable">Continuar a Correcciones →</button>
       </div>
 
       <!-- Vista contraída — se muestra automáticamente cuando las 4 fuentes ya están cargadas -->
@@ -879,14 +890,20 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
     </section>
 
     <!-- ══════════ MESA DE TRABAJO ══════════ -->
+    <!-- CAMBIO (jul-2026 — Etapa 4): ya no es un paso numerado del
+         flujo diario — sigue siendo una pantalla completa y funcional
+         (búsqueda/edición de CUALQUIER registro, no solo los que
+         tienen incidencias), pero se accede desde Administración
+         (ver botón "📋 Mesa de Trabajo" con data-admin-goto="table"
+         más abajo) en vez de ser un paso obligatorio del stepper. -->
     <section class="screen" data-screen="table">
       <div class="screen-hd">
         <div>
-          <div class="eyebrow">Paso 2 de 5</div>
+          <div class="eyebrow">🗂️ Vista completa · acceso desde Administración</div>
           <div class="screen-title">Mesa de trabajo</div>
           <div class="screen-sub" id="worktableSub">Carga las 4 fuentes en Preparación para comenzar.</div>
         </div>
-        <button class="btn btn-primary" id="btnGoFix">Ir a Correcciones →</button>
+        <button class="btn btn-primary" id="btnGoFix">← Volver a Correcciones</button>
       </div>
 
       <div class="toolbar">
@@ -915,10 +932,15 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
     <section class="screen" data-screen="fix">
       <div class="screen-hd">
         <div>
-          <div class="eyebrow">Paso 3 de 5</div>
+          <div class="eyebrow">Paso 2 de 3</div>
           <div class="screen-title">Correcciones</div>
           <div class="screen-sub">Resuelve cada incidencia sin salir de esta pantalla — un campo, un valor, listo.</div>
         </div>
+        <!-- Acceso SIEMPRE visible a Calidad — NUEVO (jul-2026, Etapa 4).
+             Mismo destino que #btnGoQuality (más abajo, dentro del
+             estado "todo corregido"), pero disponible en todo momento
+             — antes solo aparecía cuando ya no quedaban incidencias. -->
+        <button class="btn btn-ghost btn-sm" id="btnGoQualityHeader">📊 Ver detalle de calidad →</button>
       </div>
 
       <div class="fix-hd">
@@ -958,10 +980,16 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
     </section>
 
     <!-- ══════════ CALIDAD ══════════ -->
+    <!-- CAMBIO (jul-2026 — Etapa 4): ya no es un paso numerado del
+         flujo diario — el contador/progreso y el botón tricolor de
+         Correcciones ya cubren la decisión de "¿puedo exportar?" en
+         el día a día. Este dashboard sigue completo y accesible desde
+         el nuevo botón "📊 Ver detalle de calidad" en la cabecera de
+         Correcciones, y también desde el estado "todo corregido". -->
     <section class="screen" data-screen="quality">
       <div class="screen-hd">
         <div>
-          <div class="eyebrow">Paso 4 de 5</div>
+          <div class="eyebrow">📊 Detalle de calidad · acceso desde Correcciones</div>
           <div class="screen-title">Dashboard de calidad</div>
           <div class="screen-sub">Revisa el resultado antes de exportar el día operativo.</div>
         </div>
@@ -1000,7 +1028,7 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
     <section class="screen" data-screen="export">
       <div class="screen-hd">
         <div>
-          <div class="eyebrow">Paso 5 de 5</div>
+          <div class="eyebrow">Paso 3 de 3</div>
           <div class="screen-title">Exportación</div>
           <div class="screen-sub">Genera el Excel unificado del día y guárdalo en el historial permanente.</div>
         </div>
@@ -1038,6 +1066,13 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 
       <div class="admin-layout">
         <div class="admin-nav" id="adminNav">
+          <!-- NUEVO (jul-2026 — Etapa 4): acceso directo a Mesa de
+               Trabajo — ver core/app.js (listener de #adminNav,
+               chequeo de [data-admin-goto] ANTES del toggle genérico
+               de sub-paneles). A diferencia de los botones de abajo,
+               este NO activa un .admin-panel — navega a otra pantalla
+               completa (goStep('table')). -->
+          <button class="admin-nav-item" data-admin-goto="table">📋 Mesa de Trabajo</button>
           <button class="admin-nav-item active" data-admin="pool">🚚 Pool Real</button>
           <button class="admin-nav-item" data-admin="ventana">🏬 Ventana de Recibo</button>
           <button class="admin-nav-item" data-admin="lic">🪪 Licencias</button>
