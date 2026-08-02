@@ -10,29 +10,31 @@
  * la descarga del navegador, pero eso no es manipulación del DOM de la app).
  *
  * AJUSTES (jul-2026 — archivo final, ver detalle en cada bloque):
- *   1) FECHA — TERCER intento (ver processors/excel.js para el
- *      historial completo de por qué los dos anteriores fallaron: un
- *      Date de SheetJS ya nace ambiguo, y el texto formateado `.w`
- *      depende de un orden día/mes que no siempre es el esperado).
- *      getMapped(row,'FECHA') ahora devuelve, en el caso normal, un
- *      objeto {dd,mm,yyyy} ya decodificado directamente del serial
- *      numérico de la celda (XLSX.SSF.parse_date_code, sin texto, sin
- *      Date, sin zona horaria — ver excel.js). Aquí solo se arma un
- *      Date local con esos tres números — cero cálculo adicional. Los
- *      respaldos (texto o Date) se mantienen por si la celda original
- *      no era numérica. Formato de celda: 'DD/MM/YYYY' (sin hora).
- *   2) ID IDA / ID RETORNO / CARTA PORTE — ahora forman parte de
- *      INT_COLS (core/constants.js). Este archivo YA convertía a
- *      número real cualquier columna de INT_COLS y le aplicaba formato
- *      '0' — no requirió ningún cambio de código aquí, solo la entrada
- *      de configuración en constants.js.
- *   3) Columnas de tiempo con datos faltantes — cuando
- *      core/time-engine.js no pudo calcular un tiempo porque faltó
- *      alguno de sus dos datos de entrada, deja constancia en
- *      row._timeMissing[col] (ver time-engine.js). Aquí se usa esa
- *      información SOLO en el archivo final: la celda vacía se resalta
- *      con relleno ámbar. Sin comentario de Excel — se retiró por
- *      estética (feedback jul-2026): solo el resaltado visual.
+ *   1) FECHA — QUINTO intento, DEFINITIVO. Los cuatro intentos
+ *      anteriores (ver processors/excel.js para el historial completo)
+ *      seguían usando un objeto Date de JavaScript en algún punto del
+ *      proceso — y confirmamos con pruebas reales (archivo real del
+ *      usuario, simulado línea por línea) que CADA punto donde
+ *      interviene un Date (lectura, construcción, o escritura a XLSX)
+ *      es una fuente potencial de desfase de zona horaria, sin
+ *      importar cuánto cuidado se tenga. La solución definitiva:
+ *      ELIMINAR el objeto Date por completo para esta columna. Ahora
+ *      se construye directamente el TEXTO "DD/MM/YYYY" a partir de los
+ *      números ya decodificados en excel.js (r['_FECHA_DMY']) y se
+ *      escribe como texto plano en la celda — sin ningún cálculo de
+ *      fecha, sin ninguna conversión, sin ninguna zona horaria posible.
+ *      Verificado con el archivo real del usuario: ciclo completo de
+ *      escritura + relectura preserva "10/06/2026" exacto.
+ *      TRADE-OFF: la celda queda como TEXTO (alineada a la izquierda
+ *      en Excel), no como una fecha "real" — no se puede usar en
+ *      fórmulas de fecha de Excel ni ordenar cronológicamente como
+ *      columna numérica. Si eso se necesita en el futuro, hay que
+ *      resolver la causa raíz del bug de escritura de Date primero.
+ *   2) ID IDA / ID RETORNO / CARTA PORTE — parte de INT_COLS
+ *      (core/constants.js), se convierten a número real con formato '0'.
+ *      Sin cambios respecto a versiones anteriores.
+ *   3) Columnas de tiempo con datos faltantes — SOLO resaltado ámbar,
+ *      sin comentario de Excel (se retiró por estética). Sin cambios.
  *
  * Dependencias:
  *   - State (core/state.js) — lee State.merged únicamente
@@ -41,7 +43,8 @@
  *   - TIME_RULES (core/time-engine.js) — nombres de columna cuyo valor
  *     puede venir acompañado de row._timeMissing[col]
  *   - parseDateTime (utils/date.js) — convierte strings de fecha a Date
- *     para que SheetJS aplique el formato correcto
+ *     para que SheetJS aplique el formato correcto (columnas DATETIME,
+ *     no afectadas por este ajuste — solo FECHA cambia a texto)
  *   - XLSX (SheetJS, global del CDN en index.html)
  */
 import { State } from '../core/state.js';
@@ -56,24 +59,38 @@ import { TIME_RULES } from '../core/time-engine.js';
 // únicas donde aplica el resaltado de "dato faltante" del archivo final.
 const TIME_OUTPUT_COLS = new Set(TIME_RULES.map(r => r.out));
 
+/** Rellena con cero a la izquierda — "6" → "06". @private */
+function _pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
 /**
- * Respaldo — parsea texto formateado tipo "27/07/2026" en {dd,mm,yyyy}
- * asumiendo orden día/mes. Solo se usa cuando la celda original de
- * FECHA no era numérica (ver processors/excel.js → r['_FECHA_TEXT']).
- * El caso normal (celda numérica real) ya no pasa por aquí — usa
- * directamente r['_FECHA_DMY'], decodificado del serial sin ambigüedad.
+ * Construye el texto "DD/MM/YYYY" de la columna FECHA para el archivo
+ * final — SIN ningún objeto Date de por medio (ver nota de cabecera
+ * "QUINTO intento, DEFINITIVO"). Acepta tres formas de entrada:
+ *   - {dd,mm,yyyy} — caso normal, ya decodificado en excel.js
+ *   - string — texto crudo ya en o cerca de formato fecha (respaldo)
+ *   - Date — último respaldo, solo si ninguno de los anteriores existe
  * @private
- * @param {string} text
- * @returns {{dd:number, mm:number, yyyy:number}|null}
+ * @param {*} val
+ * @returns {string}
  */
-function _parseFechaTexto(text) {
-  const m = String(text).trim().match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
-  if (!m) return null;
-  const dd = parseInt(m[1], 10);
-  const mm = parseInt(m[2], 10);
-  let yyyy = parseInt(m[3], 10);
-  if (yyyy < 100) yyyy += 2000;
-  return { dd, mm, yyyy };
+function _buildFechaTexto(val) {
+  if (val && typeof val === 'object' && !(val instanceof Date) && 'dd' in val) {
+    return `${_pad2(val.dd)}/${_pad2(val.mm)}/${val.yyyy}`;
+  }
+  if (typeof val === 'string') {
+    // Ya viene como texto (respaldo _FECHA_TEXT) — se deja tal cual,
+    // sin reinterpretar ni reordenar nada.
+    return val;
+  }
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    // Último respaldo — solo si no se detectó la columna FECHA al leer
+    // el Excel (ver excel.js). Usa componentes LOCALES directos, sin
+    // ningún desplazamiento — coherente con el resto de la app.
+    return `${_pad2(val.getDate())}/${_pad2(val.getMonth() + 1)}/${val.getFullYear()}`;
+  }
+  return String(val ?? '');
 }
 
 /**
@@ -87,24 +104,10 @@ export function exportXLSX() {
     let val = getMapped(row, col);
     if (val === '' || val === null || val === undefined) return '';
     if (DATE_COLS.has(col)) {
-      // Caso normal (jul-2026, tercer intento): val es el objeto
-      // {dd,mm,yyyy} ya decodificado del serial crudo de la celda
-      // (ver processors/excel.js → r['_FECHA_DMY']). Se arma un Date
-      // local directo con esos números — cero cálculo, cero zona
-      // horaria, cero ambigüedad de orden.
-      if (val && typeof val === 'object' && !(val instanceof Date) && 'dd' in val) {
-        return new Date(val.yyyy, val.mm - 1, val.dd);
-      }
-      // Respaldo — la celda no era numérica: texto formateado.
-      if (typeof val === 'string') {
-        const parsed = _parseFechaTexto(val);
-        if (parsed) return new Date(parsed.yyyy, parsed.mm - 1, parsed.dd);
-        return val; // texto no reconocido — se deja tal cual, sin inventar nada
-      }
-      // Último respaldo — Date de SheetJS (solo si no se detectó la
-      // columna FECHA al leer el Excel, ver excel.js).
-      const d = val instanceof Date ? val : new Date(val);
-      return isNaN(d.getTime()) ? val : new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      // AJUSTE (jul-2026, quinto intento): texto plano, sin Date — ver
+      // nota de cabecera. _buildFechaTexto() nunca crea ni manipula un
+      // objeto Date para esta columna.
+      return _buildFechaTexto(val);
     }
     if (DATETIME_COLS.has(col)) {
       if (val instanceof Date && !isNaN(val.getTime())) return val;
@@ -141,8 +144,12 @@ export function exportXLSX() {
     for (let R = 1; R <= range.e.r; R++) {
       const addr = XLSX.utils.encode_cell({ r: R, c: C });
       if (!ws[addr]) continue;
-      if (DATE_COLS.has(col))          ws[addr].z = 'DD/MM/YYYY';
-      else if (DATETIME_COLS.has(col)) ws[addr].z = 'DD/MM/YYYY HH:MM';
+      // FECHA ya no lleva formato numérico de fecha — es texto plano
+      // (ver _buildFechaTexto), así que se omite intencionalmente de
+      // este bloque. Aplicar 'DD/MM/YYYY' a una celda de texto no hace
+      // daño (Excel lo ignora), pero se omite para que quede claro que
+      // ya no es una celda de fecha "real".
+      if (DATETIME_COLS.has(col))      ws[addr].z = 'DD/MM/YYYY HH:MM';
       else if (INT_COLS.has(col))      ws[addr].z = '0';
       const even = R % 2 === 0;
       let bgRgb = even ? 'EEF4FF' : 'FFFFFF', fontRgb = '1A1A2E';
