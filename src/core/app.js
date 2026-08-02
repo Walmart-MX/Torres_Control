@@ -87,6 +87,25 @@
  *   con los checks existentes de esas clases más abajo en el mismo
  *   handler.
  *
+ * CAMBIO (jul-2026 — simplificación del flujo, Etapa 4):
+ *   Ver nota completa junto a STEPS más abajo. Tres ajustes de
+ *   navegación, ninguno de lógica de negocio:
+ *     1) El botón de Preparación (id conservado: btnGoTable — el
+ *        nombre ya no describe su destino, se documenta aquí en vez de
+ *        renombrarlo para minimizar el diff) ahora navega a
+ *        goStep('fix') en vez de goStep('table') — el flujo diario
+ *        pasa directo de Preparación a Correcciones.
+ *     2) El listener de #adminNav gana un chequeo ANTES del toggle de
+ *        paneles: cualquier botón con [data-admin-goto] navega
+ *        directamente a esa pantalla (goStep) en vez de activar un
+ *        sub-panel de Administración — usado por el nuevo acceso
+ *        directo a Mesa de Trabajo.
+ *     3) Se agrega el listener de #btnGoQualityHeader — mismo destino
+ *        (goStep('quality')) que el #btnGoQuality ya existente dentro
+ *        del estado vacío de Correcciones; ahora también accesible
+ *        siempre, desde la cabecera, sin esperar a que no queden
+ *        incidencias pendientes.
+ *
  * Dependencias: todos los módulos de la aplicación.
  */
 import { State } from './state.js';
@@ -101,11 +120,31 @@ import { DispatchHistory } from '../features/dispatch-history.js';
 import { CatalogStore } from '../features/catalogs/catalog-store.js';
 
 // ── Stepper — navegación entre pantallas ──
+// CAMBIO (jul-2026 — simplificación del flujo, Etapa 4): STEPS baja de
+// 5 a 3 entradas tras varios meses de uso real. Mesa de Trabajo y
+// Calidad NO se eliminan — siguen siendo pantallas completas y
+// funcionales (ver data-screen="table"/"quality" en index.html,
+// goStep() sigue aceptando cualquier id) — solo salen del indicador
+// numerado porque en el día a día no aportaban un paso obligatorio:
+//   - Mesa de Trabajo: útil para buscar/editar CUALQUIER registro,
+//     incluso uno sin incidencias, pero eso es una tarea ocasional, no
+//     parte del flujo diario. Ahora se accede desde Administración
+//     (ver adminNav más abajo, botón con data-admin-goto="table").
+//   - Calidad: sus métricas siguen siendo útiles como diagnóstico,
+//     pero el Dashboard es redundante con el contador/progreso de
+//     Correcciones para la decisión diaria de "¿ya puedo exportar?"
+//     — esa decisión ahora la resuelve el botón tricolor "Continuar a
+//     Exportación" (ver ui.js → _updateFixContinueBtn(), Etapa 2).
+//     Se agrega un acceso siempre visible "📊 Ver detalle de calidad"
+//     en la cabecera de Correcciones (#btnGoQualityHeader) para quien
+//     sí quiera profundizar.
+// goStep()/renderStepper() NO cambian de comportamiento — goStep(id)
+// ya toleraba ids fuera de STEPS (el indicador simplemente no se
+// mueve), así que navegar a 'table'/'quality' sigue funcionando
+// exactamente igual que antes.
 const STEPS = [
   { id: 'prep',    label: 'Preparación' },
-  { id: 'table',   label: 'Mesa de Trabajo' },
   { id: 'fix',     label: 'Correcciones' },
-  { id: 'quality', label: 'Calidad' },
   { id: 'export',  label: 'Exportación' },
 ];
 let currentStepIdx = 0;
@@ -209,7 +248,13 @@ export async function init() {
   Events.setupDrop('dropWTMS', 'fileWTMS', Events.handleWTMS.bind(Events));
 
   // ── Preparación — "Continuar" y "Reemplazar archivos" (vista contraída) ──
-  document.getElementById('btnGoTable').addEventListener('click', () => goStep('table'));
+  // CAMBIO (jul-2026 — Etapa 4): navega directo a Correcciones
+  // (goStep('fix')) en vez de a Mesa de Trabajo — ver nota de cabecera
+  // "CAMBIO (jul-2026 — simplificación del flujo, Etapa 4)". El id del
+  // botón se conserva (btnGoTable) para no tocar index.html más de lo
+  // necesario; su texto visible ya se actualizó ahí a "Continuar a
+  // Correcciones →".
+  document.getElementById('btnGoTable').addEventListener('click', () => goStep('fix'));
   document.getElementById('btnPrepReset').addEventListener('click', () => UI.resetAll());
 
   // ── Status de despacho (paste) ──
@@ -352,6 +397,13 @@ export async function init() {
   const btnGoQuality = document.getElementById('btnGoQuality');
   if (btnGoQuality) btnGoQuality.addEventListener('click', () => goStep('quality'));
 
+  // ── Correcciones — acceso SIEMPRE visible a Calidad desde la
+  // cabecera (NUEVO, jul-2026 — Etapa 4). Mismo destino que
+  // #btnGoQuality de arriba, pero sin esperar a que no queden
+  // incidencias pendientes — ver nota de cabecera "CAMBIO (jul-2026 —
+  // simplificación del flujo, Etapa 4)". ──
+  document.getElementById('btnGoQualityHeader')?.addEventListener('click', () => goStep('quality'));
+
   // ── Correcciones — "Continuar a Exportación" tricolor (NUEVO, jul-2026) ──
   // Ver nota de cabecera. Nunca bloquea la navegación — solo informa el
   // estado; el gate real de exportación sigue viviendo en la pantalla
@@ -370,6 +422,15 @@ export async function init() {
   // .cat-toggle y las pestañas .ref-tabs de las fases anteriores — ver
   // nota de cabecera. ──
   document.getElementById('adminNav').addEventListener('click', e => {
+    // NUEVO (jul-2026 — Etapa 4): botones con [data-admin-goto] son
+    // ACCESOS DIRECTOS a otra pantalla completa (ej. Mesa de Trabajo),
+    // no un sub-panel de Administración — se resuelven ANTES del
+    // toggle genérico de abajo, que asume que todo botón de esta barra
+    // activa un .admin-panel dentro de la misma pantalla. Ver nota de
+    // cabecera "CAMBIO (jul-2026 — simplificación del flujo, Etapa 4)".
+    const gotoBtn = e.target.closest('[data-admin-goto]');
+    if (gotoBtn) { goStep(gotoBtn.dataset.adminGoto); return; }
+
     const btn = e.target.closest('.admin-nav-item');
     if (!btn) return;
     document.querySelectorAll('.admin-nav-item').forEach(b => b.classList.toggle('active', b === btn));
