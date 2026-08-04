@@ -102,7 +102,15 @@ export const WORKTABLE_COLS = [
 // ya convierte cualquier columna listada aquí a número real (parseInt)
 // y le aplica formato numérico '0'; no requiere ningún cambio adicional
 // ahí, solo esta entrada de configuración.
-export const INT_COLS      = new Set(['DET','RUTA','TARIMAS','CAJAS','CORTINA',
+// core/constants.js
+// AJUSTE (ago-2026 — rutas divididas): RUTA se retira de INT_COLS.
+// Es un identificador, no una cantidad numérica — forzarlo a entero
+// destruía el guión de las rutas divididas ("3215-1" → 32151, ver
+// export.js). Nunca se notó antes porque ninguna ruta normal contenía
+// caracteres no numéricos. Sin efecto en formato de columna (dejaba
+// de aplicarse el formato '0' de Excel a una columna que de todas
+// formas es texto).
+export const INT_COLS = new Set(['DET','TARIMAS','CAJAS','CORTINA',
   'MARCHAMO 1','MARCHAMO 2','MARCHAMO 3 ','MARCHAMO 4','MARCHAMO 5','FAC.','GLS DE EMB.','SW',
   'ID IDA','ID RETORNO','CARTA PORTE']);
 export const DATE_COLS     = new Set(['FECHA']);
