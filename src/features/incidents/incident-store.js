@@ -103,8 +103,20 @@ export const IncidentStore = {
       while (entries.length > MAX_ROUTES) entries.shift();
       const prunedMap = Object.fromEntries(entries);
 
+// FIX (ago-2026 — 400 Bad Request en el upsert): antes se incluía
+      // `id: existing?.id` aquí. Para incidencias NUEVAS, existing es
+      // undefined, así que el objeto declaraba la key 'id' con valor
+      // undefined — supabase-js arma la lista de columnas del INSERT a
+      // partir de las keys DECLARADAS de todos los objetos del batch
+      // (id cuenta aunque su valor sea undefined), pero al serializar a
+      // JSON esa key se descarta. PostgREST terminaba recibiendo una
+      // petición que anunciaba la columna 'id' sin valor real para las
+      // filas nuevas → viola la restricción NOT NULL de la PK → 400.
+      // No hace falta enviar 'id' en absoluto: onConflict ya localiza
+      // la fila correcta para actualizar (llave lógica real es
+      // type+source_id+key_name+key_value, no id), y para inserts el
+      // default de la tabla (gen_random_uuid()) genera el id solo.
       upserts.push({
-        id: existing?.id,
         type, source_id: g.sourceId, key_name: g.keyName, key_value: g.keyValue,
         status: 'open',
         occurrence_count: (existing?.occurrence_count || 0) + newOccurrences,
