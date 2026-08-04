@@ -773,7 +773,7 @@ export const UI = {
       </div>`;
   },
 
-  /**
+ /**
    * Tarjeta de captura dinámica de marchamos — NUEVO (jul-2026, ver
    * nota de cabecera "CAMBIO (jul-2026 — captura dinámica...)"). A
    * diferencia de _fixCardQuick(), no mapea a un único campo fijo:
@@ -787,6 +787,19 @@ export const UI = {
    * marchamo que el PDF ya extrajo correctamente en otra posición
    * (ej. MARCHAMO 1 vacío pero MARCHAMO 2 ya tiene dato válido).
    *
+   * NUEVO (jul-2026 — preview de marchamos detectados): antes de los
+   * campos editables, la tarjeta ahora muestra un resumen SOLO
+   * INFORMATIVO de los marchamos que SÍ se detectaron para esta
+   * entrega (posiciones MARCHAMO 1-5 con valor no vacío en
+   * `sampleRow`), en el mismo orden en que se extrajeron del PDF —
+   * MARCHAMO 1..5 ya conserva ese orden porque pdf.js empuja los
+   * candidatos en secuencia y merge.js los copia 1:1 sin reordenar.
+   * Si ninguna posición tiene valor, se muestra el mensaje "No se
+   * detectó ningún marchamo para esta entrega." en vez de una lista
+   * vacía. Este bloque NO es editable ni afecta el guardado — es
+   * puro contexto visual para que el usuario no tenga que volver al
+   * PDF a verificar qué ya se capturó correctamente.
+   *
    * data-fix-slots guarda el orden completo de slots disponibles (JSON)
    * — el botón "+ Agregar marchamo" (ver core/app.js →
    * handleFixCardClick) lo usa para saber cuál es el siguiente campo a
@@ -799,6 +812,21 @@ export const UI = {
     const rowIdsAttr = escH(JSON.stringify(rowIds));
 
     const sampleRow = rowIds.length ? State.merged.find(r => r._rowId === rowIds[0]) : null;
+
+    // ── Preview de marchamos YA detectados — ver nota de cabecera
+    // "NUEVO (jul-2026 — preview de marchamos detectados)". Recorre las
+    // mismas 5 posiciones que el cálculo de emptySlots de abajo, pero
+    // se queda con las que SÍ tienen valor — mismo orden de extracción,
+    // sin necesidad de tocar merge.js/pdf.js. ──
+    const detectedMarchamos = [];
+    for (let m = 1; m <= 5; m++) {
+      const val = sampleRow ? String(sampleRow['MARCHAMO ' + m] || '').trim() : '';
+      if (val) detectedMarchamos.push(val);
+    }
+    const previewHtml = detectedMarchamos.length
+      ? `<div class="fix-marchamo-preview-list">${detectedMarchamos.map(v => `<span class="fix-marchamo-chip">${escH(v)}</span>`).join('')}</div>`
+      : `<div class="fix-marchamo-preview-empty">No se detectó ningún marchamo para esta entrega.</div>`;
+
     const emptySlots = [];
     for (let m = 1; m <= 5; m++) {
       const key = 'MARCHAMO ' + m;
@@ -815,6 +843,10 @@ export const UI = {
         <div class="fix-ruta">${escH(issue.ruta || '—')}${dette}</div>
         <div class="fix-field-info"><div class="fix-field-label">Marchamos</div><div class="fix-field-desc">${escH(issue.desc)}</div></div>
         <div class="fix-marchamo-wrap">
+          <div class="fix-marchamo-preview">
+            <div class="fix-marchamo-preview-label">Marchamos detectados</div>
+            ${previewHtml}
+          </div>
           <div class="fix-marchamo-rows" data-fix-role="rows">
             <div class="fix-marchamo-row" data-slot="${escH(firstSlot)}">
               <input class="fix-input fix-marchamo-input" data-field="${escH(firstSlot)}" placeholder="Número de marchamo…">
