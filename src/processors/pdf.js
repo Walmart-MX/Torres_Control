@@ -86,11 +86,9 @@
  *       ahí también, mismo criterio.
  *   NO se aplica cuando `sameDestino === true` (PDF unificado de dos
  *   rutas con el MISMO destino compartido): ahí la repetición del
- *   destino representa DOS entregas reales, una por cada ruta — el
- *   split por mitad (`mid = Math.ceil(rawRows.length / 2)`) depende de
- *   que esa repetición se conserve intacta. Tocar esa rama rompería la
- *   lógica de rutas combinadas — confirmado con EduarDo, deliberadamente
- *   fuera del alcance de este fix.
+ *   destino representa DOS entregas reales, una por cada ruta — ver
+ *   FIX (ago-2026) más abajo para cómo se reparten correctamente entre
+ *   las dos rutas.
  *
  * FIX (jul-2026) — HR. DESPACHO con fecha invertida:
  *   El sello "Impreso/enviado por fax" del PDF imprime la fecha en
@@ -107,6 +105,56 @@
  *   fecha del sello, para dejarla en DD/MM/YYYY, formato que espera el
  *   resto de la app — ningún otro módulo (date.js, merge.js,
  *   constants.js) cambia.
+ *
+ * FIX (ago-2026) — "bug del reparto desigual de marchamos en rutas
+ * unificadas con destino compartido":
+ *   Caso real confirmado con EduarDo (PDF 1205-1206.pdf, HUB 6154001
+ *   compartido por ambas rutas). El split anterior de la rama
+ *   sameDestino dividía rawRows exactamente A LA MITAD por CONTEO de
+ *   filas (`mid = Math.ceil(rawRows.length / 2)`), asumiendo que ambas
+ *   rutas aportan el mismo número de entregas al documento. WTMS no
+ *   garantiza eso — cada ruta corresponde a un remolque (Placa
+ *   Trailer) distinto, y cada remolque puede traer un número de
+ *   entregas completamente distinto (caso real: 4 filas para un
+ *   remolque, 9 para el otro). Con conteo desigual, el corte a la
+ *   mitad cae DENTRO del bloque de la segunda ruta — la fila que
+ *   realmente lleva los marchamos de ese remolque (siempre la PRIMERA
+ *   fila de cada bloque; WTMS solo los imprime ahí, el resto de filas
+ *   del mismo remolque llegan sin marchamo) terminaba del lado
+ *   equivocado del corte. Resultado observado: la ruta con menos
+ *   filas se quedaba sin ningún marchamo ("sin marchamo principal"),
+ *   mientras la otra recibía DOS juegos de marchamos mezclados.
+ *
+ *   Además, el orden de asignación estaba invertido: el código
+ *   asumía que el PRIMER bloque del documento (el de más arriba)
+ *   pertenece a la ruta con el número MENOR de las dos (orden de
+ *   aparición en el nombre del archivo, ej. "1205" en "1205-1206.pdf").
+ *   Confirmado con EduarDo: WTMS imprime, de arriba hacia abajo,
+ *   primero el bloque de la ruta con el número MAYOR (1206) y después
+ *   el de la ruta con el número MENOR (1205) — exactamente al revés.
+ *
+ *   Se corrigen ambos problemas:
+ *     1) _splitUnifiedBlocksByMarchamo() reemplaza el corte por
+ *        conteo: detecta el inicio real de cada bloque físico
+ *        (remolque) buscando la fila que trae sus propios marchamos
+ *        — la única señal fiable de "aquí empieza un remolque nuevo",
+ *        ya que WTMS solo la imprime una vez por bloque. Si no se
+ *        detectan EXACTAMENTE 2 bloques (ej. ninguna fila trae
+ *        marchamo, o se detecta un patrón inesperado), se conserva el
+ *        corte por mitad como respaldo — mismo comportamiento que
+ *        antes, nunca peor — con una advertencia en consola para
+ *        diagnóstico.
+ *     2) La asignación ruta↔bloque ahora ordena `rutas` por valor
+ *        NUMÉRICO descendente antes de repartir los bloques — el
+ *        primer bloque (el de más arriba) siempre va a la ruta con el
+ *        número mayor, el segundo a la de número menor — en vez de
+ *        asumir que `rutas` (tomado tal cual del nombre del archivo)
+ *        ya viene en ese orden.
+ *
+ *   Aplica ÚNICAMENTE a la rama sameDestino === true (destino
+ *   compartido). El caso sameDestino === false (destinos distintos
+ *   dentro de un PDF unificado) no se toca — usa _dedupeByDestino(),
+ *   sin cambios.
  *
  * Dependencia externa: pdfjsLib (cargado globalmente desde el CDN en
  * index.html, con su workerSrc ya configurado ahí). Este módulo no
@@ -240,7 +288,7 @@ function _pushMarchamo(raw, marchamos, issues) {
  * NO se aplica al caso de rutas COMBINADAS con destino compartido (ver
  * `sameDestino` en parsePDF): ahí la repetición del mismo destino SÍ
  * representa dos entregas reales, una por cada ruta del PDF unificado
- * — deben conservarse separadas para el split por mitad.
+ * — ver _splitUnifiedBlocksByMarchamo() para cómo se reparten.
  * @private
  * @param {Array<{destino:string, factura:string, tarimas:string, marchamos:string[], marchamoIssues:Array}>} list
  * @returns {Array<object>} misma forma, un elemento por destino único
@@ -265,6 +313,40 @@ function _dedupeByDestino(list) {
     if (r.marchamoIssues.length) existing.marchamoIssues.push(...r.marchamoIssues);
   }
   return order.map(k => byKey.get(k));
+}
+
+/**
+ * Divide rawRows de una ruta unificada CON destino compartido en los
+ * bloques físicos reales (uno por remolque) — ver nota de cabecera
+ * "FIX (ago-2026) — bug del reparto desigual de marchamos".
+ *
+ * WTMS solo imprime el marchamo en la PRIMERA fila de cada remolque —
+ * el resto de filas del mismo remolque llegan sin marchamo propio. Esa
+ * es la única señal fiable de "aquí empieza un bloque nuevo": se corta
+ * cada vez que una fila (que no sea la primera del documento) trae su
+ * propio marchamo válido o inválido (marchamos.length ||
+ * marchamoIssues.length) — un marchamo con formato inválido sigue
+ * siendo evidencia de que WTMS intentó imprimir uno ahí, así que
+ * también cuenta como inicio de bloque.
+ *
+ * @private
+ * @param {Array<{marchamos:string[], marchamoIssues:Array}>} rawRows
+ * @returns {Array<Array<object>>} arreglo de bloques (cada bloque es un
+ *   sub-arreglo contiguo de rawRows)
+ */
+function _splitUnifiedBlocksByMarchamo(rawRows) {
+  const blocks = [];
+  let current = [];
+  rawRows.forEach((r, i) => {
+    const hasOwnMarchamo = (r.marchamos && r.marchamos.length) || (r.marchamoIssues && r.marchamoIssues.length);
+    if (i > 0 && hasOwnMarchamo) {
+      blocks.push(current);
+      current = [];
+    }
+    current.push(r);
+  });
+  if (current.length) blocks.push(current);
+  return blocks;
 }
 
 /**
@@ -384,13 +466,37 @@ export function parsePDF({ lines, annots }, filename) {
     const destinos    = [...new Set(rawRows.map(r => r.destino).filter(Boolean))];
     const sameDestino = destinos.length <= 1;
     if (sameDestino) {
-      // Sin dedupe aquí — ver _dedupeByDestino(), nota de cabecera: en
-      // rutas combinadas con destino compartido, la repetición del
-      // mismo destino representa DOS entregas reales (una por ruta);
-      // el split por mitad depende de que rawRows llegue intacto.
-      const mid = Math.ceil(rawRows.length / 2);
-      const grupos = [rawRows.slice(0, mid), rawRows.slice(mid)];
-      rutas.forEach((ruta, idx) => {
+      // FIX (ago-2026) — ver nota de cabecera "bug del reparto
+      // desigual de marchamos". Se reemplaza el corte por conteo
+      // (mid = mitad de filas) por un corte basado en dónde WTMS
+      // realmente imprime el marchamo de cada remolque — la única
+      // señal fiable de "aquí empieza un bloque nuevo" cuando ambas
+      // rutas comparten destino y pueden traer un número distinto de
+      // entregas cada una.
+      const blocks = _splitUnifiedBlocksByMarchamo(rawRows);
+      let grupos;
+      if (blocks.length === 2) {
+        grupos = blocks;
+      } else {
+        // Respaldo — no se detectaron exactamente 2 bloques por
+        // marchamo (ej. ninguna fila trae marchamo en absoluto, o un
+        // patrón inesperado). Se conserva el corte por mitad como
+        // antes — nunca peor que el comportamiento previo — con aviso
+        // en consola para diagnóstico manual.
+        console.warn(`[PDF] ${baseName}: se esperaban 2 bloques por remolque (detección por marchamo) pero se detectaron ${blocks.length} — usando corte por mitad como respaldo.`);
+        const mid = Math.ceil(rawRows.length / 2);
+        grupos = [rawRows.slice(0, mid), rawRows.slice(mid)];
+      }
+
+      // Orden de asignación — confirmado con EduarDo (caso real
+      // 1205-1206.pdf): WTMS imprime de arriba hacia abajo primero el
+      // bloque de la ruta con número MAYOR, después el de número
+      // MENOR. `rutas` conserva el orden literal del nombre del
+      // archivo (no necesariamente ascendente), así que se ordena
+      // explícitamente por valor numérico antes de repartir.
+      const rutasPorMagnitud = [...rutas].sort((a, b) => parseInt(b, 10) - parseInt(a, 10));
+
+      rutasPorMagnitud.forEach((ruta, idx) => {
         const grupo = grupos[idx] || [];
         if (!grupo.length) return;
         const marchamos      = [...new Set(grupo.flatMap(r => r.marchamos))];
