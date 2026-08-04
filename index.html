@@ -458,6 +458,26 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
    .fix-marchamo-rows ahora es fila (flex-wrap), cada input tiene un
    ancho fijo y compacto en vez de heredar flex:1 de .fix-input. */
 .fix-card-marchamo{align-items:flex-start}
+   /* ── Preview de marchamos detectados — NUEVO (jul-2026) ──
+   Puramente informativo: chips de solo lectura con los valores que SÍ
+   se extrajeron del PDF para esta entrega (ver ui.js →
+   _fixCardMarchamo()). Vive dentro de .fix-marchamo-wrap, antes de los
+   inputs editables — visualmente separado por un borde inferior sutil
+   para que quede claro que no es parte del formulario de captura. */
+.fix-marchamo-preview{
+  display:flex;flex-direction:column;gap:6px;padding-bottom:8px;margin-bottom:2px;
+  border-bottom:1px dashed var(--border-2);
+}
+.fix-marchamo-preview-label{
+  font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);
+}
+.fix-marchamo-preview-list{display:flex;flex-wrap:wrap;gap:6px}
+.fix-marchamo-chip{
+  font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.02em;
+  background:var(--surface-3);color:var(--text-2);border:1px solid var(--border-2);
+  border-radius:100px;padding:3px 10px;
+}
+.fix-marchamo-preview-empty{font-size:10.5px;color:var(--text-3);font-style:italic}
 .fix-marchamo-wrap{display:flex;flex-direction:column;gap:8px;flex:0 1 auto}
 .fix-marchamo-rows{display:flex;flex-wrap:wrap;gap:8px}
 .fix-marchamo-row{display:inline-flex;align-items:center;gap:4px}
