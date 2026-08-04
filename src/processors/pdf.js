@@ -371,10 +371,27 @@ function _splitUnifiedBlocksByMarchamo(rawRows) {
  *          resto de los campos de la misma entrega.
  */
 export function parsePDF({ lines, annots }, filename) {
-  const baseName     = filename.replace(/\.pdf$/i, '').replace(/^\d+_/, '');
-  const unifiedMatch = baseName.match(/^(\d+)-(\d+)$/);
-  const isUnified    = !!unifiedMatch;
-  const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName];
+ const baseName     = filename.replace(/\.pdf$/i, '').replace(/^\d+_/, '');
+const unifiedMatch = baseName.match(/^(\d+)-(\d+)$/);
+
+// AJUSTE (ago-2026 — rutas divididas, "3215-1" no es ruta unificada):
+// confirmado con EduarDo — cuando una ruta se "parte" en el día
+// operativo, el sufijo tras el guión es un ÍNDICE corto (1, 2, 3…) del
+// FRAGMENTO de la MISMA ruta física, no una segunda ruta combinada. El
+// PDF y la columna RUTA de RUTEO NUEVO usan el nombre completo literal
+// ("3215-1") como identificador. Antes, CUALQUIER "XXXX-YYYY" se
+// interpretaba como combinada — "3215-1.pdf" se partía en rutas
+// ["3215","1"], ninguna coincide con "3215-1" real → falso positivo de
+// 'no_pdf' pese a que el PDF sí estaba cargado.
+//
+// Heurística: ruta COMBINADA real = dos números de magnitud comparable
+// (ej. "1205-1206", 4 y 4 dígitos). Ruta DIVIDIDA = sufijo corto (≤2
+// dígitos) y más corto que el número principal (ej. "3215-1": 4 vs 1).
+const isSplitSuffix = !!unifiedMatch &&
+  unifiedMatch[2].length <= 2 &&
+  unifiedMatch[2].length < unifiedMatch[1].length;
+const isUnified    = !!unifiedMatch && !isSplitSuffix;
+const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName];
 
   let nombre = '', apellido = '', hrDespacho = '';
   for (const { text } of lines) {
