@@ -151,6 +151,34 @@
  *      cambios — sigue siendo la señal correcta de un problema real
  *      (ej. recarga de página a medio proceso).
  *
+ * CAMBIO (ago-2026 — refuerzo de detección de marchamos duplicados
+ * DENTRO de la misma ruta, confirmado con EduarDo):
+ *   Antes, la regla A (dup_march) SOLO reportaba un marchamo repetido
+ *   cuando aparecía en DOS RUTAS DISTINTAS (`prev.ruta !== ruta`). Si
+ *   el mismo marchamo se repetía dentro de la MISMA ruta, el código no
+ *   generaba ninguna incidencia — un hueco real, porque un marchamo es
+ *   único e irrepetible por entrega SIN IMPORTAR si coincide la ruta o
+ *   no. Se agregan dos casos nuevos, ambos derivados del mismo
+ *   `marchMap` ya existente (sin costo adicional de recorrido):
+ *
+ *   1) 'dup_march_ruta' (SVE_CRIT) — el marchamo se repite en DOS
+ *      ENTREGAS DISTINTAS de la MISMA ruta (mismo problema de fondo que
+ *      dup_march: un sello físico no puede estar en dos cargas — solo
+ *      cambia si la ruta coincide o no). Bloquea la exportación igual
+ *      que dup_march, hasta que se verifique cuál entrega lleva
+ *      realmente ese marchamo.
+ *
+ *   2) 'dup_march_self' (SVE_WARN) — el marchamo se repite DOS VECES
+ *      dentro de la MISMA entrega (dos posiciones MARCHAMO N distintas
+ *      del mismo registro). Normalmente es un error de captura (mismo
+ *      valor pegado dos veces) — no bloquea la exportación, pero se
+ *      muestra en Correcciones para que se verifique contra el PDF.
+ *
+ *   Ambas reutilizan la tarjeta "🔍 Revisar" genérica de Correcciones
+ *   (no están en QUICKFIX_RULES/MULTI_RULES/CONFIRM_RULES de ui.js) —
+ *   sin cambios necesarios en ui.js/edit-system.js: EDITABLE_FIELDS ya
+ *   expone MARCHAMO 1-5 como campos editables en el drawer.
+ *
  * Dependencias:
  *   - State (core/state.js) — lee rows ya vía parámetro, pero escribe
  *     State.sveHasCritical / sveHasWarnings / sveLastQuality
@@ -164,7 +192,7 @@ export const SVE_WARN = 'ADVERTENCIA';
 export const SVE_INFO = 'INFORMATIVA';
 
 export const SVE_ICONS = {
-  'dup_march':'🔖','missing_ruta':'🔴','missing':'🟠',
+  'dup_march':'🔖','dup_march_ruta':'🔁','dup_march_self':'♻️','missing_ruta':'🔴','missing':'🟠',
   'no_march':'🔴','zero_tar':'📐','high_tar':'📐','no_pdf':'🟡',
   'no_fac':'ℹ️','bad_march':'ℹ️','integrity':'🔗','no_ventana':'📇','no_pool':'🚚','cat_dup':'🗂️','time_anomaly':'⏱️',
   'no_cita':'📅','pdf_ambiguous':'🧩','dette_sin_pdf':'🚫'
@@ -216,8 +244,18 @@ export function runSVE(rows, screenCount, excludedCount) {
 
   const matched = rows.filter(r => r._matched);
 
-  // A: Marchamos duplicados entre rutas distintas
-  // marchMap stores: marc → { ruta, rowId, dette } — keeps the first row that claimed each marchamo
+  // A: Marchamos duplicados — CUALQUIER repetición del mismo marchamo
+  // es un error, sin importar si ocurre entre rutas distintas, entre
+  // entregas de la MISMA ruta, o dentro de la MISMA entrega (dos
+  // posiciones MARCHAMO N). Ver nota de cabecera "CAMBIO (ago-2026 —
+  // refuerzo de detección...)" para el detalle de cada caso.
+  //
+  // marchMap guarda SOLO la primera aparición de cada marchamo: además
+  // de ruta/rowId/dette (ya existentes), ahora también `slot` (número
+  // de posición MARCHAMO N) — necesario para distinguir "dos entregas
+  // distintas de la misma ruta" de "dos posiciones de la misma
+  // entrega" y para poder describir cuáles dos posiciones chocan en el
+  // mensaje de dup_march_self.
   const marchMap = new Map();
   rows.forEach(r => {
     const ruta  = String(getMapped(r,'RUTA')||'').trim();
@@ -228,15 +266,39 @@ export function runSVE(rows, screenCount, excludedCount) {
       if (marchMap.has(marc)) {
         const prev = marchMap.get(marc);
         if (prev.ruta !== ruta) {
+          // Caso original — dos rutas distintas. Sin cambios.
           rawAdd(SVE_CRIT,'dup_march', ruta, `MARCHAMO ${m}`,
             `Marchamo ${marc} asignado a ruta ${ruta} (entrega ${dette||'—'}) y también a ruta ${prev.ruta} (entrega ${prev.dette||'—'}).`,
             'Confirma con la documentación cuál ruta lleva este marchamo.',
             marc,
             [prev.rowId, r._rowId].filter(Boolean),
             dette);
+        } else if (prev.rowId === r._rowId) {
+          // NUEVO (ago-2026) — mismo marchamo repetido DOS VECES dentro
+          // de la MISMA entrega (dos posiciones MARCHAMO N). Casi
+          // siempre un error de captura (valor pegado/copiado dos
+          // veces) — no bloquea la exportación, pero se marca para
+          // verificar contra el PDF.
+          rawAdd(SVE_WARN,'dup_march_self', ruta, `MARCHAMO ${m}`,
+            `Ruta ${ruta} · Entrega ${dette||'—'}: el marchamo ${marc} está repetido en MARCHAMO ${prev.slot} y MARCHAMO ${m} de la misma entrega.`,
+            'Verifica el PDF de esta entrega — probablemente un marchamo se capturó dos veces por error.',
+            marc,
+            [r._rowId],
+            dette);
+        } else {
+          // NUEVO (ago-2026) — mismo marchamo en DOS ENTREGAS DISTINTAS
+          // de la MISMA ruta. Mismo problema de fondo que dup_march
+          // (un sello físico no puede estar en dos cargas) — bloquea
+          // la exportación igual que el caso entre rutas distintas.
+          rawAdd(SVE_CRIT,'dup_march_ruta', ruta, `MARCHAMO ${m}`,
+            `Ruta ${ruta}: el marchamo ${marc} está asignado tanto a la entrega ${prev.dette||'—'} como a la entrega ${dette||'—'} — un marchamo no puede repetirse ni dentro de la misma ruta.`,
+            'Verifica el PDF de ambas entregas y corrige el marchamo que no corresponda.',
+            marc,
+            [prev.rowId, r._rowId].filter(Boolean),
+            dette);
         }
       } else {
-        marchMap.set(marc, { ruta, rowId: r._rowId, dette });
+        marchMap.set(marc, { ruta, rowId: r._rowId, dette, slot: m });
       }
     }
   });
