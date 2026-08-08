@@ -1166,6 +1166,30 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
           <!-- Caché de facturas -->
           <div class="admin-panel" data-admin-panel="cache">
             <div class="admin-hd"><h3>Caché de facturas</h3><p>Concentrado histórico multi-día — TTL 7 días.</p></div>
+
+            <!-- Facturas crudas SAM'S/AUTO — NUEVO (Fase 1 de la
+                 migración de la Macro Despacho, ago-2026). Reemplazo
+                 nativo de las macros VBA SintesisFacturas +
+                 "Consolidación de Facturas" (ver processors/invoice-raw.js).
+                 Aditivo/opcional — no es una 5ª fuente obligatoria: se
+                 fusiona en State.factData exactamente como ya hace el
+                 Excel macro, y reutiliza FactCache.persist() sin
+                 ningún cambio (por eso vive aquí, junto al resto de la
+                 gestión de facturas). Mismo patrón visual que los
+                 botones "Importar/Reemplazar" de Pool Real/Ventana de
+                 Recibo. -->
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
+              <div class="btn btn-ghost btn-sm cat-import-btn">
+                📥 Cargar SAM'S (crudo)
+                <input type="file" id="invSamsFile" accept=".xls,.xlsx">
+              </div>
+              <div class="btn btn-ghost btn-sm cat-import-btn">
+                📥 Cargar AUTO (crudo)
+                <input type="file" id="invAutoFile" accept=".xls,.xlsx">
+              </div>
+            </div>
+            <div class="cat-status" id="invRawStatus" style="margin-bottom:10px"></div>
+
             <div style="margin-bottom:10px"><span class="cat-badge-count" id="cacheHistBadge">—</span></div>
             <div style="font-size:11px;color:var(--text-3);margin-bottom:10px;line-height:1.5">
               Cargar el mismo día <strong>actualiza</strong> las facturas existentes y agrega
