@@ -106,6 +106,13 @@
  *        siempre, desde la cabecera, sin esperar a que no queden
  *        incidencias pendientes.
  *
+ * CAMBIO (Fase 1 de la migración de la Macro Despacho, ago-2026):
+ *   Se agregan los listeners de #invSamsFile/#invAutoFile (panel
+ *   Administración → Caché de facturas) — mismo patrón exacto que
+ *   #mcVentanaFile/#mcPoolFile: change → Events.handleInvoiceRaw(file,
+ *   sourceId), limpiar el input después. Ver events.js/ui.js para el
+ *   detalle completo de diseño.
+ *
  * Dependencias: todos los módulos de la aplicación.
  */
 import { State } from './state.js';
@@ -407,7 +414,7 @@ export async function init() {
   // ── Correcciones — "Continuar a Exportación" tricolor (NUEVO, jul-2026) ──
   // Ver nota de cabecera. Nunca bloquea la navegación — solo informa el
   // estado; el gate real de exportación sigue viviendo en la pantalla
-  // Exportación, sin cambios.
+  // Exportación.
   document.getElementById('btnFixContinue')?.addEventListener('click', () => goStep('export'));
 
   // ── Exportación — modal de celebración ──
@@ -491,6 +498,19 @@ export async function init() {
     await FactCache.clear();
     await FactCache.clearLog();
     UI.renderCacheHistory();
+  });
+
+  // ── Administración — Facturas crudas SAM'S/AUTO (Fase 1 de la
+  // migración de la Macro Despacho, ago-2026) — mismo patrón exacto
+  // que #mcVentanaFile/#mcPoolFile: change → Events.handleInvoiceRaw(),
+  // limpiar el input después. Ver events.js/ui.js para el detalle
+  // completo de diseño (por qué vive en Caché de facturas, por qué es
+  // opcional/aditivo y no una 5ª fuente obligatoria). ──
+  document.getElementById('invSamsFile').addEventListener('change', function() {
+    Events.handleInvoiceRaw(this.files[0], 'sams'); this.value = '';
+  });
+  document.getElementById('invAutoFile').addEventListener('change', function() {
+    Events.handleInvoiceRaw(this.files[0], 'auto'); this.value = '';
   });
 
   // ── Warn Confirm Modal ──
