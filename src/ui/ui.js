@@ -135,6 +135,16 @@
  *   las otras variantes de tarjeta — no se agrega ningún listener
  *   nuevo al DOM.
  *
+ * CAMBIO (Fase 1 de la migración de la Macro Despacho, ago-2026):
+ *   Se agrega setInvoiceRawStatus() — feedback de texto para los dos
+ *   botones nuevos de Administración → Caché de facturas ("Cargar
+ *   SAM'S (crudo)" / "Cargar AUTO (crudo)", ver index.html). Mismo
+ *   patrón exacto que setMasterCatStatus()/setCatStatus() — un solo
+ *   elemento de texto con clase 'ok'/'err'. No requiere ningún cambio
+ *   en State ni en renderCacheHistory(): el resultado de la ingesta ya
+ *   se refleja ahí automáticamente porque Events.handleInvoiceRaw()
+ *   reutiliza FactCache.persist() sin modificarlo.
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - escH (utils/dom.js)
@@ -1461,6 +1471,24 @@ export const UI = {
           </div>
         </div>`;
     }).join('');
+  },
+
+  /**
+   * Escribe un mensaje de estado para la ingesta nativa de facturas
+   * crudas (SAM'S/AUTO) — NUEVO (Fase 1 de la migración de la Macro
+   * Despacho, ago-2026). Mismo patrón exacto que setCatStatus()/
+   * setMasterCatStatus(): un solo elemento de texto con clase 'ok'/
+   * 'err'. Vive en el panel Administración → Caché de facturas (ver
+   * index.html, #invRawStatus), junto a los dos botones "Cargar SAM'S
+   * (crudo)"/"Cargar AUTO (crudo)".
+   * @param {string} msg
+   * @param {'ok'|'err'|''} cls
+   */
+  setInvoiceRawStatus(msg, cls) {
+    const el = document.getElementById('invRawStatus');
+    if (!el) return;
+    el.className   = 'cat-status' + (cls ? ' ' + cls : '');
+    el.textContent = msg;
   },
 
   // ── Buttons ──
