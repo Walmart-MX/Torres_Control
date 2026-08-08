@@ -86,6 +86,35 @@
  *   tolerante por campo — un marchamo inválido ya no vacía
  *   factura/destino, así que esta colisión de claves vacías será cada
  *   vez menos frecuente, pero se corrige de raíz de todas formas).
+ *
+ * CAMBIO (Fase 1 de la migración de la Macro Despacho, ago-2026) —
+ * ingesta nativa de facturas SAM'S/AUTO:
+ *   Se agrega handleInvoiceRaw(file, sourceId) — reemplazo nativo de
+ *   las macros VBA `SintesisFacturas` + "Consolidación de Facturas"
+ *   (ver processors/invoice-raw.js para la especificación completa).
+ *
+ *   DECISIÓN DE DISEÑO — por qué NO es una 5ª fuente obligatoria:
+ *   Esta fase reemplaza únicamente el origen de State.factData (hoy
+ *   viene de la hoja CONCENTRADO FACTURAS dentro del Excel macro,
+ *   leída por processors/excel.js). RUTEO NUEVO sigue viniendo del
+ *   Excel macro sin cambios — esa migración es la Fase 2/3, todavía no
+ *   implementada. Por eso handleInvoiceRaw() es aditivo y opcional: se
+ *   fusiona (upsert) en State.factData exactamente como ya hace
+ *   handleXLS() con el resultado de processXLS(), y reutiliza
+ *   FactCache.persist() sin ningún cambio — mismo patrón fire-and-
+ *   forget, misma tabla de Supabase, mismo panel "Caché de facturas"
+ *   en Administración (ver ui.js → setInvoiceRawStatus()).
+ *
+ *   LIMITACIÓN CONOCIDA — orden de carga: si el operador vuelve a
+ *   cargar el Excel macro DESPUÉS de haber cargado SAM'S/AUTO nativos,
+ *   handleXLS() reemplaza State.factData por completo
+ *   (`State.factData = factData`), perdiendo lo cargado nativamente.
+ *   El flujo recomendado (y el que ya sigue la operación hoy) es
+ *   cargar el Excel macro primero y las facturas nativas después. No
+ *   se resuelve aquí para no tocar el comportamiento ya validado de
+ *   handleXLS() fuera del alcance de esta fase — queda documentado
+ *   como limitación conocida, mismo criterio que ya usa el proyecto
+ *   para excludedDettes (ver core/state.js).
  */
 import { State } from '../core/state.js';
 import { normOp } from '../utils/format.js';
@@ -98,6 +127,7 @@ import { pdfExtract, parsePDF } from '../processors/pdf.js';
 import { processXLS } from '../processors/excel.js';
 import { processPaste } from '../processors/paste.js';
 import { processWTMS } from '../processors/wtms.js';
+import { processInvoiceRaw } from '../processors/invoice-raw.js';
 import { runMerge } from '../processors/merge.js';
 import { runSVE } from '../features/validation/sve.js';
 import { exportXLSX } from '../features/export.js';
@@ -287,6 +317,52 @@ export const Events = {
     UI.setPasteSt('', '');
     UI.setSourceStatus('desp', false, 'Pega desde Excel', 'Copia RUTA · CASETA · WTMS · ID\'S MASTER');
     Events.triggerMerge();
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // ── FACTURAS CRUDAS SAM'S/AUTO (Fase 1, ago-2026) ──
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Procesa un archivo crudo de facturas (Shipment Status Report) de
+   * la fuente SAM'S o AUTO y lo fusiona en State.factData — ver nota
+   * de cabecera de este archivo para el detalle completo de diseño.
+   *
+   * Reutiliza FactCache.persist() sin ningún cambio: el resultado de
+   * esta fuente queda disponible tanto para el día operativo actual
+   * (State.factData, prioridad alta en merge.js) como para el caché
+   * histórico multi-día (State.factCache, fallback en merge.js).
+   *
+   * @param {File} file
+   * @param {'sams'|'auto'} sourceId
+   */
+  async handleInvoiceRaw(file, sourceId) {
+    if (!file) return;
+    const label = sourceId === 'sams' ? "SAM'S" : 'AUTO';
+    UI.setInvoiceRawStatus(`Procesando ${label}…`, 'ok');
+    try {
+      const { data, count } = await processInvoiceRaw(file, sourceId);
+      if (!count) throw new Error('El archivo no contiene facturas reconocibles.');
+
+      // Fusión (upsert) en State.factData — mismo criterio que
+      // handleXLS(): la fuente cargada más recientemente prevalece
+      // para las facturas que se repitan entre SAM'S y AUTO (no
+      // debería ocurrir en la práctica, pero un upsert es seguro de
+      // todas formas).
+      data.forEach((val, inv) => State.factData.set(inv, val));
+
+      State.cacheUpdating = true;
+      UI.renderCacheHistory();
+      FactCache.persist(data).finally(() => {
+        State.cacheUpdating = false;
+        UI.renderCacheHistory();
+      });
+
+      UI.setInvoiceRawStatus(`✓ ${count} facturas de ${label} cargadas`, 'ok');
+      if (State.merged.length) Events.triggerMerge();
+    } catch (e) {
+      UI.setInvoiceRawStatus(`Error (${label}): ` + e.message, 'err');
+    }
   },
 
   // ── Validación de fuentes obligatorias ──
