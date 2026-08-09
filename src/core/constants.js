@@ -40,6 +40,19 @@
  *      agregar estas tres columnas al Set basta para que Excel las
  *      reconozca como número sin necesidad del paso manual
  *      "Convertir a número". No requiere ningún cambio en export.js.
+ *
+ * CAMBIO (Fase 2 de la migración de la Macro Despacho, ago-2026):
+ *   Se agregan SETEO_MAP y CEDIS_CLOSE_HOUR — ver
+ *   features/route-postprocess.js para el detalle completo de uso.
+ *   SETEO_MAP: tabla cerrada de 3 valores (confirmada con EduarDo como
+ *   completa), reemplaza el `Replace` de celda completa que hacía
+ *   `POST_PROCESO_UNIFICADO_FINAL` sobre la columna SETEO.
+ *   CEDIS_CLOSE_HOUR: documentada pero DELIBERADAMENTE NO aplicada
+ *   todavía — ver nota de cabecera de route-postprocess.js para por
+ *   qué (los campos de tiempo de RUTEO NUEVO ya llegan corregidos por
+ *   ArbeyJr, que esta fase no reemplaza). Queda lista para cuando una
+ *   fase futura reemplace también el procesamiento crudo de columnas
+ *   de ArbeyJr.
  */
 import { State } from './state.js';
 
@@ -52,6 +65,25 @@ export const COL_FACT    = 'FACTURAS';
 
 export const SHEET_RUTEO    = ['RUTEO NUEVO', 'RUTEO', 'HOJA1', 'SHEET1'];
 export const SHEET_FACTURAS = ['CONCENTRADO FACTURAS', 'FACTURAS', 'CONCENTRADO', 'FACT'];
+
+/**
+ * SETEO_MAP — tabla cerrada de normalización de zona de temperatura,
+ * usada por features/route-postprocess.js. Confirmada con EduarDo
+ * (ago-2026) como la lista COMPLETA de valores en uso — cualquier
+ * valor de SETEO fuera de esta tabla se deja sin traducir (no se
+ * inventa un mapeo), consistente con el principio de nunca adivinar.
+ */
+export const SETEO_MAP = { '3°C': 'REFRI', '4°C': 'FRUTA', '-26°C': 'CONGE' };
+
+/**
+ * CEDIS_CLOSE_HOUR — hora de cierre de operaciones del CeDis (24h),
+ * confirmada con EduarDo como el fundamento real (no arbitrario) del
+ * umbral de "cruce de medianoche" que usa `ArbeyJr` (VBA) para decidir
+ * si una hora capturada ≥ este umbral pertenece al día anterior.
+ * DELIBERADAMENTE NO aplicada todavía en ningún módulo nativo — ver
+ * nota de cabecera de features/route-postprocess.js.
+ */
+export const CEDIS_CLOSE_HOUR = 22;
 
 export const BASE_ORDER = [
   'FECHA','DIA','SW','LINEA','ENTREGA','ENT1','RUTA',
