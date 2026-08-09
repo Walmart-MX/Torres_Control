@@ -115,6 +115,21 @@
  *   handleXLS() fuera del alcance de esta fase — queda documentado
  *   como limitación conocida, mismo criterio que ya usa el proyecto
  *   para excludedDettes (ver core/state.js).
+ *
+ * CAMBIO (Fase 2 de la migración de la Macro Despacho, ago-2026) —
+ * post-proceso nativo de ruta:
+ *   handleXLS() ahora llama a applyRoutePostprocess(rows) (ver
+ *   features/route-postprocess.js) justo después de leer el Excel y
+ *   antes de asignar State.xlsData — reemplazo nativo de
+ *   `POST_PROCESO_UNIFICADO_FINAL` (fill-down de RUTA/SETEO/TRACTOR/
+ *   UNIDAD/CORTINA/tiempos + normalización de SETEO). Deliberadamente
+ *   NO incluye la generación de determinantes ENT1/2/3.../nU —
+ *   diferida a la Fase 3 (hub-consolidation.js), que debe correr antes
+ *   de esa numeración para que sea correcta en rutas con HUB. Ver
+ *   nota de cabecera de route-postprocess.js para el detalle completo.
+ *   Seguro de correr siempre (no-op sobre un Excel ya completamente
+ *   procesado por la macro) — no requiere ningún cambio de UI ni de
+ *   flujo para quien siga usando el proceso actual sin cambios.
  */
 import { State } from '../core/state.js';
 import { normOp } from '../utils/format.js';
@@ -128,6 +143,7 @@ import { processXLS } from '../processors/excel.js';
 import { processPaste } from '../processors/paste.js';
 import { processWTMS } from '../processors/wtms.js';
 import { processInvoiceRaw } from '../processors/invoice-raw.js';
+import { applyRoutePostprocess } from '../features/route-postprocess.js';
 import { runMerge } from '../processors/merge.js';
 import { runSVE } from '../features/validation/sve.js';
 import { exportXLSX } from '../features/export.js';
@@ -249,6 +265,15 @@ export const Events = {
     UI.setSourceProcessing('xls', true);
     try {
       const { rows, factData, ruteoName, factSheetLabel } = await processXLS(file);
+      // CAMBIO (Fase 2 de la migración de la Macro Despacho, ago-2026):
+      // fill-down de RUTA/SETEO/TRACTOR/UNIDAD/CORTINA/tiempos y
+      // normalización de SETEO — ver features/route-postprocess.js.
+      // Seguro de correr siempre: si el Excel ya viene completamente
+      // procesado por la macro (flujo actual), no encuentra nada que
+      // rellenar y es un no-op; si es el "Esqueleto" crudo de ArbeyJr
+      // sin POST_PROCESO_UNIFICADO_FINAL (flujo nuevo que esta fase
+      // habilita), hace el trabajo real.
+      applyRoutePostprocess(rows);
       State.xlsData  = rows;
       State.factData = factData;
 
