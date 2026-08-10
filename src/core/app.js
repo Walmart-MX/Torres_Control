@@ -459,6 +459,12 @@ export async function init() {
   // por fila (NUEVO, jul-2026) — ver wireCatalogAdmin() arriba. ──
   wireCatalogAdmin('ventanaRecibo', 'mcVentanaAdmin');
   wireCatalogAdmin('poolReal', 'mcPoolAdmin');
+  // ── Administración — Exclusiones de HUB (Fase 3 de la migración de
+  // la Macro Despacho, ago-2026) — mismo mecanismo genérico, sin
+  // ningún código nuevo: agrega/elimina filas de
+  // catalog_hub_exclusions vía CatalogStore, consumido directamente
+  // por features/hub-consolidation.js en cada merge. ──
+  wireCatalogAdmin('hubExclusions', 'mcHubExclusionsAdmin');
 
   // ── Administración — Licencias (catálogo de operadores) ──
   document.getElementById('btnCatAdd').addEventListener('click',     () => Events.addCatalogEntry());
@@ -588,6 +594,8 @@ export async function init() {
   // ver ui.js → renderCatalogAdmin().
   UI.renderCatalogAdmin('ventanaRecibo');
   UI.renderCatalogAdmin('poolReal');
+  // ── Exclusiones de HUB (Fase 3, ago-2026) — mismo mecanismo genérico. ──
+  UI.renderCatalogAdmin('hubExclusions');
 
   // ── Aviso de día ya procesado (Camino B, Fase 3) ──
   const todaySession = await DispatchHistory.getTodaySession();
