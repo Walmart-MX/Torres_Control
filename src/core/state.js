@@ -7,6 +7,14 @@
  * un patrón estricto de inmutabilidad. Documentar quién escribe cada
  * propiedad es responsabilidad de quien la modifica.
  *
+ * CAMBIO (Fase 3 de la migración de la Macro Despacho, ago-2026):
+ *   State.catalogs gana `hubExclusions: []` — catálogo de
+ *   determinantes de HUB que no representan entregas reales (ver
+ *   features/catalogs/catalog-registry.js y
+ *   features/hub-consolidation.js). Mismo patrón exacto que
+ *   ventanaRecibo/poolReal — cargado por CatalogStore.loadAll() al
+ *   iniciar la app, sin lógica adicional en este archivo.
+ *
  * No tiene dependencias de otros módulos propios — solo lee localStorage,
  * que está disponible globalmente en el navegador.
  */
@@ -23,8 +31,10 @@ export const State = {
   // FORMATO/TIENDA/ESTADO (Ventana de Recibo) y LINEA/PLACAS/CAPACIDAD
   // (Pool Real). Empiezan vacíos hasta que se importen desde el panel
   // "Catálogos" — el motor de enriquecimiento no-opea con seguridad
-  // mientras tanto.
-  catalogs:     { ventanaRecibo: [], poolReal: [] },
+  // mientras tanto. hubExclusions (Fase 3, ago-2026) — ver nota de
+  // cabecera — no alimenta el enrichment-engine, lo consume
+  // directamente features/hub-consolidation.js.
+  catalogs:     { ventanaRecibo: [], poolReal: [], hubExclusions: [] },
   catalogMeta:  {},   // catalogId → { row_count, updated_at, updated_by }
   catalogIndices: null,   // Map — reconstruido en cada runMerge()
   catalogDuplicates: [],  // llaves duplicadas detectadas — leído por sve.js
