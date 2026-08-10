@@ -179,6 +179,18 @@
  *   sin cambios necesarios en ui.js/edit-system.js: EDITABLE_FIELDS ya
  *   expone MARCHAMO 1-5 como campos editables en el drawer.
  *
+ * CAMBIO (Fase 3 de la migración de la Macro Despacho, ago-2026):
+ *   Se agrega la regla 'hub_consolidated' (SVE_INFO) — reporta cada
+ *   consolidación automática de HUB que hizo
+ *   features/hub-consolidation.js en esta corrida (ver
+ *   processors/merge.js): qué facturas se fusionaron y en cuál fila
+ *   quedó el resultado. Puramente informativa y de trazabilidad — la
+ *   consolidación ya ocurrió automáticamente, esta regla no pide
+ *   ninguna acción, solo dejar constancia auditable para que el
+ *   usuario pueda verificar contra el PDF si tiene dudas. Lee
+ *   r._hubConsolidated, escrito por hub-consolidation.js directamente
+ *   sobre la fila consolidada.
+ *
  * Dependencias:
  *   - State (core/state.js) — lee rows ya vía parámetro, pero escribe
  *     State.sveHasCritical / sveHasWarnings / sveLastQuality
@@ -195,7 +207,7 @@ export const SVE_ICONS = {
   'dup_march':'🔖','dup_march_ruta':'🔁','dup_march_self':'♻️','missing_ruta':'🔴','missing':'🟠',
   'no_march':'🔴','zero_tar':'📐','high_tar':'📐','no_pdf':'🟡',
   'no_fac':'ℹ️','bad_march':'ℹ️','integrity':'🔗','no_ventana':'📇','no_pool':'🚚','cat_dup':'🗂️','time_anomaly':'⏱️',
-  'no_cita':'📅','pdf_ambiguous':'🧩','dette_sin_pdf':'🚫'
+  'no_cita':'📅','pdf_ambiguous':'🧩','dette_sin_pdf':'🚫','hub_consolidated':'📦'
 };
 
 /**
@@ -647,6 +659,22 @@ export function runSVE(rows, screenCount, excludedCount) {
       `Ruta ${ruta}: ${parts.join(' · ')} en los cálculos de tiempo.`,
       'Revisa las fechas capturadas de enrampe/retiro/despacho/caseta.',
       '', [...rowIds]);
+  });
+
+  // P: Consolidación automática de HUB — NUEVO (Fase 3, ago-2026).
+  // Puramente informativa/de trazabilidad — ver nota de cabecera. Lee
+  // r._hubConsolidated, escrito directamente sobre la fila consolidada
+  // por features/hub-consolidation.js (invocado desde merge.js antes
+  // de que estas filas lleguen aquí).
+  rows.forEach(r => {
+    const hc = r._hubConsolidated;
+    if (!hc) return;
+    const ruta = String(getMapped(r,'RUTA')||'').trim();
+    rawAdd(SVE_INFO,'hub_consolidated', ruta, 'DETTE',
+      `Ruta ${ruta}: ${hc.count} facturas (${hc.originalDettes.join(', ')}) se consolidaron automáticamente en el HUB ${hc.destino}.`,
+      'Verifica contra el PDF si tienes dudas sobre la consolidación.',
+      `×${hc.count}`,
+      [r._rowId]);
   });
 
   // K: Integridad "pantalla" vs memoria — ver nota de cabecera "Fix regla K".
