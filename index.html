@@ -1097,6 +1097,7 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
           <button class="admin-nav-item" data-admin="ventana">🏬 Ventana de Recibo</button>
           <button class="admin-nav-item" data-admin="lic">🪪 Licencias</button>
           <button class="admin-nav-item" data-admin="cache">🗄️ Caché de facturas</button>
+          <button class="admin-nav-item" data-admin="hubex">📦 Exclusiones de HUB</button>
           <button class="admin-nav-item" data-admin="maint">🩺 Centro de Mantenimiento</button>
           <button class="admin-nav-item" data-admin="hist">🗂️ Historial</button>
           <button class="admin-nav-item" data-admin="cfg">⚙️ Configuración</button>
@@ -1199,6 +1200,20 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
             <div style="margin-top:10px;text-align:right">
               <button class="btn btn-danger-outline btn-sm" id="btnCacheHistClear">🗑 Limpiar caché histórico</button>
             </div>
+          </div>
+
+          <!-- Exclusiones de HUB (Fase 3 de la migración de la Macro
+               Despacho, ago-2026) — determinantes de HUB que NO
+               representan entregas reales (se usan únicamente para
+               registrar rutas alternas, ver
+               features/hub-consolidation.js). Mismo patrón genérico
+               exacto que Pool Real/Ventana de Recibo — sin
+               "Importar/Reemplazar" masivo porque es una lista corta
+               que se administra fila por fila; #mcHubExclusionsAdmin
+               generado por UI.renderCatalogAdmin('hubExclusions'). -->
+          <div class="admin-panel" data-admin-panel="hubex">
+            <div class="admin-hd"><h3>📦 Exclusiones de HUB</h3><p>Determinantes de HUB que NO representan entregas reales — se usan únicamente para registrar rutas alternas. Cualquier determinante en esta lista nunca se consolida automáticamente, sin excepción.</p></div>
+            <div id="mcHubExclusionsAdmin"><!-- generado por UI.renderCatalogAdmin('hubExclusions') --></div>
           </div>
 
           <!-- Centro de Mantenimiento (Fase 2, jul-2026) —
