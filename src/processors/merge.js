@@ -105,20 +105,39 @@
  *   TIEMP APROX DE CARGA / RETIRO VS DESPACHO / TIEMPO DE DESP /
  *   TIEMPO EN PATIO y la regla SVE 'time_anomaly' tampoco funcionaban.
  *
- *   Orden dentro del loop (importa):
- *     0. Filtrar entregas excluidas (State.excludedDettes) — antes de
- *        cualquier otro paso.
- *     1. Resolver PDF (con el fix de ambigüedad/ausencia) / factura /
- *        despacho
- *     2. Cruce WTMS (Status.ID'S MASTER == WTMS.ID de la carga) →
- *        nr['_CARTA_PORTE'] / nr['_ID_RETORNO']
- *     3. Calendario fiscal sobre row['FECHA'] → nr['_DIA'] / nr['_SW']
- *     4. Enrichment de catálogos (Ventana de Recibo / Pool Real) —
- *        requiere los índices ya construidos UNA VEZ por corrida
- *        (buildIndices), no por fila
- *     5. computeTimes(nr) — AL FINAL, requiere que todos los campos de
- *        fecha/hora de nr ya estén resueltos (ver nota de cabecera en
- *        core/time-engine.js)
+ * CAMBIO (Fase 3 de la migración de la Macro Despacho, ago-2026) —
+ * REORDENAMIENTO DEL PIPELINE a DOS PASADAS:
+ *   Antes, todo el trabajo de una fila (match de PDF/factura/despacho,
+ *   cruce WTMS, calendario fiscal, enrichment de catálogos, motor de
+ *   tiempos) ocurría en UNA sola pasada, dentro del mismo loop, y cada
+ *   `nr` se empujaba a State.merged inmediatamente.
+ *
+ *   La consolidación automática de HUB (features/hub-consolidation.js)
+ *   necesita ver TODAS las filas de una ruta a la vez para poder
+ *   agruparlas por destino real — no puede vivir dentro de un loop
+ *   fila-por-fila. Y una vez que la consolidación cambia el DETTE de
+ *   una fila (de un ID de factura individual al número de HUB real),
+ *   el enrichment de catálogos (Ventana de Recibo, que cruza
+ *   exactamente por DETTE) debe correr DESPUÉS de esa consolidación,
+ *   no antes — si no, buscaría en el catálogo con el DETTE equivocado.
+ *
+ *   Por eso runMerge() ahora tiene dos pasadas:
+ *     PASADA 1 (por fila): filtro de exclusiones, match de PDF/
+ *       factura/despacho, cruce WTMS, calendario fiscal — construye
+ *       cada `nr` pero NO llama enrichRow()/computeTimes() ni empuja a
+ *       State.merged todavía.
+ *     ENTRE PASADAS: consolidateHubs() agrupa por (ruta, destino) y
+ *       colapsa los grupos de HUB; assignDeterminants() genera
+ *       ENT1/2/3.../nU sobre el resultado YA consolidado (ver
+ *       features/hub-consolidation.js para el porqué de este orden,
+ *       validado con datos reales).
+ *     PASADA 2 (por fila, sobre el resultado consolidado): enrichRow()
+ *       (ahora con el DETTE final) y computeTimes() — recién aquí se
+ *       empuja cada fila a State.merged.
+ *
+ *   Ningún comportamiento de la PASADA 1 cambia respecto al código
+ *   anterior — es exactamente la misma lógica, solo que ya no llama
+ *   enrichRow()/computeTimes()/push() al final de cada iteración.
  *
  * Estrategia de match de factura:
  *   1. State.factData (concentrado del Excel recién cargado)
@@ -149,6 +168,7 @@
  *   - buildIndices, enrichRow (features/catalogs/enrichment-engine.js)
  *   - getSW (core/fiscal-calendar.js)
  *   - computeTimes (core/time-engine.js)
+ *   - consolidateHubs, assignDeterminants (features/hub-consolidation.js) — NUEVO (Fase 3)
  *   - IncidentStore (features/incidents/incident-store.js) — sync del
  *     Centro de Mantenimiento
  *   - INCIDENT_TYPES (features/incidents/incident-types.js)
@@ -160,6 +180,7 @@ import { normOp } from '../utils/format.js';
 import { buildIndices, enrichRow } from '../features/catalogs/enrichment-engine.js';
 import { getSW } from '../core/fiscal-calendar.js';
 import { computeTimes } from '../core/time-engine.js';
+import { consolidateHubs, assignDeterminants } from '../features/hub-consolidation.js';
 import { IncidentStore } from '../features/incidents/incident-store.js';
 import { INCIDENT_TYPES } from '../features/incidents/incident-types.js';
 
@@ -189,10 +210,12 @@ export function runMerge() {
   State.catalogIndices    = indices;
   State.catalogDuplicates = duplicates;
 
-  // Acumulador de misses de catálogo de ESTA corrida — alimenta el
-  // sync con el Centro de Mantenimiento al final del loop (ver nota de
-  // cabecera "CAMBIO (Centro de Mantenimiento — Fase 2)").
-  const catalogMissesRaw = [];
+  // ── PASADA 1 (por fila) — ver nota de cabecera "CAMBIO (Fase 3 —
+  // REORDENAMIENTO DEL PIPELINE)". Construye cada `nr` con el match de
+  // PDF/factura/despacho, cruce WTMS y calendario fiscal ya resueltos,
+  // pero SIN enrichment de catálogos ni motor de tiempos todavía —
+  // ambos corren en la PASADA 2, después de consolidar HUB. ──
+  const rawRows = [];
 
   for (const row of State.xlsData) {
     const ruta    = String(row[COL_RUTA]    || '').trim();
@@ -263,7 +286,7 @@ export function runMerge() {
     // Multiple rows sharing the same RUTA but different destinations remain
     // distinguishable. EditSystem uses this ID as the canonical pointer to
     // guarantee it mutates exactly the right object in State.merged.
-    const _rowId = ruta + '||' + (detteF || String(State.merged.length));
+    const _rowId = ruta + '||' + (detteF || String(rawRows.length));
     const nr = { ...row, _rowId, _matched: !!pdfRow, _factMatched: !!factRow, _despMatched: !!despRow };
 
     // Marca de integridad — leída por features/validation/sve.js (regla
@@ -355,19 +378,54 @@ export function runMerge() {
       }
     }
 
+    rawRows.push(nr);
+  }
+
+  // ── Consolidación automática de HUB (Fase 3, ago-2026) ──
+  // Ver features/hub-consolidation.js para el detalle completo de la
+  // regla (validada con datos reales) y del catálogo de exclusión.
+  // Corre sobre TODAS las filas de rawRows a la vez (necesita ver el
+  // conjunto completo de cada ruta para poder agrupar por destino).
+  const excludedDeterminantes = new Set(
+    (State.catalogs.hubExclusions || [])
+      .map(r => String(r['DETERMINANTE'] || '').trim())
+      .filter(Boolean)
+  );
+  const consolidatedRows = consolidateHubs(rawRows, excludedDeterminantes);
+
+  // ── Determinantes ENT1/2/3.../nU (Fase 3) ──
+  // SIEMPRE después de consolidar — ver nota de cabecera de
+  // hub-consolidation.js para por qué el orden importa (numerar antes
+  // de consolidar produciría una numeración que nunca existió en el
+  // proceso real).
+  assignDeterminants(consolidatedRows);
+
+  // ── PASADA 2 (por fila, sobre el resultado YA consolidado) —
+  // enrichment de catálogos maestros + motor de tiempos. Ver nota de
+  // cabecera "CAMBIO (Fase 3 — REORDENAMIENTO DEL PIPELINE)": debe
+  // correr aquí, no en la pasada 1, porque el DETTE de las filas
+  // consolidadas por HUB solo es el valor FINAL a partir de este punto.
+  const catalogMissesRaw = [];
+
+  for (const nr of consolidatedRows) {
     // ── Enrichment de catálogos maestros (Ventana de Recibo / Pool Real) ──
     // No-op seguro si el catálogo correspondiente aún no se ha importado
     // (ver enrichment-engine.js). Los "misses" alimentan las reglas SVE
     // L/M (no_ventana/no_pool) Y, desde jul-2026, el Centro de
-    // Mantenimiento (ver catalogMissesRaw más abajo).
-    nr._enrichMisses = enrichRow(nr, row, indices);
+    // Mantenimiento (ver catalogMissesRaw más abajo). Se pasa `nr` como
+    // ambos argumentos (fila final Y fila "cruda") porque, tras la
+    // consolidación de HUB, `nr['DETTE']` ya es el valor FINAL — no el
+    // de la fila original de RUTEO NUEVO, que pudo pertenecer a una
+    // factura individual ya absorbida por el grupo.
+    nr._enrichMisses = enrichRow(nr, nr, indices);
+    const ruta = String(nr[COL_RUTA] || '').trim();
     nr._enrichMisses.forEach(m => {
       catalogMissesRaw.push({ sourceId: m.catalog, keyName: m.index, keyValue: m.val, ruta });
     });
 
-    // ── Motor de tiempos — SIEMPRE al final del loop, requiere que nr
-    // ya tenga resueltos todos sus campos de fecha/hora (PDF, despacho,
-    // facturación) calculados arriba. ──
+    // ── Motor de tiempos — requiere que nr ya tenga resueltos todos
+    // sus campos de fecha/hora (PDF, despacho, facturación), calculados
+    // en la PASADA 1. ──
     nr._timeAnomalies = computeTimes(nr);
 
     State.merged.push(nr);
