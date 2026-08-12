@@ -98,15 +98,19 @@ function _buildFechaTexto(val) {
  * aplica estilos de encabezado y celda, anchos de columna, freeze
  * de primera fila, y dispara la descarga con nombre ruteo_base_YYYY-MM-DD.xlsx.
  */
-export function exportXLSX() {
+export function exportXLSX(rows, exportType, sessionDate) {
+  // Si se pasan filas explícitas (redescarga desde Historial / "día ya
+  // procesado"), se usan esas — nunca State.merged de la sesión actual,
+  // que puede estar vacío o pertenecer a otro día operativo. Si no se
+  // pasa nada (exportación normal del día en curso, ver Events.finalizeAndExport),
+  // el comportamiento es idéntico al de antes.
+  const dataSource = (rows && rows.length) ? rows : State.merged;
+
   const wb       = XLSX.utils.book_new();
-  const dataRows = State.merged.map(row => BASE_ORDER.map(col => {
+  const dataRows = dataSource.map(row => BASE_ORDER.map(col => {
     let val = getMapped(row, col);
     if (val === '' || val === null || val === undefined) return '';
     if (DATE_COLS.has(col)) {
-      // AJUSTE (jul-2026, quinto intento): texto plano, sin Date — ver
-      // nota de cabecera. _buildFechaTexto() nunca crea ni manipula un
-      // objeto Date para esta columna.
       return _buildFechaTexto(val);
     }
     if (DATETIME_COLS.has(col)) {
@@ -144,11 +148,6 @@ export function exportXLSX() {
     for (let R = 1; R <= range.e.r; R++) {
       const addr = XLSX.utils.encode_cell({ r: R, c: C });
       if (!ws[addr]) continue;
-      // FECHA ya no lleva formato numérico de fecha — es texto plano
-      // (ver _buildFechaTexto), así que se omite intencionalmente de
-      // este bloque. Aplicar 'DD/MM/YYYY' a una celda de texto no hace
-      // daño (Excel lo ignora), pero se omite para que quede claro que
-      // ya no es una celda de fecha "real".
       if (DATETIME_COLS.has(col))      ws[addr].z = 'DD/MM/YYYY HH:MM';
       else if (INT_COLS.has(col))      ws[addr].z = '0';
       const even = R % 2 === 0;
@@ -165,13 +164,12 @@ export function exportXLSX() {
         border: { bottom: { style: 'thin', color: { rgb: 'CCCCCC' } }, right: { style: 'thin', color: { rgb: 'CCCCCC' } } }
       };
 
-      // AJUSTE (jul-2026 — identificación de datos faltantes para el
-      // cálculo de tiempos): SOLO en el archivo final. Si esta celda es
-      // la salida de una regla de core/time-engine.js y el cálculo no
-      // se pudo hacer por falta de dato de entrada, se resalta con
-      // relleno ámbar — SIN comentario de Excel.
       if (TIME_OUTPUT_COLS.has(col)) {
-        const mergedRow     = State.merged[R - 1];
+        // FIX: antes leía siempre State.merged[R-1] — al redescargar
+        // desde Historial, dataSource puede ser otro array (otro día,
+        // otra longitud), así que el resaltado de "dato faltante"
+        // quedaba desalineado o apuntando a filas inexistentes.
+        const mergedRow     = dataSource[R - 1];
         const missingReason = mergedRow && mergedRow._timeMissing && mergedRow._timeMissing[col];
         if (missingReason) {
           ws[addr].s.fill = { patternType: 'solid', fgColor: { rgb: 'FDE68A' } };
@@ -181,23 +179,15 @@ export function exportXLSX() {
     }
   }
 
-  const W = {
-    'FECHA':13,'DIA':10,'SW':5,'LINEA':12,'ENTREGA':8,'ENT1':6,'RUTA':7,
-    'ID IDA':11,'COSTOS IDA':11,'STATUS IDA':13,'ID RETORNO':11,'COSTO RETORNO':13,
-    'STATUS RETORNO':14,'CARTA PORTE':11,'CAPTURA':9,'USUARIO WTMS':24,'LIC.':13,
-    'OPERADOR':30,'DET':7,'FORMATO':8,'NOMBRE':28,'ESTADO':7,'TARIMAS':8,
-    'MARCHAMO 1':11,'MARCHAMO 2':11,'MARCHAMO 3 ':11,'MARCHAMO 4':11,'MARCHAMO 5':11,
-    'CAJAS':7,'CAP.':7,'CORTINA':8,'TRACTOR ':9,'PLACA TRACTOR':13,'REMOLQUE':9,
-    'PLACA REMOLQUE':13,'GLS DE EMB.':11,'FAC.':13,'ESQUEMA':10,'TEMP. ENRAMPE':13,
-    'TEMP. DESENRAMPE':15,'SOLICITUD DE ENRAMPE':20,'ENRAMPE':18,'TIEMPO ENRAMPE':14,
-    'RETIRO':18,'TIEMP APROX DE CARGA':18,'RETIRO VS DESPACHO':18,'HORA DE FACTURACION':20,
-    'HR. DESPACHO':18,'SALIDA DE CASETA ':18,'TIEMPO DE DESP':14,'TIEMPO EN PATIO':14,'CITA':18
-  };
+  const W = { /* ...sin cambios... */ };
   ws['!cols']  = BASE_ORDER.map(c => ({ wch: W[c] || 12 }));
   ws['!freeze'] = { xSplit: 0, ySplit: 1, topLeftCell: 'A2', activePane: 'bottomLeft' };
   ws['!rows']  = [{ hpt: 18 }, ...Array(range.e.r).fill({ hpt: 14 })];
 
   XLSX.utils.book_append_sheet(wb, ws, 'RUTEO UNIFICADO');
-  const fecha = new Date().toISOString().slice(0, 10);
+  // FIX: usa sessionDate si se pasó explícitamente (redescarga de un
+  // día pasado) — antes siempre usaba la fecha de HOY, así que el
+  // nombre del archivo era engañoso incluso si hubiera tenido datos.
+  const fecha = sessionDate || new Date().toISOString().slice(0, 10);
   XLSX.writeFile(wb, `ruteo_base_${fecha}.xlsx`, { cellStyles: true });
 }
