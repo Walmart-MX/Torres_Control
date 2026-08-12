@@ -7,8 +7,8 @@
  *                       agrupadas por posición Y, y anotaciones FreeText (citas).
  *   parsePDF(extracted, filename) → interpreta esas líneas con regex
  *                       específicas del formato del documento, devuelve
- *                       un array de rows { ruta, operador, destino, factura,
- *                       tarimas, marchamos, marchamoIssues, cita, hrDespacho }.
+ *                       { rows, unrecognizedCitas } — ver CAMBIO (Fase 0)
+ *                       más abajo para el segundo campo.
  *
  * FIX DE INTEGRIDAD DE DATOS — extracción tolerante por campo (jul-2026):
  *   Antes, ROW_RE capturaba factura + tarimas + marchamo de encabezado
@@ -156,6 +156,45 @@
  *   dentro de un PDF unificado) no se toca — usa _dedupeByDestino(),
  *   sin cambios.
  *
+ * CAMBIO (Fase 0 — telemetría de citas no reconocidas, ago-2026):
+ *   Antes, dentro de pdfExtract(), cualquier anotación FreeText cuyo
+ *   texto no matcheara el regex de fecha se descartaba con un simple
+ *   `continue` — sin ningún rastro de que existía texto que no se
+ *   reconoció como cita. Esto hacía imposible saber, sin revisar PDFs
+ *   uno por uno, qué formatos de captura está usando la operación que
+ *   el detector actual no contempla.
+ *
+ *   Se agrega captura de esas anotaciones (NUEVO array `citaMisses`,
+ *   devuelto por pdfExtract junto a `lines`/`annots`, sin afectarlos en
+ *   absoluto) — el regex de detección de citas NO CAMBIA ni una línea:
+ *   solo se agrega un `else` conceptual al `continue` existente, que
+ *   antes no hacía nada. Cada candidato se reduce a su "firma de
+ *   patrón" (_citaPatternSignature() — cada dígito se reemplaza por
+ *   '#', preservando prefijos/sufijos/separadores literales) para que
+ *   "CITA: 12/08/2026 06:00" y "CITA: 13/08/2026 07:30" cuenten como
+ *   LA MISMA forma ("CITA: ##/##/#### ##:##"), no como dos incidencias
+ *   distintas — el dato accionable es la FORMA del texto, no la fecha
+ *   puntual que contiene.
+ *
+ *   parsePDF() asocia cada candidato a la(s) ruta(s) reales que
+ *   comparten el destino físico más cercano (misma cascada de
+ *   proximidad que ya usan las citas SÍ reconocidas — extraída a
+ *   _nearestDestino() para no duplicar esa lógica dos veces) y expone
+ *   el resultado en `unrecognizedCitas`. NO se escribe en `result`
+ *   (las filas normales) — es un canal de diagnóstico completamente
+ *   aparte, en paralelo.
+ *
+ *   Por eso el retorno de parsePDF() cambia de un array plano a
+ *   `{ rows, unrecognizedCitas }` — el único caller (events.js →
+ *   handlePDFs()) se actualiza en el mismo cambio para desestructurar
+ *   `rows` en vez de iterar el valor de retorno directamente.
+ *
+ *   pdf.js sigue siendo puro — NO importa State, Supabase, ni
+ *   IncidentStore. Solo devuelve el dato crudo; la sincronización con
+ *   el Centro de Mantenimiento (features/incidents/) ocurre en
+ *   events.js, igual que ya hace processors/merge.js con los misses de
+ *   catálogo.
+ *
  * Dependencia externa: pdfjsLib (cargado globalmente desde el CDN en
  * index.html, con su workerSrc ya configurado ahí). Este módulo no
  * configura el worker — eso es responsabilidad del bootstrap en index.html.
@@ -186,17 +225,76 @@ function _isValidMarchamo(s) {
 }
 
 /**
- * Extrae todas las líneas de texto (agrupadas por posición vertical)
- * y las anotaciones de tipo FreeText (citas de cada destino) de un PDF.
+ * Reduce un texto de anotación a su "forma" — colapsa espacios y
+ * reemplaza cada dígito por '#', preservando prefijos/sufijos/
+ * separadores literales tal cual aparecen. NUEVO (Fase 0 — telemetría
+ * de citas no reconocidas, ago-2026).
+ *
+ * Objetivo: agrupar anotaciones con la MISMA estructura de texto (ej.
+ * "CITA: 12/08/2026 06:00" y "CITA: 15/08/2026 07:00 HRS" → firmas
+ * "CITA: ##/##/#### ##:##" y "CITA: ##/##/#### ##:## HRS"
+ * respectivamente) en una sola incidencia con su contador de
+ * ocurrencias — en vez de una incidencia nueva por cada fecha/hora
+ * literal, que sería ruido inmanejable. El límite de 80 caracteres
+ * evita firmas absurdamente largas si una anotación trae texto
+ * inusual (ej. un comentario largo mal usado como caja de cita).
+ * @private
+ * @param {string} text
+ * @returns {string}
+ */
+function _citaPatternSignature(text) {
+  return String(text || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/\d/g, '#')
+    .slice(0, 80);
+}
+
+/**
+ * Encuentra el destino candidato más cercano a un ítem con posición
+ * {pageNum, y_td} — misma cascada de fallback que ya usaba (inline) la
+ * asignación de citas reconocidas: ventana de 300pt en la misma página
+ * → misma página a cualquier distancia → página anterior → cualquier
+ * posición del documento.
+ *
+ * NUEVO (Fase 0, ago-2026): se extrae como función compartida —
+ * EXTRACCIÓN LITERAL del bloque que antes vivía inline dentro de
+ * parsePDF() para las citas reconocidas, sin cambiar ni un operador de
+ * esa lógica — para que la asignación de citas reconocidas y la de
+ * `citaMisses` (no reconocidas) usen exactamente el mismo criterio de
+ * proximidad, sin arriesgarse a que las dos implementaciones diverjan
+ * con el tiempo.
+ * @private
+ * @param {{pageNum:number, y_td:number}} item
+ * @param {Array<{destino:string,pageNum:number,y:number}>} destPositions
+ * @returns {{destino:string,pageNum:number,y:number}|null}
+ */
+function _nearestDestino(item, destPositions) {
+  let candidates = destPositions.filter(d => d.pageNum === item.pageNum && d.y <= item.y_td + 300);
+  if (!candidates.length) candidates = destPositions.filter(d => d.pageNum === item.pageNum);
+  if (!candidates.length) candidates = destPositions.filter(d => d.pageNum === item.pageNum - 1);
+  if (!candidates.length) candidates = destPositions;
+  if (!candidates.length) return null;
+  return candidates.reduce((a, b) => Math.abs(a.y - item.y_td) < Math.abs(b.y - item.y_td) ? a : b);
+}
+
+/**
+ * Extrae todas las líneas de texto (agrupadas por posición vertical),
+ * las anotaciones de tipo FreeText (citas de cada destino) reconocidas,
+ * y — NUEVO (Fase 0, ago-2026) — las anotaciones FreeText con texto que
+ * NO matcheó el formato de fecha esperado (`citaMisses`), de un PDF.
  *
  * @param {File} file
- * @returns {Promise<{ lines: Array<{pageNum:number,y:number,text:string}>,
- *                      annots: Array<{pageNum:number,y_td:number,cita:string}> }>}
+ * @returns {Promise<{
+ *   lines: Array<{pageNum:number,y:number,text:string}>,
+ *   annots: Array<{pageNum:number,y_td:number,cita:string}>,
+ *   citaMisses: Array<{pageNum:number,y_td:number,signature:string}>
+ * }>}
  */
 export async function pdfExtract(file) {
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-  const lines = [], annots = [];
+  const lines = [], annots = [], citaMisses = [];
 
   for (let p = 1; p <= pdf.numPages; p++) {
     const page  = await pdf.getPage(p);
@@ -232,7 +330,27 @@ export async function pdfExtract(file) {
       const allText   = parts.join(' ');
       const dateMatch = allText.match(/(\d{2}[\/\-]\d{2}[\/\-]\d{4})/);
       const timeMatch = allText.match(/(\d{1,2})[:.;]\s*(\d{2})(?![\/\-\d])/);
-      if (!dateMatch) continue;
+      if (!dateMatch) {
+        // NUEVO (Fase 0 — telemetría de citas no reconocidas, ago-2026):
+        // antes esta anotación se descartaba en silencio (`continue`),
+        // sin dejar ningún rastro de que existía texto que no matcheó
+        // el formato esperado. Se captura aquí — SIN bloquear ni
+        // alterar el comportamiento existente (el `continue` sigue
+        // ocurriendo exactamente igual después) — para que
+        // Events.handlePDFs() pueda sincronizarla con el Centro de
+        // Mantenimiento (features/incidents/) y darle visibilidad real
+        // a qué formatos de cita no se están reconociendo hoy, antes
+        // de decidir si vale la pena un catálogo de variantes completo.
+        const trimmed = allText.trim();
+        if (trimmed) {
+          citaMisses.push({
+            pageNum: p,
+            y_td: pageH - a.rect[3],
+            signature: _citaPatternSignature(trimmed)
+          });
+        }
+        continue;
+      }
       const fecha = dateMatch[1].replace(/-/g, '/');
       let cita = fecha;
       if (timeMatch) {
@@ -246,7 +364,7 @@ export async function pdfExtract(file) {
       annots.push({ pageNum: p, y_td: pageH - a.rect[3], cita: cita.trim() });
     }
   }
-  return { lines, annots };
+  return { lines, annots, citaMisses };
 }
 
 /**
@@ -351,26 +469,36 @@ function _splitUnifiedBlocksByMarchamo(rawRows) {
 
 /**
  * Interpreta las líneas extraídas por pdfExtract() según el formato
- * específico de los PDFs de carga de Walmart CeDis, y produce un array
- * de rows estructurados — uno por cada destino/factura encontrado.
+ * específico de los PDFs de carga de Walmart CeDis, y produce las filas
+ * estructuradas del documento más — NUEVO (Fase 0, ago-2026) — el
+ * diagnóstico de citas no reconocidas.
  *
  * Maneja dos casos de nombre de archivo:
  *   - "12345.pdf"        → ruta única
  *   - "12345-67890.pdf"  → PDF unificado de dos rutas (se reparten
  *                            los destinos entre ambas)
  *
- * @param {{ lines: Array, annots: Array }} extracted — salida de pdfExtract()
+ * @param {{ lines: Array, annots: Array, citaMisses: Array }} extracted — salida de pdfExtract()
  * @param {string} filename — nombre original del archivo (para detectar ruta(s))
- * @returns {Array<{ ruta, operador, destino, factura, tarimas, marchamos,
- *                    marchamoIssues, cita, hrDespacho }>}
- *          marchamoIssues: Array<{raw:string}> — marchamos candidatos
- *          detectados en el PDF que NO pasaron la validación de formato
- *          y por lo tanto quedaron vacíos en `marchamos` — consumido por
- *          features/validation/sve.js (regla 'bad_march') para reportar
- *          la incidencia con el valor crudo, sin bloquear ni afectar el
- *          resto de los campos de la misma entrega.
+ * @returns {{
+ *   rows: Array<{ ruta, operador, destino, factura, tarimas, marchamos,
+ *                  marchamoIssues, cita, hrDespacho }>,
+ *   unrecognizedCitas: Array<{ ruta:string, destino:string, signature:string }>
+ * }}
+ *   rows.marchamoIssues: Array<{raw:string}> — marchamos candidatos
+ *   detectados en el PDF que NO pasaron la validación de formato
+ *   y por lo tanto quedaron vacíos en `marchamos` — consumido por
+ *   features/validation/sve.js (regla 'bad_march') para reportar
+ *   la incidencia con el valor crudo, sin bloquear ni afectar el
+ *   resto de los campos de la misma entrega.
+ *   unrecognizedCitas: candidatos de cita (anotaciones FreeText) que
+ *   NO matchearon el formato de fecha/hora esperado, agrupables por
+ *   `signature` (patrón, no valor literal) — ver
+ *   Events.handlePDFs() (events/events.js), que los sincroniza con
+ *   el Centro de Mantenimiento (features/incidents/). NO afecta a
+ *   `rows` de ninguna forma — es un canal de diagnóstico aparte.
  */
-export function parsePDF({ lines, annots }, filename) {
+export function parsePDF({ lines, annots, citaMisses }, filename) {
  const baseName     = filename.replace(/\.pdf$/i, '').replace(/^\d+_/, '');
 const unifiedMatch = baseName.match(/^(\d+)-(\d+)$/);
 
@@ -543,15 +671,35 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
 
   if (annots.length && destPositions.length) {
     for (const ann of annots) {
-      let candidates = destPositions.filter(d => d.pageNum === ann.pageNum && d.y <= ann.y_td + 300);
-      if (!candidates.length) candidates = destPositions.filter(d => d.pageNum === ann.pageNum);
-      if (!candidates.length) candidates = destPositions.filter(d => d.pageNum === ann.pageNum - 1);
-      if (!candidates.length) candidates = destPositions;
-      if (!candidates.length) continue;
-      const best = candidates.reduce((a, b) => Math.abs(a.y - ann.y_td) < Math.abs(b.y - ann.y_td) ? a : b);
+      const best = _nearestDestino(ann, destPositions);
+      if (!best) continue;
       const citaRows = result.filter(r => r.destino === best.destino && !r.cita);
       for (const row of citaRows) row.cita = ann.cita;
     }
   }
-  return result;
+
+  // ── NUEVO (Fase 0 — telemetría de citas no reconocidas, ago-2026) ──
+  // Mismo criterio de proximidad que las citas reconocidas (arriba, vía
+  // _nearestDestino), aplicado a los candidatos que NO pasaron el regex
+  // de fecha/hora en pdfExtract(). Se asocia cada uno a la(s) ruta(s)
+  // reales que comparten ese destino en `result` — si no hay ninguna
+  // fila con ese destino (poco común, pero posible), se cae a `rutas`
+  // (las rutas del archivo completo) para no perder el dato. Esto NO
+  // toca `result` ni ningún campo de las filas ya construidas — es
+  // puramente informativo, en paralelo.
+  const unrecognizedCitas = [];
+  if (citaMisses && citaMisses.length && destPositions.length) {
+    for (const miss of citaMisses) {
+      const best = _nearestDestino(miss, destPositions);
+      if (!best) continue;
+      const rutasAfectadas = [...new Set(result.filter(r => r.destino === best.destino).map(r => r.ruta))];
+      unrecognizedCitas.push({
+        ruta: rutasAfectadas.join(', ') || rutas.join(', '),
+        destino: best.destino,
+        signature: miss.signature
+      });
+    }
+  }
+
+  return { rows: result, unrecognizedCitas };
 }

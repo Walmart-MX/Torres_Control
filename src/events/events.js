@@ -86,6 +86,21 @@
  *   tolerante por campo — un marchamo inválido ya no vacía
  *   factura/destino, así que esta colisión de claves vacías será cada
  *   vez menos frecuente, pero se corrige de raíz de todas formas).
+ *
+ * CAMBIO (Fase 0 — telemetría de citas no reconocidas, ago-2026):
+ *   processors/pdf.js → parsePDF() cambia su retorno de un array plano
+ *   a { rows, unrecognizedCitas } — ver cabecera de ese archivo para el
+ *   detalle completo. handlePDFs() se actualiza para desestructurar
+ *   `rows` (mismo uso que antes, sin cambio de comportamiento) y además
+ *   recolecta `unrecognizedCitas` de TODOS los PDFs del lote en
+ *   `citaMissesRaw`. Al terminar el lote, se sincroniza una sola vez
+ *   con el Centro de Mantenimiento vía IncidentStore.sync() — mismo
+ *   patrón fire-and-forget que ya usa processors/merge.js para los
+ *   misses de catálogo (nunca bloquea el flujo ni el merge). Objetivo:
+ *   visibilidad de qué formatos de cita el detector actual no
+ *   reconoce, sin tocar la detección misma en absoluto — ver
+ *   features/incidents/incident-types.js (tipo 'cita_unrecognized') y
+ *   processors/pdf.js para el resto del diseño.
  */
 import { State } from '../core/state.js';
 import { normOp } from '../utils/format.js';
@@ -105,6 +120,7 @@ import { addOperator, deleteOperator, importOperators } from '../features/catalo
 import { DispatchHistory } from '../features/dispatch-history.js';
 import { CatalogStore } from '../features/catalogs/catalog-store.js';
 import { IncidentStore } from '../features/incidents/incident-store.js';
+import { INCIDENT_TYPES } from '../features/incidents/incident-types.js';
 
 export const Events = {
 
@@ -181,11 +197,20 @@ export const Events = {
     UI.setSourceProcessing('pdf', true);
     const errors = [];
     let ok = 0;
+    // NUEVO (Fase 0 — telemetría de citas no reconocidas, ago-2026):
+    // acumula los candidatos de TODOS los PDFs de este lote — ver
+    // processors/pdf.js → parsePDF() (campo `unrecognizedCitas`) y la
+    // sincronización al final de este método.
+    const citaMissesRaw = [];
     try {
       for (let i = 0; i < files.length; i++) {
         try {
           const extracted = await pdfExtract(files[i]);
-          const parsed    = parsePDF(extracted, files[i].name);
+          // CAMBIO (Fase 0): parsePDF() ahora devuelve
+          // { rows, unrecognizedCitas } en vez de un array plano — ver
+          // processors/pdf.js. `parsed` conserva exactamente el mismo
+          // contenido/uso que antes (se sigue iterando igual abajo).
+          const { rows: parsed, unrecognizedCitas } = parsePDF(extracted, files[i].name);
           for (const r of parsed) {
             // FIX (jul-2026) — ver nota de cabecera "FIX DE INTEGRIDAD DE
             // DATOS": nunca indexar una clave con factura/destino vacío.
@@ -195,6 +220,15 @@ export const Events = {
             if (r.factura) State.pdfData.set(r.ruta + '|' + r.factura,   r);
             if (r.destino) State.pdfData.set(r.ruta + '|D|' + r.destino, r);
           }
+          // NUEVO (Fase 0): cada candidato ya trae `ruta`/`destino`/
+          // `signature` — se traduce al shape genérico que espera
+          // IncidentStore.sync() (mismo contrato que usa
+          // processors/merge.js para catalog_miss). sourceId es
+          // siempre el literal 'pdf' — no hay múltiples catálogos como
+          // en ese otro tipo de incidencia.
+          (unrecognizedCitas || []).forEach(m => {
+            citaMissesRaw.push({ sourceId: 'pdf', keyName: 'patron_texto', keyValue: m.signature, ruta: m.ruta });
+          });
           if (parsed.length) ok++;
           else errors.push('Sin datos: ' + files[i].name);
         } catch (e) { errors.push('Error: ' + files[i].name + ' — ' + e.message); }
@@ -209,6 +243,19 @@ export const Events = {
     UI.setSourceStatus('pdf', true, '✓ Completo', `${ok} archivos · ${uniqueCount} entregas`);
 
     if (errors.length) UI.showErrors(errors);
+
+    // NUEVO (Fase 0 — telemetría de citas no reconocidas, ago-2026):
+    // fire-and-forget, mismo patrón que processors/merge.js con los
+    // misses de catálogo — nunca bloquea el flujo de Preparación ni el
+    // merge que sigue abajo. sourceIds=['pdf'] marca 'pdf' como
+    // "evaluado en esta corrida" para que IncidentStore pueda
+    // auto-resolver patrones que ya no aparecieron (ver
+    // incident-store.js, nota "AUTO-RESOLUCIÓN SEGURA").
+    if (citaMissesRaw.length) {
+      IncidentStore.sync(INCIDENT_TYPES.cita_unrecognized.id, ['pdf'], citaMissesRaw)
+        .catch(e => console.warn('[Events] No se pudo sincronizar telemetría de citas no reconocidas:', e.message));
+    }
+
     Events.triggerMerge();
   },
 
@@ -519,6 +566,12 @@ export const Events = {
    * usuario entra a ese sub-panel (ver app.js → adminNav listener) —
    * los datos pueden haber cambiado desde la última corrida de merge,
    * así que se refresca en cada visita en vez de cachear.
+   *
+   * NOTA (Fase 0, ago-2026): esta lista ahora también puede incluir
+   * incidencias de tipo 'cita_unrecognized' (ver
+   * features/incidents/incident-types.js) — IncidentStore.listOpen()
+   * sin filtro de `type` ya las trae junto con 'catalog_miss', sin
+   * ningún cambio necesario aquí.
    */
   async loadMaintenanceCenter() {
     UI.setMaintenanceStatus('Cargando…', 'ok');
