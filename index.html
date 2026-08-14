@@ -954,7 +954,11 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
         <div>
           <div class="eyebrow">Paso 2 de 3</div>
           <div class="screen-title">Correcciones</div>
-          <div class="screen-sub">Resuelve cada incidencia sin salir de esta pantalla — un campo, un valor, listo.</div>
+          <!-- NUEVO (ago-2026 — "reabrir para corregir"): id agregado
+               para que UI.renderFixList() pueda alternar el texto entre
+               el flujo normal y el aviso de sesión reabierta desde el
+               Historial (ver ui.js → FIX_SUB_DEFAULT/FIX_SUB_REVIEW). -->
+          <div class="screen-sub" id="fixScreenSub">Resuelve cada incidencia sin salir de esta pantalla — un campo, un valor, listo.</div>
         </div>
         <!-- Acceso SIEMPRE visible a Calidad — NUEVO (jul-2026, Etapa 4).
              Mismo destino que #btnGoQuality (más abajo, dentro del
@@ -1316,7 +1320,12 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
           <tbody id="histPreviewTbody"></tbody>
         </table>
       </div>
-      <div style="margin-top:14px;text-align:right">
+      <!-- NUEVO (ago-2026 — "reabrir para corregir"): botón hermano de
+           "Descargar de nuevo" — reutiliza Events._currentHistorySession,
+           ya fijado por selectHistorySession()/previewTodaySession()
+           (ver core/app.js para el listener). -->
+      <div style="margin-top:14px;text-align:right;display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-ghost btn-sm" id="btnHistoryReopen">↺ Reabrir para corregir</button>
         <button class="btn btn-amber" id="btnHistoryRedownload">⬇ Descargar de nuevo</button>
       </div>
     </div>
