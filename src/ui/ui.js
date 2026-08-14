@@ -135,6 +135,15 @@
  *   las otras variantes de tarjeta — no se agrega ningún listener
  *   nuevo al DOM.
  *
+ * CAMBIO (ago-2026 — "reabrir para corregir"):
+ *   renderFixList() gana un aviso contextual: cuando State.reviewSessionId
+ *   está activo (ver events.js → reopenSession()), el subtítulo de la
+ *   pantalla Correcciones (#fixScreenSub, ver index.html) cambia de
+ *   texto para dejar explícito que esta no es una captura nueva del
+ *   día — evita que el usuario se confunda al ver incidencias sin
+ *   haber cargado las 4 fuentes en Preparación. Puramente cosmético,
+ *   no afecta ninguna lógica de negocio ni ningún otro render.
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - escH (utils/dom.js)
@@ -228,6 +237,14 @@ let _fixPeakTotal = null;
 // Mapea la clave de fuente ('pdf'|'xls'|'wtms'|'desp') al sufijo de
 // IDs usado en el HTML de Preparación (#dropPDF/#pdfSub/#pdfStatus, etc).
 const SOURCE_ID = { pdf: 'PDF', xls: 'XLS', wtms: 'WTMS', desp: 'DESP' };
+
+// Texto por defecto del subtítulo de Correcciones — NUEVO (ago-2026,
+// ver nota de cabecera "reabrir para corregir"). Se guarda aquí como
+// constante para no repetir el literal en renderFixList() y para que
+// quede claro cuál es el texto "normal" al que se vuelve cuando
+// State.reviewSessionId se limpia.
+const FIX_SUB_DEFAULT = 'Resuelve cada incidencia sin salir de esta pantalla — un campo, un valor, listo.';
+const FIX_SUB_REVIEW  = '↺ Sesión reabierta desde el Historial — corrige lo pendiente y exporta de nuevo.';
 
 export const UI = {
 
@@ -904,6 +921,14 @@ export const UI = {
     const infoWrap  = document.getElementById('fixInfoSection');
     const infoList  = document.getElementById('fixInfoList');
     if (!list || !counter || !progress) return;
+
+    // NUEVO (ago-2026 — "reabrir para corregir"): deja explícito en el
+    // subtítulo de la pantalla que esta no es una captura nueva del día
+    // — evita que el usuario se confunda al ver incidencias sin haber
+    // cargado las 4 fuentes en Preparación. Ver events.js →
+    // reopenSession()/checkSources() para el resto del mecanismo.
+    const subEl = document.getElementById('fixScreenSub');
+    if (subEl) subEl.textContent = State.reviewSessionId ? FIX_SUB_REVIEW : FIX_SUB_DEFAULT;
 
     // NUEVO (jul-2026) — ver nota de cabecera. Se actualiza en cada
     // paso por este método (cubre triggerMerge, _revalidateAfterEdit,
@@ -1588,6 +1613,10 @@ export const UI = {
     State.wtmsData = new Map();   // FIX: faltaba en el reset original — bug latente desde que se agregó WTMS
     State.excludedDettes = new Set();
     State.excludedCount  = 0;
+    // NUEVO (ago-2026 — "reabrir para corregir"): salir del modo
+    // revisión al reiniciar por completo — ver events.js, nota de
+    // cabecera "reabrir para corregir".
+    State.reviewSessionId = null;
     State.merged   = [];
     State.sveIssues = [];
     State.sveHasCritical = false;
