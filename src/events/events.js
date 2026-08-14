@@ -101,6 +101,54 @@
  *   reconoce, sin tocar la detección misma en absoluto — ver
  *   features/incidents/incident-types.js (tipo 'cita_unrecognized') y
  *   processors/pdf.js para el resto del diseño.
+ *
+ * CAMBIO (ago-2026 — "reabrir para corregir", Historial como punto de
+ * retoma):
+ *   Contexto: se evaluó y se descartó (decisión de EduarDo, confirmada
+ *   tras auditoría arquitectónica) un modelo colaborativo en tiempo
+ *   real (dos usuarios trabajando simultáneamente sobre la misma
+ *   sesión, con Realtime/Presence/locking de Supabase). El caso de uso
+ *   real es mucho más simple y mucho más frecuente: el 90% del tiempo
+ *   se trabaja solo; el escenario a cubrir es que el Usuario A procese
+ *   el día pero la calidad quede baja, y el Usuario B (o el mismo A más
+ *   tarde) retome esa sesión YA EXPORTADA desde el Historial para
+ *   seguir corrigiendo y volver a exportar con mejor calidad — nunca
+ *   simultáneo, siempre secuencial.
+ *
+ *   Se agrega reopenSession(sessionId) — carga las filas ya mergeadas
+ *   de una sesión completada (DispatchHistory.getSessionRows(), mismo
+ *   shape que State.merged, _rowId incluido) directamente en memoria y
+ *   marca State.reviewSessionId. NO llama a runMerge(): no hay fuentes
+ *   crudas que cruzar, el resultado del cruce ya es lo que se está
+ *   cargando. Corre runSVE() de inmediato (sin screenCount — la regla K
+ *   de integridad Excel-vs-memoria se salta automáticamente cuando ese
+ *   parámetro se omite, comportamiento ya documentado en sve.js —
+ *   correcto aquí, porque no hay Excel crudo contra qué comparar) para
+ *   que Correcciones/Calidad/Exportación reflejen el estado real sin
+ *   esperar a otra acción del usuario.
+ *
+ *   checkSources() gana un bypass: ok = missing.length === 0 ||
+ *   !!State.reviewSessionId — una sesión reabierta trae State.merged
+ *   ya resuelto, no tiene (ni necesita) PDFs/Excel/paste/WTMS crudos en
+ *   memoria. `missing` se sigue devolviendo igual que antes por si algún
+ *   caller lo usa para otra cosa además de `ok`.
+ *
+ *   triggerMerge() NO resetea el pico de Correcciones/baseline de
+ *   Calidad cuando State.reviewSessionId está activo — evita perder el
+ *   progreso visual si, estando en modo revisión, se edita un catálogo
+ *   maestro (lo cual re-dispara triggerMerge() como efecto colateral,
+ *   ver importMasterCatalog()/addCatalogRow()/deleteCatalogRow()) —
+ *   runMerge() ya es un no-op seguro en ese caso porque State.xlsData
+ *   es null.
+ *
+ *   handlePDFs/handleXLS/handleWTMS/handlePaste limpian
+ *   State.reviewSessionId al inicio — cargar cualquier fuente cruda
+ *   nueva saca a la app del modo revisión y la regresa al flujo normal
+ *   de captura, evitando quedar en un estado híbrido confuso.
+ *
+ *   No se toca merge.js, sve.js (salvo el uso ya soportado de omitir
+ *   screenCount), dispatch-history.js, ni ninguna tabla de Supabase —
+ *   el cambio es puramente de orquestación en memoria.
  */
 import { State } from '../core/state.js';
 import { normOp } from '../utils/format.js';
@@ -193,6 +241,10 @@ export const Events = {
   async handlePDFs(files) {
     files = files.filter(f => f.type === 'application/pdf');
     if (!files.length) return;
+    // NUEVO (ago-2026 — "reabrir para corregir"): cargar una fuente
+    // cruda nueva sale del modo "sesión reabierta" — vuelve al flujo
+    // normal de captura. Ver nota de cabecera de este archivo.
+    State.reviewSessionId = null;
     UI.showProgress('Procesando PDFs…');
     UI.setSourceProcessing('pdf', true);
     const errors = [];
@@ -262,6 +314,8 @@ export const Events = {
   async handleXLS(files) {
     const file = files.find(f => f.name.match(/\.xlsx?$/i));
     if (!file) return;
+    // NUEVO (ago-2026 — "reabrir para corregir"): ver nota de cabecera.
+    State.reviewSessionId = null;
     UI.showProgress('Leyendo Excel…');
     UI.setSourceProcessing('xls', true);
     try {
@@ -292,6 +346,8 @@ export const Events = {
   async handleWTMS(files) {
     const file = files.find(f => f.name.match(/\.csv$/i));
     if (!file) { if (files.length) UI.showErrors(['El Reporte WTMS debe ser un archivo .csv']); return; }
+    // NUEVO (ago-2026 — "reabrir para corregir"): ver nota de cabecera.
+    State.reviewSessionId = null;
     UI.showProgress('Leyendo Reporte WTMS…');
     UI.setSourceProcessing('wtms', true);
     try {
@@ -314,6 +370,8 @@ export const Events = {
   handlePaste() {
     const raw = document.getElementById('pasteArea').value.trim();
     if (!raw) { UI.setPasteSt('Pega datos primero', 'err'); return; }
+    // NUEVO (ago-2026 — "reabrir para corregir"): ver nota de cabecera.
+    State.reviewSessionId = null;
     UI.setPasteSt('Procesando…', 'proc');
     try {
       const { data, preview, idx } = processPaste(raw);
@@ -343,7 +401,14 @@ export const Events = {
     if (!State.xlsData || !State.xlsData.length) missing.push('Excel macro (RUTEO NUEVO)');
     if (State.despData.size === 0) missing.push("Status de despacho (RUTA + ID'S MASTER)");
     if (State.wtmsData.size === 0) missing.push('Reporte WTMS');
-    return { ok: missing.length === 0, missing };
+    // NUEVO (ago-2026 — "reabrir para corregir"): una sesión reabierta
+    // desde Historial (ver Events.reopenSession()) trae State.merged
+    // ya resuelto por un merge anterior — no hay fuentes crudas que
+    // exigir ni volver a cruzar. `missing` se sigue devolviendo tal
+    // cual (por si algún caller lo usa para otra cosa además de `ok`)
+    // — solo `ok` se bypassa.
+    const ok = missing.length === 0 || !!State.reviewSessionId;
+    return { ok, missing };
   },
 
   triggerMerge() {
@@ -370,12 +435,21 @@ export const Events = {
     if (!State.captureStartedAt) State.captureStartedAt = Date.now();
 
     runMerge();
-    // Nuevo merge completo = nueva sesión de corrección — el progreso
-    // de Correcciones y el "antes/después" de Calidad arrancan de cero
-    // contra el total fresco de este merge, no contra el de la corrida
-    // anterior.
-    UI.resetFixPeak();
-    UI.resetQualityBaseline();
+    // NUEVO (ago-2026 — "reabrir para corregir"): en modo revisión no
+    // hay fuentes crudas que mergear (runMerge() es un no-op seguro,
+    // ver su guard clause — State.xlsData es null) — resetear el pico
+    // de Correcciones/baseline de Calidad aquí solo tiene sentido para
+    // un merge NUEVO real, no para el efecto colateral de editar un
+    // catálogo maestro mientras se revisa una sesión ya resuelta
+    // (perdería el progreso visual sin ninguna razón real).
+    if (!State.reviewSessionId) {
+      // Nuevo merge completo = nueva sesión de corrección — el progreso
+      // de Correcciones y el "antes/después" de Calidad arrancan de cero
+      // contra el total fresco de este merge, no contra el de la corrida
+      // anterior.
+      UI.resetFixPeak();
+      UI.resetQualityBaseline();
+    }
     UI.renderTable();
     UI.updateStats();
     UI.setActionsEnabled(true);
@@ -441,6 +515,13 @@ export const Events = {
     const ts   = new Date().toLocaleString('es-MX');
     const user = State.user || 'desconocido';
 
+    // NUEVO (ago-2026 — "reabrir para corregir"): si esta exportación
+    // proviene de una sesión reabierta desde el Historial, se deja
+    // constancia de cuál — auditoría barata (una clave más en el mismo
+    // objeto meta que ya se guarda tal cual en dispatch_sessions.meta,
+    // ver dispatch-history.js) sin requerir ningún cambio de esquema.
+    if (State.reviewSessionId) auditMeta = { ...auditMeta, reopenedFrom: State.reviewSessionId };
+
     State.sveAuditLog.push({ ts, user, action: (auditMeta.action || 'export').toUpperCase(), quality: State.sveLastQuality, ...auditMeta });
     console.info('[SVE AUDIT]', State.sveAuditLog[State.sveAuditLog.length - 1]);
 
@@ -490,6 +571,59 @@ export const Events = {
   redownloadHistorySession() {
     if (!Events._currentHistoryRows || !Events._currentHistorySession) return;
     exportXLSX(Events._currentHistoryRows, 'despacho', Events._currentHistorySession.session_date);
+  },
+
+  /**
+   * Reabre una sesión completada del Historial para seguir corrigiéndola
+   * — NUEVO (ago-2026, "reabrir para corregir"). Ver nota de cabecera de
+   * este archivo para el contexto completo de la decisión.
+   *
+   * Carga las filas ya mergeadas de esa sesión directamente en
+   * State.merged (mismo shape que produce runMerge() —
+   * DispatchHistory.getSessionRows() las devuelve tal cual se
+   * guardaron, _rowId incluido — así que EditSystem/UI las consumen sin
+   * ningún cambio) y marca State.reviewSessionId para que
+   * Events.checkSources() no exija las 4 fuentes crudas (ver nota de
+   * cabecera de ese método).
+   *
+   * NO llama a runMerge() — no hay nada que cruzar, el resultado del
+   * cruce ya es lo que se está cargando. Corre el SVE de inmediato
+   * (sin screenCount — la regla K se salta automáticamente, correcto:
+   * no hay Excel crudo contra qué comparar) para que Correcciones/
+   * Calidad/Exportación reflejen el estado real sin esperar a otra
+   * acción del usuario.
+   *
+   * @param {string} sessionId
+   * @returns {Promise<void>}
+   */
+  async reopenSession(sessionId) {
+    const rows = await DispatchHistory.getSessionRows(sessionId);
+    if (!rows.length) return;
+
+    State.merged = rows;
+    State.reviewSessionId = sessionId;
+
+    UI.resetFixPeak();
+    UI.resetQualityBaseline();
+    UI.updatePrepView([]);
+    UI.renderTable();
+    UI.updateStats();
+    UI.setActionsEnabled(true);
+
+    const sveResult = runSVE(State.merged);
+    if (sveResult) {
+      State.sveIssues = sveResult.issues;
+      UI.renderSVE(sveResult.issues, sveResult.quality, sveResult.nCrit, sveResult.nWarn, sveResult.nInfo, sveResult.nPass);
+    } else {
+      State.sveIssues = [];
+      UI.resetSVE();
+    }
+    UI.renderTable();
+    UI.renderFixList();
+    UI.renderQualityScreen();
+    UI.renderExportScreen();
+    UI.updateHealthRail();
+    UI.applyMode();
   },
 
   async previewTodaySession() {
