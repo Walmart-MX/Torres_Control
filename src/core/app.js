@@ -10,8 +10,7 @@
  *   su contenido se redistribuyó a sus pantallas definitivas (ver
  *   índice más abajo). goStep()/renderStepper() vuelven a su forma
  *   simple: togglear .screen y, si el id pertenece a STEPS (los 5
- *   pasos numerados — Administración queda fuera del flujo, se accede
- *   por su propio botón en el topbar), actualizar el indicador.
+ *   pasos numerados), actualizar el indicador.
  *
  *   Dónde quedó cada pieza de #legacyPanel:
  *     - Botón de exportar (antes btnExport/btnExport2 duplicados) →
@@ -105,6 +104,16 @@
  *        del estado vacío de Correcciones; ahora también accesible
  *        siempre, desde la cabecera, sin esperar a que no queden
  *        incidencias pendientes.
+ *
+ * CAMBIO (ago-2026 — "reabrir para corregir"):
+ *   Se agrega el listener de #btnHistoryReopen, junto al de
+ *   #btnHistoryRedownload — reutiliza Events._currentHistorySession
+ *   (mismo dato ya fijado por selectHistorySession()/
+ *   previewTodaySession()). Llama a Events.reopenSession(), cierra el
+ *   modal de Historial y navega a Correcciones (goStep('fix')) para
+ *   que el usuario continúe corrigiendo de inmediato. Ver
+ *   events/events.js (reopenSession()/checkSources()) y ui/ui.js
+ *   (renderFixList(), aviso contextual) para el resto del mecanismo.
  *
  * Dependencias: todos los módulos de la aplicación.
  */
@@ -407,7 +416,7 @@ export async function init() {
   // ── Correcciones — "Continuar a Exportación" tricolor (NUEVO, jul-2026) ──
   // Ver nota de cabecera. Nunca bloquea la navegación — solo informa el
   // estado; el gate real de exportación sigue viviendo en la pantalla
-  // Exportación, sin cambios.
+  // Exportación.
   document.getElementById('btnFixContinue')?.addEventListener('click', () => goStep('export'));
 
   // ── Exportación — modal de celebración ──
@@ -535,6 +544,19 @@ export async function init() {
     document.getElementById('historyPreviewView').style.display = 'none';
   });
   document.getElementById('btnHistoryRedownload').addEventListener('click', () => Events.redownloadHistorySession());
+
+  // ── Historial — "Reabrir para corregir" (NUEVO, ago-2026) ──
+  // Ver nota de cabecera. Reutiliza Events._currentHistorySession, ya
+  // fijado por selectHistorySession()/previewTodaySession() — mismo
+  // dato que usa el botón de re-descarga justo arriba. Cierra el modal
+  // de Historial y navega directo a Correcciones para que el usuario
+  // continúe corrigiendo sin pasos intermedios.
+  document.getElementById('btnHistoryReopen')?.addEventListener('click', async () => {
+    if (!Events._currentHistorySession) return;
+    await Events.reopenSession(Events._currentHistorySession.id);
+    document.getElementById('historyModalOverlay').classList.add('hidden');
+    goStep('fix');
+  });
 
   // ── Aviso "día ya procesado" ──
   document.getElementById('btnTodayPreview').addEventListener('click', () => Events.previewTodaySession());

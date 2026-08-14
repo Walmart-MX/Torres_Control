@@ -113,6 +113,18 @@ export const State = {
   // core/app.js.
   todaySession: null,
 
+  // Sesión de Historial reabierta para corrección — NUEVO (ago-2026,
+  // "reabrir para corregir"). null en el flujo normal de captura. Al
+  // reabrir una sesión completada desde el Historial (ver
+  // Events.reopenSession()), se guarda aquí el id de esa sesión —
+  // Events.checkSources() lo usa para no exigir las 4 fuentes crudas
+  // (PDFs/Excel/paste/WTMS) cuando State.merged ya es el resultado de
+  // un merge anterior, no algo que deba re-cruzarse. Se limpia
+  // automáticamente en cuanto el usuario carga cualquier fuente nueva
+  // (ver handlePDFs/handleXLS/handleWTMS/handlePaste en events.js) para
+  // no quedar en un estado híbrido confuso. Se reinicia en UI.resetAll().
+  reviewSessionId: null,
+
   // Marca de tiempo del primer merge exitoso de la sesión (las 4
   // fuentes completas por primera vez) — NUEVO (Calidad, mockup
   // jul-2026). Alimenta el metric "Tiempo de captura" del Dashboard de
