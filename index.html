@@ -1160,6 +1160,7 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
           <button class="admin-nav-item" data-admin="cache">🗄️ Caché de facturas</button>
           <button class="admin-nav-item" data-admin="maint">🩺 Centro de Mantenimiento</button>
           <button class="admin-nav-item" data-admin="hist">🗂️ Historial</button>
+           <button class="admin-nav-item" data-admin="users">🧑‍🤝‍🧑 Usuarios</button>
           <button class="admin-nav-item" data-admin="cfg">⚙️ Configuración</button>
         </div>
 
@@ -1172,6 +1173,24 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
                UI.renderCatalogAdmin('poolReal') (ver ui.js) — las
                columnas mostradas vienen de CATALOGS.poolReal.columns
                (catalog-registry.js), no están hardcodeadas aquí. -->
+
+           <div class="admin-panel" data-admin-panel="users">
+  <div class="admin-hd"><h3>Usuarios</h3><p>Cuentas de SmartDispatch — el usuario corporativo no es editable una vez creado.</p></div>
+  <div class="cat-add-row">
+    <input class="cat-input" id="userUsernameInput" placeholder="Usuario corporativo (ej. e0g0913)" style="flex:1;min-width:140px">
+    <input class="cat-input" id="userPasswordInput" placeholder="Contraseña inicial" style="flex:1;min-width:120px">
+    <input class="cat-input" id="userDisplayInput" placeholder="Nombre (display)" style="flex:1;min-width:140px">
+    <input class="cat-input" id="userCaptureInput" placeholder="Nombre en CAPTURA" style="flex:1;min-width:120px">
+    <button class="btn btn-success btn-sm" id="btnUserAdd">+ Crear</button>
+  </div>
+  <div class="cat-table-wrap">
+    <table class="cat-table">
+      <thead><tr><th>Usuario</th><th>Nombre</th><th>Captura</th><th>Estado</th><th></th></tr></thead>
+      <tbody id="usersTbody"></tbody>
+    </table>
+  </div>
+  <div class="cat-status" id="usersStatus"></div>
+</div>
           <div class="admin-panel active" data-admin-panel="pool">
             <div class="admin-hd"><h3>Pool Real</h3><p>Placas, tractores y remolques. "Importar/Reemplazar" sustituye TODO el catálogo desde un Excel; la tabla de abajo permite agregar o eliminar un registro individual sin tocar el resto.</p></div>
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
