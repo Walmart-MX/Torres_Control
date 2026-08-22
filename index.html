@@ -773,23 +773,32 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
       <div class="modal-logo-mark">🚛</div>
       <div class="modal-logo-text"><span>Smart</span>Dispatch · CeDis VHSA</div>
     </div>
-    <div class="modal-title" id="modalTitle">¡Bienvenido!</div>
-    <div class="modal-sub" id="modalSub">Configura tu sesión una sola vez. Esta información se guardará automáticamente.</div>
-    <div class="modal-field-label">Tu nombre</div>
-    <input class="modal-input" id="nameInput" type="text" placeholder="Ej. Eduardo García" maxlength="60" autocomplete="off">
-    <div class="modal-hint">Identifica quién realiza la captura en cada exportación.</div>
+    <div class="modal-title">Configuración</div>
+    <div class="modal-sub">Tu cuenta y la interfaz de SmartDispatch.</div>
+
+    <div class="modal-field-label">Usuario</div>
+    <input class="modal-input" id="cfgUsername" type="text" disabled>
+    <div class="modal-hint">🔒 No editable.</div>
+
+    <div class="modal-field-label">Nombre</div>
+    <input class="modal-input" id="cfgDisplayName" type="text" maxlength="60">
+
+    <div class="modal-field-label">Nombre en CAPTURA</div>
+    <input class="modal-input" id="cfgCaptureName" type="text" maxlength="20">
+
+    <div class="modal-field-label">Contraseña actual (para guardar cambios)</div>
+    <input class="modal-input" id="cfgCurrentPassword" type="password" autocomplete="current-password" placeholder="••••••••">
+
+    <div class="modal-field-label">Nueva contraseña (opcional)</div>
+    <input class="modal-input" id="cfgNewPassword" type="password" autocomplete="new-password" placeholder="Dejar en blanco para no cambiarla">
+    <div class="modal-hint" id="cfgStatus">&nbsp;</div>
+
     <div class="modal-field-label">Interfaz preferida</div>
     <div class="theme-opts">
-      <div class="theme-opt selected" id="themeOptLight" data-theme="light">
-        <div class="theme-opt-ico">☀️</div>
-        <div class="theme-opt-label">Claro</div>
-      </div>
-      <div class="theme-opt" id="themeOptDark" data-theme="dark">
-        <div class="theme-opt-ico">🌙</div>
-        <div class="theme-opt-label">Oscuro</div>
-      </div>
+      <div class="theme-opt selected" id="themeOptLight" data-theme="light"><div class="theme-opt-ico">☀️</div><div class="theme-opt-label">Claro</div></div>
+      <div class="theme-opt" id="themeOptDark" data-theme="dark"><div class="theme-opt-ico">🌙</div><div class="theme-opt-label">Oscuro</div></div>
     </div>
-    <button class="modal-btn" id="nameModalBtn">Guardar y comenzar →</button>
+    <button class="modal-btn" id="nameModalBtn">Guardar cambios</button>
   </div>
 </div>
 <!-- ── AUTH OVERLAY — login bloqueante, reemplaza el first-run modal anterior ── -->
