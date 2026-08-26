@@ -117,6 +117,7 @@
  *
  * Dependencias: todos los módulos de la aplicación.
  */
+import { Auth } from '../features/auth.js';
 import { State } from './state.js';
 import { UI, _setEvents } from '../ui/ui.js';
 import { Events } from '../events/events.js';
@@ -228,11 +229,459 @@ function wireCatalogAdmin(catalogId, containerId) {
 /**
  * Inicializa la aplicación completa.
  */
+let _activityWired = false;
+let _pendingFirstLoginPassword = null;
+
+function wireActivityTracking() {
+  if (_activityWired) return;
+  _activityWired = true;
+  ['click', 'keydown'].forEach(evt => document.addEventListener(evt, () => Auth.touchActivity()));
+}
+
+function handleSessionExpired() {
+  const known = Auth.getKnownUser();
+  UI.showAuthKnown(known ? `${Auth.greeting()}, ${known.displayName}` : '—');
+}
+
+async function afterLoginSuccess(result) {
+  if (result.isFirstLogin) {
+    UI.showAuthProfile({ displayName: result.user.displayName, captureName: result.user.captureName });
+    return;
+  }
+  _pendingFirstLoginPassword = null;
+  UI.setUser(State.currentUser);
+  UI.hideAuthOverlay();
+  Auth.startExpiryWatch(handleSessionExpired);
+  wireActivityTracking();
+  await continueInit();
+}
+
+function wireAuthForms() {
+  document.getElementById('authFormKnown').addEventListener('submit', async e => {
+    e.preventDefault();
+    const known  = Auth.getKnownUser();
+    const pass   = document.getElementById('authKnownPassword').value;
+    const errEl  = document.getElementById('authKnownError');
+    errEl.textContent = '';
+    const result = await Auth.login(known.username, pass);
+    if (!result.ok) {
+      errEl.textContent = result.error === 'inactive' ? 'Esta cuenta está inactiva.' : 'Contraseña incorrecta.';
+      return;
+    }
+    _pendingFirstLoginPassword = pass;
+    await afterLoginSuccess(result);
+  });
+
+  document.getElementById('authChangeUser').addEventListener('click', () => {
+    Auth.changeUser();
+    UI.showAuthFull();
+  });
+
+  document.getElementById('authFormFull').addEventListener('submit', async e => {
+    e.preventDefault();
+    const user  = document.getElementById('authFullUsername').value.trim();
+    const pass  = document.getElementById('authFullPassword').value;
+    const errEl = document.getElementById('authFullError');
+    errEl.textContent = '';
+    if (!user || !pass) { errEl.textContent = 'Completa usuario y contraseña.'; return; }
+    const result = await Auth.login(user, pass);
+    if (!result.ok) { errEl.textContent = 'Usuario o contraseña incorrectos.'; return; }
+    _pendingFirstLoginPassword = pass;
+    await afterLoginSuccess(result);
+  });
+
+  document.getElementById('authFormProfile').addEventListener('submit', async e => {
+    e.preventDefault();
+    const displayName = document.getElementById('authProfileDisplay').value.trim();
+    const captureName = document.getElementById('authProfileCapture').value.trim();
+    const newPass      = document.getElementById('authProfileNewPassword').value;
+    const errEl        = document.getElementById('authProfileError');
+    errEl.textContent = '';
+    if (!displayName || !captureName) { errEl.textContent = 'Completa ambos campos.'; return; }
+
+    const currentPass = _pendingFirstLoginPassword;
+    const profResult  = await Auth.updateProfile(currentPass, displayName, captureName);
+    if (!profResult.ok) { errEl.textContent = 'No se pudo guardar tu perfil — intenta de nuevo.'; return; }
+    if (newPass) {
+      const pwResult = await Auth.changePassword(currentPass, newPass);
+      if (!pwResult.ok) errEl.textContent = 'Perfil guardado, pero no se pudo cambiar la contraseña.';
+    }
+    _pendingFirstLoginPassword = null;
+    UI.setUser(State.currentUser);
+    UI.hideAuthOverlay();
+    Auth.startExpiryWatch(handleSessionExpired);
+    wireActivityTracking();
+    await continueInit();
+  });
+}
+
+/**
+ * Punto de entrada real. wireAuthForms() se engancha SIEMPRE, haya o no
+ * sesión — el resto del bootstrap (continueInit) solo corre tras login
+ * exitoso o sesión restaurada (login bloqueante, ver propuesta §17).
+ */
 export async function init() {
-  // ── Resolver dependencias circulares ──
   _setRoutePicker(RoutePicker);
   _setEvents(Events);
   _setWarnModalEvents(Events);
+
+  UI.applyTheme(State.theme);
+  wireAuthForms();
+
+  if (Auth.restoreSession()) {
+    UI.setUser(State.currentUser);
+    Auth.startExpiryWatch(handleSessionExpired);
+    wireActivityTracking();
+    await continueInit();
+    return;
+  }
+
+  const known = Auth.getKnownUser();
+  if (known) UI.showAuthKnown(`${Auth.greeting()}, ${known.displayName}`);
+  else       UI.showAuthFull();
+  // continueInit() se dispara desde wireAuthForms() tras login exitoso.
+}
+
+/**
+ * Bootstrap completo de la aplicación — antes vivía como el cuerpo de
+ * init(). Se extrae sin cambios de comportamiento salvo los señalados:
+ * ya no llama UI.applyTheme/UI.setUser(String) (resuelto antes de
+ * llegar aquí) y el nameInput/first-run modal de nombre libre se
+ * retiran (reemplazados por el flujo de auth de arriba).
+ */
+async function continueInit() {
+  renderStepper();
+  document.getElementById('btnAdmin').addEventListener('click', () => goStep('admin'));
+
+  State.factCache    = await FactCache.load();
+  State.factCacheLog = await FactCache.loadLog();
+  const fcStats = FactCache.stats();
+  if (fcStats.total > 0) {
+    console.log('[FactCache] Loaded', fcStats.total, 'invoices from', fcStats.days, 'day(s):', fcStats.dates.join(', '));
+  }
+  UI.renderCacheHistory();
+
+  Events.setupDrop('dropPDF', 'filePDF', Events.handlePDFs.bind(Events));
+  Events.setupDrop('dropXLS', 'fileXLS', Events.handleXLS.bind(Events));
+  Events.setupDrop('dropWTMS', 'fileWTMS', Events.handleWTMS.bind(Events));
+
+  document.getElementById('btnGoTable').addEventListener('click', () => goStep('fix'));
+  document.getElementById('btnPrepReset').addEventListener('click', () => UI.resetAll());
+
+  document.getElementById('btnParse').addEventListener('click',      () => Events.handlePaste());
+  document.getElementById('btnPasteClear').addEventListener('click', () => Events.clearPaste());
+
+  document.getElementById('btnExport').addEventListener('click', () => Events.handleExport());
+
+  document.getElementById('btnTheme').addEventListener('click', () =>
+    UI.applyTheme(State.theme === 'dark' ? 'light' : 'dark'));
+
+  document.querySelectorAll('.theme-opt[data-theme]').forEach(el => {
+    el.addEventListener('click', () => UI.applyTheme(el.dataset.theme));
+  });
+
+  document.getElementById('tbUser').addEventListener('click', () => UI.openModal());
+
+  // ── Configuración — Mi cuenta (reemplaza el guardado de nombre libre) ──
+  document.getElementById('nameModalBtn').addEventListener('click', async () => {
+    const displayName     = document.getElementById('cfgDisplayName').value.trim();
+    const captureName     = document.getElementById('cfgCaptureName').value.trim();
+    const currentPassword = document.getElementById('cfgCurrentPassword').value;
+    const newPassword     = document.getElementById('cfgNewPassword').value;
+    const statusEl = document.getElementById('cfgStatus');
+
+    if (!displayName || !captureName) {
+      statusEl.textContent = 'Completa nombre y nombre en CAPTURA.'; statusEl.style.color = 'var(--red)'; return;
+    }
+    if (!currentPassword) {
+      statusEl.textContent = 'Ingresa tu contraseña actual para guardar cambios.'; statusEl.style.color = 'var(--red)'; return;
+    }
+    statusEl.textContent = 'Guardando…'; statusEl.style.color = '';
+
+    const profResult = await Auth.updateProfile(currentPassword, displayName, captureName);
+    if (!profResult.ok) {
+      statusEl.textContent = profResult.error === 'invalid_password' ? 'Contraseña actual incorrecta.' : 'No se pudo guardar.';
+      statusEl.style.color = 'var(--red)';
+      return;
+    }
+    if (newPassword) {
+      const pwResult = await Auth.changePassword(currentPassword, newPassword);
+      if (!pwResult.ok) {
+        statusEl.textContent = 'Nombre guardado, pero no se pudo cambiar la contraseña.'; statusEl.style.color = 'var(--amber-deep)'; return;
+      }
+    }
+    UI.setUser(State.currentUser);
+    statusEl.textContent = '✓ Cambios guardados'; statusEl.style.color = 'var(--green)';
+    document.getElementById('cfgCurrentPassword').value = '';
+    document.getElementById('cfgNewPassword').value     = '';
+  });
+
+  document.getElementById('tableSearch').addEventListener('input', e => UI.setTableSearch(e.target.value));
+  document.getElementById('filterChips').addEventListener('click', e => {
+    const btn = e.target.closest('.fchip');
+    if (!btn) return;
+    UI.setTableFilter(btn.dataset.filter);
+  });
+
+  document.getElementById('mainTbody').addEventListener('click', e => {
+    const btn = e.target.closest('.row-edit-btn');
+    if (!btn) return;
+    EditSystem.locateAndEdit(btn.dataset.editRuta, '', JSON.stringify([btn.dataset.editRowid]));
+  });
+
+  const btnGoFix = document.getElementById('btnGoFix');
+  if (btnGoFix) btnGoFix.addEventListener('click', () => goStep('fix'));
+
+  const handleFixCardClick = e => {
+    const confirmBtn = e.target.closest('.fix-confirm-btn');
+    if (confirmBtn) {
+      const ruta  = confirmBtn.dataset.confirmRuta;
+      const dette = confirmBtn.dataset.confirmDette;
+      if (!confirm(`¿Confirmas que la entrega ${dette || '—'} de la ruta ${ruta} NO se realizará?\n\nSe eliminará por completo del archivo final y del historial de Supabase — esta acción no se puede deshacer una vez exportado el día.`)) return;
+      Events.confirmExcludedDette(ruta, dette);
+      return;
+    }
+    const addMarchBtn = e.target.closest('[data-fix-role="add-marchamo"]');
+    if (addMarchBtn) {
+      const card     = addMarchBtn.closest('.fix-card-marchamo');
+      const rowsWrap = card.querySelector('[data-fix-role="rows"]');
+      const slots    = JSON.parse(card.dataset.fixSlots || '[]');
+      const current  = rowsWrap.querySelectorAll('.fix-marchamo-row').length;
+      if (current >= slots.length) return;
+      const nextSlot = slots[current];
+      const row = document.createElement('div');
+      row.className = 'fix-marchamo-row';
+      row.dataset.slot = nextSlot;
+      row.innerHTML =
+        `<input class="fix-input fix-marchamo-input" data-field="${nextSlot}" placeholder="Número de marchamo…">` +
+        `<button type="button" class="fix-marchamo-remove" data-fix-role="remove-marchamo">✕</button>`;
+      rowsWrap.appendChild(row);
+      row.querySelector('input').focus();
+      if (current + 1 >= slots.length) addMarchBtn.disabled = true;
+      return;
+    }
+    const removeMarchBtn = e.target.closest('[data-fix-role="remove-marchamo"]');
+    if (removeMarchBtn) {
+      const card = removeMarchBtn.closest('.fix-card-marchamo');
+      removeMarchBtn.closest('.fix-marchamo-row').remove();
+      const addBtn = card.querySelector('[data-fix-role="add-marchamo"]');
+      if (addBtn) addBtn.disabled = false;
+      return;
+    }
+    const saveMarchBtn = e.target.closest('[data-fix-role="save-marchamo"]');
+    if (saveMarchBtn) {
+      const card   = saveMarchBtn.closest('.fix-card-marchamo');
+      const inputs = card.querySelectorAll('.fix-marchamo-input');
+      const fields = {};
+      inputs.forEach(inp => { const val = inp.value.trim(); if (val) fields[inp.dataset.field] = val; });
+      if (!Object.keys(fields).length) {
+        const first = card.querySelector('.fix-marchamo-input');
+        if (first) { first.focus(); first.classList.add('fix-input-error'); }
+        return;
+      }
+      const rowIds = JSON.parse(card.dataset.fixRowids || '[]');
+      EditSystem.quickFixMulti(rowIds, fields);
+      return;
+    }
+    const saveBtn = e.target.closest('.fix-save');
+    if (saveBtn) {
+      const card  = saveBtn.closest('.fix-card');
+      const input = card.querySelector('.fix-input');
+      if (!input.value.trim()) { input.focus(); input.classList.add('fix-input-error'); return; }
+      const rowIds = JSON.parse(saveBtn.dataset.fixRowids || '[]');
+      EditSystem.quickFix(rowIds, saveBtn.dataset.fixKey, input.value);
+      return;
+    }
+    const reviewBtn = e.target.closest('.fix-review-btn');
+    if (reviewBtn) {
+      EditSystem.locateAndEdit(reviewBtn.dataset.locateRuta, reviewBtn.dataset.locateField, reviewBtn.dataset.locateIds || '[]');
+    }
+  };
+  document.getElementById('fixList').addEventListener('click', handleFixCardClick);
+  document.getElementById('fixInfoList').addEventListener('click', handleFixCardClick);
+
+  const btnGoQuality = document.getElementById('btnGoQuality');
+  if (btnGoQuality) btnGoQuality.addEventListener('click', () => goStep('quality'));
+  document.getElementById('btnGoQualityHeader')?.addEventListener('click', () => goStep('quality'));
+  document.getElementById('btnFixContinue')?.addEventListener('click', () => goStep('export'));
+
+  document.getElementById('btnCelebrateClose')?.addEventListener('click', () => {
+    UI.hideCelebrate();
+    goStep('prep');
+  });
+
+  document.getElementById('adminNav').addEventListener('click', e => {
+    const gotoBtn = e.target.closest('[data-admin-goto]');
+    if (gotoBtn) { goStep(gotoBtn.dataset.adminGoto); return; }
+
+    const btn = e.target.closest('.admin-nav-item');
+    if (!btn) return;
+    document.querySelectorAll('.admin-nav-item').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.admin-panel').forEach(p => p.classList.toggle('active', p.dataset.adminPanel === btn.dataset.admin));
+    if (btn.dataset.admin === 'maint') Events.loadMaintenanceCenter();
+    if (btn.dataset.admin === 'users') refreshUsersAdmin();
+  });
+  document.getElementById('mcVentanaFile').addEventListener('change', function() {
+    Events.importMasterCatalog('ventanaRecibo', this.files[0]); this.value = '';
+  });
+  document.getElementById('mcPoolFile').addEventListener('change', function() {
+    Events.importMasterCatalog('poolReal', this.files[0]); this.value = '';
+  });
+
+  wireCatalogAdmin('ventanaRecibo', 'mcVentanaAdmin');
+  wireCatalogAdmin('poolReal', 'mcPoolAdmin');
+
+  document.getElementById('btnCatAdd').addEventListener('click',     () => Events.addCatalogEntry());
+  document.getElementById('catLicInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') Events.addCatalogEntry();
+  });
+  document.getElementById('catImportFile').addEventListener('change', function() {
+    Events.importCatalog(this.files[0]); this.value = '';
+  });
+  document.getElementById('catTbody').addEventListener('click', e => {
+    const btn = e.target.closest('.btn-del');
+    if (!btn) return;
+    Events.delOp(btn.dataset.delOp);
+  });
+
+  // ── Administración — Usuarios (NUEVO) ──
+  document.getElementById('btnUserAdd').addEventListener('click', async () => {
+    const username    = document.getElementById('userUsernameInput').value.trim();
+    const password    = document.getElementById('userPasswordInput').value;
+    const displayName = document.getElementById('userDisplayInput').value.trim();
+    const captureName = document.getElementById('userCaptureInput').value.trim();
+    if (!username || !password || !displayName || !captureName) {
+      UI.setUsersStatus('Completa todos los campos.', 'err'); return;
+    }
+    UI.setUsersStatus('Creando…', 'ok');
+    const result = await Auth.adminCreateUser(username, password, displayName, captureName);
+    if (!result.ok) {
+      UI.setUsersStatus(result.error === 'duplicate_username' ? 'Ese usuario ya existe.' : 'Error al crear usuario', 'err');
+      return;
+    }
+    ['userUsernameInput','userPasswordInput','userDisplayInput','userCaptureInput'].forEach(id => document.getElementById(id).value = '');
+    UI.setUsersStatus('✓ Usuario creado', 'ok');
+    await refreshUsersAdmin();
+  });
+  document.getElementById('usersTbody').addEventListener('click', async e => {
+    const toggleBtn = e.target.closest('[data-user-toggle]');
+    if (toggleBtn) {
+      const active = toggleBtn.dataset.userToggle === 'activate';
+      await Auth.adminSetActive(toggleBtn.dataset.userId, active);
+      await refreshUsersAdmin();
+      return;
+    }
+    const resetBtn = e.target.closest('[data-user-reset]');
+    if (resetBtn) {
+      const newPass = prompt('Nueva contraseña temporal para este usuario:');
+      if (!newPass) return;
+      await Auth.adminResetPassword(resetBtn.dataset.userId, newPass);
+      UI.setUsersStatus('✓ Contraseña restablecida', 'ok');
+    }
+  });
+
+  document.getElementById('mcOpenTbody').addEventListener('click', e => {
+    const btn = e.target.closest('[data-mc-resolve]');
+    if (!btn) return;
+    if (!confirm('¿Marcar esta incidencia como resuelta manualmente? Esta acción no se puede deshacer.')) return;
+    Events.resolveIncident(btn.dataset.mcResolve);
+  });
+  document.getElementById('btnMcToggleResolved').addEventListener('click', () => Events.toggleResolvedIncidents());
+
+  document.getElementById('btnHistoryOpenAdmin')?.addEventListener('click', () => Events.openHistory());
+  document.getElementById('btnOpenSettingsAdmin')?.addEventListener('click', () => UI.openModal());
+
+  document.getElementById('btnCacheHistClear').addEventListener('click', async () => {
+    if (!confirm('¿Eliminar todo el caché histórico de facturas? Esta acción no se puede deshacer.')) return;
+    await FactCache.clear();
+    await FactCache.clearLog();
+    UI.renderCacheHistory();
+  });
+
+  document.getElementById('wmReview').addEventListener('click', () => WarnModal.review());
+  document.getElementById('wmExport').addEventListener('click', () => WarnModal.exportAnyway());
+  document.getElementById('warnModalOverlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('warnModalOverlay')) WarnModal.close();
+  });
+
+  document.getElementById('rpOptions').addEventListener('click', e => {
+    const opt = e.target.closest('.route-picker-opt');
+    if (!opt) return;
+    RoutePicker._pick(opt.dataset.rowid);
+  });
+  document.getElementById('rpCancel').addEventListener('click', () => RoutePicker.close());
+  document.getElementById('routePickerOverlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('routePickerOverlay')) RoutePicker.close();
+  });
+
+  document.getElementById('btnEditSave').addEventListener('click',   () => EditSystem.saveAndRevalidate());
+  document.getElementById('btnEditCancel').addEventListener('click', () => EditSystem.close());
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { EditSystem.close(); WarnModal.close(); RoutePicker.close(); }
+  });
+
+  document.getElementById('btnHistoryOpen').addEventListener('click', () => Events.openHistory());
+  document.getElementById('btnHistoryClose').addEventListener('click', () =>
+    document.getElementById('historyModalOverlay').classList.add('hidden'));
+  document.getElementById('historyModalOverlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('historyModalOverlay')) document.getElementById('historyModalOverlay').classList.add('hidden');
+  });
+  document.getElementById('historyList').addEventListener('click', e => {
+    const item = e.target.closest('[data-session-id]');
+    if (!item) return;
+    Events.selectHistorySession(item.dataset.sessionId);
+  });
+  document.getElementById('btnHistoryBack').addEventListener('click', () => {
+    document.getElementById('historyListView').style.display = '';
+    document.getElementById('historyPreviewView').style.display = 'none';
+  });
+  document.getElementById('btnHistoryRedownload').addEventListener('click', () => Events.redownloadHistorySession());
+
+  document.getElementById('btnHistoryReopen')?.addEventListener('click', async () => {
+    if (!Events._currentHistorySession) return;
+    await Events.reopenSession(Events._currentHistorySession.id);
+    document.getElementById('historyModalOverlay').classList.add('hidden');
+    goStep('fix');
+  });
+
+  document.getElementById('btnTodayPreview').addEventListener('click', () => Events.previewTodaySession());
+  document.getElementById('btnTodayRedownload').addEventListener('click', () => Events.redownloadToday());
+
+  UI.setActionsEnabled(false);
+  UI.resetFixPeak();
+  UI.resetQualityBaseline();
+  UI.updatePrepView(['PDFs de cargas','Excel macro (RUTEO NUEVO)',"Status de despacho (RUTA + ID'S MASTER)",'Reporte WTMS']);
+  UI.renderTable();
+  UI.renderFixList();
+  UI.renderQualityScreen();
+  UI.renderExportScreen();
+  UI.updateHealthRail();
+  UI.applyMode();
+
+  UI.setCatStatus('Cargando catálogo…', 'ok');
+  const catResult = await initCatalog();
+  UI.renderCatalog();
+  UI.setCatStatus(catResult.msg, catResult.ok ? 'ok' : 'err');
+
+  await CatalogStore.loadAll();
+  UI.renderCatalogMasterStatus('ventanaRecibo');
+  UI.renderCatalogMasterStatus('poolReal');
+  UI.renderCatalogAdmin('ventanaRecibo');
+  UI.renderCatalogAdmin('poolReal');
+
+  const todaySession = await DispatchHistory.getTodaySession();
+  State.todaySession = todaySession;
+  UI.renderTodayBanner(todaySession);
+  UI.applyMode();
+
+  // First-run/nameModal de nombre libre — RETIRADO. La identidad ahora
+  // se resuelve por completo en el flujo de auth, antes de llegar aquí.
+}
+
+async function refreshUsersAdmin() {
+  const users = await Auth.adminListUsers();
+  UI.renderUsersAdmin(users);
+}
 
   // ── Theme & User ──
   UI.applyTheme(State.theme);
