@@ -683,9 +683,6 @@ async function refreshUsersAdmin() {
   UI.renderUsersAdmin(users);
 }
 
-  // ── Theme & User ──
-  UI.applyTheme(State.theme);
-  UI.setUser(State.user);
 
   // ── Stepper ──
   renderStepper();
