@@ -290,7 +290,61 @@ export const UI = {
   closeModal() {
     document.getElementById('nameModal').classList.add('hidden');
   },
+  // ── AUTH OVERLAY ──
+  _showAuthView(id) {
+    document.getElementById('authOverlay').classList.remove('hidden');
+    ['authFormKnown', 'authFormFull', 'authFormProfile'].forEach(vid =>
+      document.getElementById(vid).style.display = vid === id ? '' : 'none');
+  },
+  showAuthKnown(greetingLine) {
+    UI._showAuthView('authFormKnown');
+    document.getElementById('authGreeting').textContent = greetingLine;
+    document.getElementById('authKnownError').textContent = '';
+    document.getElementById('authKnownPassword').value = '';
+    setTimeout(() => document.getElementById('authKnownPassword').focus(), 80);
+  },
+  showAuthFull() {
+    UI._showAuthView('authFormFull');
+    document.getElementById('authFullError').textContent = '';
+    setTimeout(() => document.getElementById('authFullUsername').focus(), 80);
+  },
+  showAuthProfile(prefill) {
+    UI._showAuthView('authFormProfile');
+    document.getElementById('authProfileDisplay').value = prefill.displayName;
+    document.getElementById('authProfileCapture').value = prefill.captureName;
+    document.getElementById('authProfileNewPassword').value = '';
+    document.getElementById('authProfileError').textContent = '';
+  },
+  hideAuthOverlay() {
+    document.getElementById('authOverlay').classList.add('hidden');
+  },
 
+  // ── Administración — Usuarios ──
+  renderUsersAdmin(users) {
+    const tbody = document.getElementById('usersTbody');
+    if (!tbody) return;
+    if (!users.length) {
+      tbody.innerHTML = '<tr><td colspan="5"><div class="cat-empty">Sin usuarios registrados.</div></td></tr>';
+      return;
+    }
+    tbody.innerHTML = users.map(u => `
+      <tr>
+        <td class="td-op">${escH(u.username)}</td>
+        <td class="td-op">${escH(u.display_name)}</td>
+        <td class="td-op">${escH(u.capture_name)}</td>
+        <td><span class="status-pill ${u.active ? 'ok' : 'crit'}">${u.active ? 'Activo' : 'Inactivo'}</span></td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-ghost btn-xs" data-user-reset data-user-id="${escH(u.id)}">🔑 Reset</button>
+          <button class="btn btn-ghost btn-xs" data-user-toggle="${u.active ? 'deactivate' : 'activate'}" data-user-id="${escH(u.id)}">${u.active ? '✕ Desactivar' : '✓ Activar'}</button>
+        </td>
+      </tr>`).join('');
+  },
+  setUsersStatus(msg, cls) {
+    const el = document.getElementById('usersStatus');
+    if (!el) return;
+    el.className   = 'cat-status' + (cls ? ' ' + cls : '');
+    el.textContent = msg;
+  },
   // ═══════════════════════════════════════════════════════════════
   // ── PREPARACIÓN — tarjetas de fuente (NUEVO, reemplaza pipeline) ──
   // ═══════════════════════════════════════════════════════════════
