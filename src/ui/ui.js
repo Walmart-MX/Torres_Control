@@ -263,44 +263,32 @@ export const UI = {
   selectTheme(t) { UI.applyTheme(t); },
 
   // ── User ──
-  setUser(name) {
-    State.user = name || '';
-    localStorage.setItem('sd_user', State.user);
+  setUser(currentUser) {
     const nameEl = document.getElementById('tbUserName');
-    if (nameEl) nameEl.textContent = State.user || '—';
+    if (nameEl) nameEl.textContent = currentUser ? currentUser.displayName : '—';
     const avatarEl = document.getElementById('tbAvatar');
     if (avatarEl) {
-      const initials = String(State.user || '')
-        .trim().split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
+      const initials = currentUser
+        ? String(currentUser.displayName).trim().split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase()
+        : '—';
       avatarEl.textContent = initials || '—';
     }
   },
 
   // ── Modal (nombre + tema) ──
-  openModal(mode) {
-    mode = mode || 'settings';
-    State._modalMode = mode;
-    document.getElementById('nameInput').value = State.user;
+   openModal() {
+    document.getElementById('cfgUsername').value     = State.currentUser?.username || '';
+    document.getElementById('cfgDisplayName').value   = State.currentUser?.displayName || '';
+    document.getElementById('cfgCaptureName').value   = State.currentUser?.captureName || '';
+    document.getElementById('cfgCurrentPassword').value = '';
+    document.getElementById('cfgNewPassword').value     = '';
+    document.getElementById('cfgStatus').textContent    = '\u00A0';
     document.getElementById('themeOptLight').classList.toggle('selected', State.theme === 'light');
     document.getElementById('themeOptDark').classList.toggle('selected', State.theme === 'dark');
-    if (mode === 'setup') {
-      document.getElementById('modalTitle').textContent = '¡Bienvenido!';
-      document.getElementById('modalSub').textContent = 'Configura tu sesión una sola vez. Esta información se guardará automáticamente.';
-      document.getElementById('nameModalBtn').textContent = 'Guardar y comenzar →';
-    } else {
-      document.getElementById('modalTitle').textContent = 'Configuración de sesión';
-      document.getElementById('modalSub').textContent = 'Actualiza tu nombre o el tema de la interfaz.';
-      document.getElementById('nameModalBtn').textContent = 'Guardar cambios';
-    }
     document.getElementById('nameModal').classList.remove('hidden');
-    setTimeout(() => document.getElementById('nameInput').focus(), 80);
   },
-  closeModal(name) {
+  closeModal() {
     document.getElementById('nameModal').classList.add('hidden');
-    if (name !== null) {
-      UI.setUser(name);
-      localStorage.setItem('sd_configured', '1');
-    }
   },
 
   // ═══════════════════════════════════════════════════════════════
