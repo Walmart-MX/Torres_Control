@@ -264,6 +264,14 @@ function wireCatalogAdmin(catalogId, containerId) {
  */
 let _activityWired = false;
 let _pendingFirstLoginPassword = null;
+// NUEVO — protección simple del panel Administración → Usuarios.
+// Cortina de acceso, NO seguridad real (ver nota abajo): el panel de
+// gestión de cuentas es sensible pero de bajo tráfico — un prompt()
+// basta para evitar accesos accidentales o de personal no autorizado
+// casual. Se desbloquea una sola vez por sesión de navegador (no
+// persiste en localStorage — recargar vuelve a pedirla).
+let _usersPanelUnlocked = false;
+const USERS_PANEL_PASSWORD = 'rainmerer99';
 
 function wireActivityTracking() {
   if (_activityWired) return;
@@ -571,12 +579,22 @@ async function continueInit() {
     goStep('prep');
   });
 
-  document.getElementById('adminNav').addEventListener('click', e => {
+    document.getElementById('adminNav').addEventListener('click', e => {
     const gotoBtn = e.target.closest('[data-admin-goto]');
     if (gotoBtn) { goStep(gotoBtn.dataset.adminGoto); return; }
 
     const btn = e.target.closest('.admin-nav-item');
     if (!btn) return;
+
+    // NUEVO — gate de contraseña para el panel Usuarios. Ver nota de
+    // cabecera junto a _usersPanelUnlocked/USERS_PANEL_PASSWORD.
+    if (btn.dataset.admin === 'users' && !_usersPanelUnlocked) {
+      const pass = prompt('Este panel está protegido. Ingresa la contraseña para continuar:');
+      if (pass === null) return; // canceló — no hace nada, no cambia de panel
+      if (pass !== USERS_PANEL_PASSWORD) { alert('Contraseña incorrecta.'); return; }
+      _usersPanelUnlocked = true;
+    }
+
     document.querySelectorAll('.admin-nav-item').forEach(b => b.classList.toggle('active', b === btn));
     document.querySelectorAll('.admin-panel').forEach(p => p.classList.toggle('active', p.dataset.adminPanel === btn.dataset.admin));
     if (btn.dataset.admin === 'maint') Events.loadMaintenanceCenter();
