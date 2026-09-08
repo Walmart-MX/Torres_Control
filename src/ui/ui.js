@@ -144,6 +144,18 @@
  *   haber cargado las 4 fuentes en Preparación. Puramente cosmético,
  *   no afecta ninguna lógica de negocio ni ningún otro render.
  *
+ * CAMBIO (ago-2026 — validación informativa Excel vs PDF en
+ * Preparación, ver features/source-check.js):
+ *   Se agregan renderSourceCheck(result)/toggleSourceCheckDetail() —
+ *   UI no calcula la comparación (eso vive en el módulo puro
+ *   features/source-check.js); solo pinta el resultado que Events le
+ *   pasa (mismo contrato que renderMaintenanceCenter()/renderSVE()).
+ *   result === null oculta la tarjeta por completo (falta Excel o PDF
+ *   todavía) — no requiere ningún chequeo adicional aquí. Puramente
+ *   informativo: nunca deshabilita ningún botón, nunca toca
+ *   State.sveHasCritical/sveHasWarnings ni ningún otro estado que
+ *   gobierne el gate de exportación.
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - escH (utils/dom.js)
@@ -418,6 +430,84 @@ export const UI = {
       <span class="chip ok">📋 ${despCount} despacho</span>`;
     const timeEl = document.getElementById('prepCollapsedTime');
     if (timeEl) timeEl.textContent = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // ── VALIDACIÓN DE FUENTES — Excel vs PDF (NUEVO, ago-2026) ──
+  // Ver features/source-check.js para el cálculo (compareExcelPdf());
+  // este método solo pinta el resultado. Puramente informativo — nunca
+  // toca setActionsEnabled/sveHasCritical/sveHasWarnings ni ningún otro
+  // estado que gobierne el gate de exportación.
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Pinta (o esconde) la tarjeta "Validación de fuentes" de Preparación.
+   * @param {null|{excelCount:number,pdfCount:number,matchCount:number,
+   *   diffCount:number,missingInPdf:string[],onlyInPdf:string[],
+   *   status:'ok'|'warn'}} result — salida de compareExcelPdf(), o null
+   *   si falta Excel o PDF todavía (oculta la tarjeta por completo).
+   */
+  renderSourceCheck(result) {
+    const card = document.getElementById('sourceCheckCard');
+    if (!card) return;
+
+    const pill      = document.getElementById('scStatusPill');
+    const summary   = document.getElementById('scSummary');
+    const toggleBtn = document.getElementById('btnScToggle');
+    const detail    = document.getElementById('scDetail');
+
+    if (!result) {
+      card.style.display = 'none';
+      if (detail) { detail.style.display = 'none'; detail.innerHTML = ''; }
+      if (toggleBtn) toggleBtn.style.display = 'none';
+      return;
+    }
+
+    card.style.display = '';
+    document.getElementById('scExcelCount').textContent = result.excelCount;
+    document.getElementById('scPdfCount').textContent    = result.pdfCount;
+    document.getElementById('scMatchCount').textContent  = result.matchCount;
+
+    if (result.status === 'ok') {
+      pill.className   = 'status-pill ok';
+      pill.textContent = '🟢 Fuentes conciliadas';
+      summary.textContent = `${result.matchCount} entrega${result.matchCount!==1?'s':''} coinciden entre Excel y PDF.`;
+      if (toggleBtn) toggleBtn.style.display = 'none';
+      if (detail) { detail.style.display = 'none'; detail.innerHTML = ''; }
+      return;
+    }
+
+    pill.className   = 'status-pill warn';
+    pill.textContent = '🟡 Revisar diferencias';
+    summary.textContent = `⚠ ${result.diffCount} diferencia${result.diffCount!==1?'s':''} detectada${result.diffCount!==1?'s':''} — esto es informativo, no bloquea la preparación.`;
+    if (toggleBtn) {
+      toggleBtn.style.display = '';
+      const isOpen = detail && detail.style.display && detail.style.display !== 'none';
+      toggleBtn.textContent = isOpen ? 'Ocultar diferencias' : 'Ver diferencias';
+    }
+    if (detail) {
+      detail.innerHTML =
+        (result.missingInPdf.length ? `
+          <div class="sc-detail-group">
+            <div class="sc-detail-group-title">Faltantes en PDF (${result.missingInPdf.length})</div>
+            <div class="sc-detail-list">${result.missingInPdf.map(v => escH(v)).join('<br>')}</div>
+          </div>` : '') +
+        (result.onlyInPdf.length ? `
+          <div class="sc-detail-group">
+            <div class="sc-detail-group-title">Encontradas solo en PDF (${result.onlyInPdf.length})</div>
+            <div class="sc-detail-list">${result.onlyInPdf.map(v => escH(v)).join('<br>')}</div>
+          </div>` : '');
+    }
+  },
+
+  /** Muestra/oculta el detalle de diferencias — listener de #btnScToggle (ver core/app.js). */
+  toggleSourceCheckDetail() {
+    const detail = document.getElementById('scDetail');
+    const btn    = document.getElementById('btnScToggle');
+    if (!detail || !btn) return;
+    const willShow = detail.style.display === 'none' || !detail.style.display;
+    detail.style.display = willShow ? '' : 'none';
+    btn.textContent = willShow ? 'Ocultar diferencias' : 'Ver diferencias';
   },
 
   // ── Progress ──
@@ -1691,6 +1781,9 @@ export const UI = {
     UI.setActionsEnabled(false);
     UI.resetFixPeak();
     UI.resetQualityBaseline();
+    // NUEVO (ago-2026 — validación Excel vs PDF): oculta la tarjeta al
+    // reiniciar por completo — ver features/source-check.js.
+    UI.renderSourceCheck(null);
     UI.updatePrepView(['PDFs de cargas','Excel macro (RUTEO NUEVO)',"Status de despacho (RUTA + ID'S MASTER)",'Reporte WTMS']);
     UI.renderTable();
     UI.renderFixList();

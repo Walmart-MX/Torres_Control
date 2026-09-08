@@ -149,6 +149,20 @@
  *   No se toca merge.js, sve.js (salvo el uso ya soportado de omitir
  *   screenCount), dispatch-history.js, ni ninguna tabla de Supabase —
  *   el cambio es puramente de orquestación en memoria.
+ *
+ * CAMBIO (ago-2026 — validación informativa Excel vs PDF en
+ * Preparación, ver features/source-check.js):
+ *   triggerMerge() ahora llama compareExcelPdf() y UI.renderSourceCheck()
+ *   como PRIMER paso, ANTES de Events.checkSources() — así la tarjeta
+ *   se actualiza en cuanto Excel+PDF están cargados, sin esperar a que
+ *   las 4 fuentes obligatorias estén completas (WTMS/despacho pueden
+ *   faltar todavía). Es deliberadamente independiente del gate de
+ *   checkSources(): compareExcelPdf() devuelve null por sí solo si
+ *   falta Excel o PDF, y UI.renderSourceCheck(null) oculta la tarjeta
+ *   — no se necesita ningún condicional adicional aquí. Puramente
+ *   informativo — no participa en runMerge()/runSVE() ni en el gate de
+ *   exportación, ver features/source-check.js para el detalle completo
+ *   de diseño.
  */
 import { State } from '../core/state.js';
 import { normOp } from '../utils/format.js';
@@ -169,6 +183,7 @@ import { DispatchHistory } from '../features/dispatch-history.js';
 import { CatalogStore } from '../features/catalogs/catalog-store.js';
 import { IncidentStore } from '../features/incidents/incident-store.js';
 import { INCIDENT_TYPES } from '../features/incidents/incident-types.js';
+import { compareExcelPdf } from '../features/source-check.js';
 
 export const Events = {
 
@@ -412,6 +427,16 @@ export const Events = {
   },
 
   triggerMerge() {
+    // NUEVO (ago-2026 — validación informativa Excel vs PDF, ver nota de
+    // cabecera de este archivo y features/source-check.js). Deliberadamente
+    // ANTES de checkSources()/el gate de las 4 fuentes: compareExcelPdf()
+    // solo necesita Excel+PDF, así que la tarjeta debe reflejar su estado
+    // aunque falten WTMS/despacho. compareExcelPdf() devuelve null por sí
+    // solo si falta alguna de las dos, y UI.renderSourceCheck(null) oculta
+    // la tarjeta — no requiere ningún condicional adicional aquí. Nunca
+    // afecta el resto de este método ni el gate de exportación.
+    UI.renderSourceCheck(compareExcelPdf());
+
     const { ok, missing } = Events.checkSources();
     UI.updatePrepView(missing);
 

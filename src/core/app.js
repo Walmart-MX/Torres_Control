@@ -115,6 +115,39 @@
  *   events/events.js (reopenSession()/checkSources()) y ui/ui.js
  *   (renderFixList(), aviso contextual) para el resto del mecanismo.
  *
+ * CAMBIO (ago-2026 — login como primera vista, sin "flash" de la app):
+ *   La app entera (.shell) queda oculta por CSS hasta que
+ *   <body> tenga la clase 'app-authed' (ver regla en index.html:
+ *   body:not(.app-authed) .shell{display:none!important}). Se agrega
+ *   document.body.classList.add('app-authed') en los TRES puntos donde
+ *   ya se decidía "el usuario está autenticado, mostrar la app":
+ *     1) init() → rama Auth.restoreSession() exitosa (sesión ya
+ *        vigente en esta terminal, no requiere overlay de login)
+ *     2) afterLoginSuccess() → login normal completado
+ *     3) el submit handler de authFormProfile → primer login,
+ *        tras confirmar perfil
+ *   NO se toca la lógica de Auth/RPCs en absoluto — es un cambio
+ *   puramente de visibilidad, complementario a UI.hideAuthOverlay()
+ *   (que ya se llamaba en los mismos 3 puntos, salvo el 1, donde el
+ *   overlay nunca llegó a mostrarse).
+ *
+ * CAMBIO (ago-2026 — cerrar el modal de configuración de usuario):
+ *   UI.closeModal() ya existía pero no tenía ningún disparador en el
+ *   DOM. Se agregan dos listeners nuevos, mismo patrón que
+ *   #historyModalOverlay: click en el botón "×" (#btnCfgClose) y click
+ *   en el "Cancelar" (#btnCfgCancel) → UI.closeModal(); click en el
+ *   overlay FUERA de .modal-box (mismo filtro e.target === overlay que
+ *   ya usan warnModalOverlay/routePickerOverlay/historyModalOverlay) →
+ *   UI.closeModal(). No se toca el guardado (#nameModalBtn) en
+ *   absoluto.
+ *
+ * CAMBIO (ago-2026 — validación informativa Excel vs PDF en
+ * Preparación):
+ *   Se agrega el listener de #btnScToggle → UI.toggleSourceCheckDetail()
+ *   (ver ui.js/features/source-check.js). Simple toggle de visibilidad,
+ *   sin ninguna llamada a Events — la tarjeta ya se actualiza sola
+ *   desde Events.triggerMerge().
+ *
  * Dependencias: todos los módulos de la aplicación.
  */
 import { Auth } from '../features/auth.js';
@@ -251,6 +284,9 @@ async function afterLoginSuccess(result) {
   _pendingFirstLoginPassword = null;
   UI.setUser(State.currentUser);
   UI.hideAuthOverlay();
+  // NUEVO (ago-2026 — login como primera vista): revela .shell — ver
+  // nota de cabecera de este archivo y la regla CSS en index.html.
+  document.body.classList.add('app-authed');
   Auth.startExpiryWatch(handleSessionExpired);
   wireActivityTracking();
   await continueInit();
@@ -309,6 +345,8 @@ function wireAuthForms() {
     _pendingFirstLoginPassword = null;
     UI.setUser(State.currentUser);
     UI.hideAuthOverlay();
+    // NUEVO (ago-2026 — login como primera vista): ver nota de cabecera.
+    document.body.classList.add('app-authed');
     Auth.startExpiryWatch(handleSessionExpired);
     wireActivityTracking();
     await continueInit();
@@ -330,6 +368,12 @@ export async function init() {
 
   if (Auth.restoreSession()) {
     UI.setUser(State.currentUser);
+    // NUEVO (ago-2026 — login como primera vista): sesión ya vigente en
+    // esta terminal — el overlay de login nunca llega a mostrarse, pero
+    // .shell seguía oculto por CSS hasta este punto (ver regla nueva en
+    // index.html). Se revela aquí, antes de continueInit(), para que la
+    // app aparezca de inmediato sin esperar ningún dato de red.
+    document.body.classList.add('app-authed');
     Auth.startExpiryWatch(handleSessionExpired);
     wireActivityTracking();
     await continueInit();
@@ -370,6 +414,12 @@ async function continueInit() {
 
   document.getElementById('btnParse').addEventListener('click',      () => Events.handlePaste());
   document.getElementById('btnPasteClear').addEventListener('click', () => Events.clearPaste());
+
+  // NUEVO (ago-2026 — validación Excel vs PDF): simple toggle de
+  // visibilidad del detalle de diferencias — la tarjeta en sí ya se
+  // actualiza sola desde Events.triggerMerge(), este listener no llama
+  // a Events en absoluto.
+  document.getElementById('btnScToggle')?.addEventListener('click', () => UI.toggleSourceCheckDetail());
 
   document.getElementById('btnExport').addEventListener('click', () => Events.handleExport());
 
@@ -414,6 +464,17 @@ async function continueInit() {
     statusEl.textContent = '✓ Cambios guardados'; statusEl.style.color = 'var(--green)';
     document.getElementById('cfgCurrentPassword').value = '';
     document.getElementById('cfgNewPassword').value     = '';
+  });
+
+  // ── NUEVO (ago-2026 — cerrar el modal de configuración de usuario) ──
+  // UI.closeModal() ya existía pero no tenía ningún disparador en el
+  // DOM. Mismo patrón que #historyModalOverlay/#warnModalOverlay/
+  // #routePickerOverlay: botón "×", botón "Cancelar" y click en el
+  // overlay fuera de .modal-box — ninguno guarda cambios.
+  document.getElementById('btnCfgClose')?.addEventListener('click', () => UI.closeModal());
+  document.getElementById('btnCfgCancel')?.addEventListener('click', () => UI.closeModal());
+  document.getElementById('nameModal').addEventListener('click', e => {
+    if (e.target === document.getElementById('nameModal')) UI.closeModal();
   });
 
   document.getElementById('tableSearch').addEventListener('input', e => UI.setTableSearch(e.target.value));
@@ -617,7 +678,7 @@ async function continueInit() {
   document.getElementById('btnEditSave').addEventListener('click',   () => EditSystem.saveAndRevalidate());
   document.getElementById('btnEditCancel').addEventListener('click', () => EditSystem.close());
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { EditSystem.close(); WarnModal.close(); RoutePicker.close(); }
+    if (e.key === 'Escape') { EditSystem.close(); WarnModal.close(); RoutePicker.close(); UI.closeModal(); }
   });
 
   document.getElementById('btnHistoryOpen').addEventListener('click', () => Events.openHistory());
