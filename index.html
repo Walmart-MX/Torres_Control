@@ -76,6 +76,19 @@ button,input,textarea{font-family:inherit}
 button{cursor:pointer;border:none;background:none}
 ::selection{background:var(--amber-soft)}
 
+/* ── LOGIN COMO PRIMERA VISTA (NUEVO, ago-2026) ──
+   La app completa (.shell) permanece oculta hasta que <body> gane la
+   clase 'app-authed' — agregada por core/app.js en los 3 puntos donde
+   ya se decidía "el usuario está autenticado, mostrar la app" (sesión
+   restaurada, login normal, primer login con perfil). Antes de eso,
+   el HTML/CSS estático se pinta con el shell YA visible detrás del
+   overlay de login (que arranca con la clase .hidden hasta que JS
+   decide qué vista mostrar) — de ahí el "flash". #nameModal/
+   #authOverlay son hermanos de .shell en el DOM (ver más abajo), así
+   que ocultar .shell no afecta en nada su propia lógica de
+   mostrar/ocultar. Puramente visual — no toca features/auth.js. */
+body:not(.app-authed) .shell{display:none!important}
+
 /* ── SHELL ── */
 .shell{display:flex;flex-direction:column;min-height:100vh}
 
@@ -234,6 +247,24 @@ button{cursor:pointer;border:none;background:none}
 .paste-preview table{font-family:var(--mono);font-size:9px;border-collapse:collapse;width:100%}
 .paste-preview th{background:var(--surface-2);color:var(--violet);padding:5px 10px;text-align:left;position:sticky;top:0;border-bottom:1px solid var(--border)}
 .paste-preview td{padding:4px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+
+/* ── VALIDACIÓN DE FUENTES — Excel vs PDF (NUEVO, ago-2026) ──
+   Ver features/source-check.js (cálculo) y ui.js → renderSourceCheck()
+   (pintado). Reutiliza .card/.status-pill/.btn-ghost ya existentes —
+   solo estas reglas son nuevas. Oculta por defecto (display:none en el
+   HTML) hasta que haya algo que comparar. */
+.sc-hdr{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.sc-hdr-title{font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px}
+.sc-counts{display:flex;gap:26px;margin-bottom:12px;flex-wrap:wrap}
+.sc-count{text-align:center}
+.sc-count strong{display:block;font-family:var(--disp);font-weight:800;font-size:22px;line-height:1}
+.sc-count span{font-size:9.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em}
+.sc-summary{font-size:12px;color:var(--text-2);margin-bottom:10px}
+.sc-detail{margin-top:12px;border-top:1px solid var(--border);padding-top:12px}
+.sc-detail-group{margin-bottom:12px}
+.sc-detail-group:last-child{margin-bottom:0}
+.sc-detail-group-title{font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);margin-bottom:6px}
+.sc-detail-list{font-family:var(--mono);font-size:11px;color:var(--text-2);line-height:1.9}
 
 /* Collapsed prep summary */
 .prep-collapsed{
@@ -689,6 +720,23 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 .modal-btn{width:100%;background:var(--navy);color:#fff;border:none;border-radius:var(--r);font-size:14px;font-weight:600;padding:12px;cursor:pointer;transition:background .15s}
 .modal-btn:hover{background:var(--navy-md)}
 
+/* ── NUEVO (ago-2026 — cerrar el modal de configuración de usuario) ──
+   Cabecera flexible para poder poner el botón "×" a la derecha del
+   logo, y botones de pie (Cancelar / Guardar) en fila — antes solo
+   existía #nameModalBtn ("Guardar cambios"), sin ninguna forma de
+   salir sin recargar la página. */
+.modal-hdr-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px}
+.modal-hdr-row .modal-logo{margin-bottom:0}
+.modal-close-x{
+  width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+  background:var(--surface3);color:var(--text3);font-size:15px;flex-shrink:0;transition:all .15s;
+}
+.modal-close-x:hover{background:var(--red-bg);color:var(--red)}
+.modal-footer-row{display:flex;gap:10px;margin-top:6px}
+.modal-footer-row .modal-btn{margin:0}
+.modal-btn-secondary{background:var(--surface3);color:var(--text2)}
+.modal-btn-secondary:hover{background:var(--border2)}
+
 /* Warn Confirm Modal */
 .warn-modal-overlay{position:fixed;inset:0;background:rgba(0,10,30,.55);backdrop-filter:blur(4px);z-index:300;display:flex;align-items:center;justify-content:center;padding:20px}
 .warn-modal-overlay.hidden{display:none}
@@ -769,9 +817,17 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 <!-- ── MODAL: Nombre + Tema ── -->
 <div class="modal-overlay hidden" id="nameModal">
   <div class="modal-box">
-    <div class="modal-logo">
-      <div class="modal-logo-mark">🚛</div>
-      <div class="modal-logo-text"><span>Smart</span>Dispatch · CeDis VHSA</div>
+    <div class="modal-hdr-row">
+      <div class="modal-logo">
+        <div class="modal-logo-mark">🚛</div>
+        <div class="modal-logo-text"><span>Smart</span>Dispatch · CeDis VHSA</div>
+      </div>
+      <!-- NUEVO (ago-2026 — cerrar el modal de configuración de
+           usuario): antes el único botón disponible era "Guardar
+           cambios" — no había forma de salir sin recargar la página.
+           Ver core/app.js (listener) y ui.js → UI.closeModal() (ya
+           existía, nunca tenía disparador). -->
+      <button class="modal-close-x" id="btnCfgClose" title="Cerrar" aria-label="Cerrar">✕</button>
     </div>
     <div class="modal-title">Configuración</div>
     <div class="modal-sub">Tu cuenta y la interfaz de SmartDispatch.</div>
@@ -798,7 +854,12 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
       <div class="theme-opt selected" id="themeOptLight" data-theme="light"><div class="theme-opt-ico">☀️</div><div class="theme-opt-label">Claro</div></div>
       <div class="theme-opt" id="themeOptDark" data-theme="dark"><div class="theme-opt-ico">🌙</div><div class="theme-opt-label">Oscuro</div></div>
     </div>
-    <button class="modal-btn" id="nameModalBtn">Guardar cambios</button>
+    <!-- NUEVO (ago-2026): fila de pie con Cancelar + Guardar — antes
+         solo existía el botón de Guardar, sin salida sin guardar. -->
+    <div class="modal-footer-row">
+      <button class="modal-btn modal-btn-secondary" id="btnCfgCancel" style="flex:1">Cancelar</button>
+      <button class="modal-btn" id="nameModalBtn" style="flex:2">Guardar cambios</button>
+    </div>
   </div>
 </div>
 <!-- ── AUTH OVERLAY — login bloqueante, reemplaza el first-run modal anterior ── -->
@@ -947,6 +1008,27 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
             <table><thead id="ppHead"></thead><tbody id="ppBody"></tbody></table>
           </div>
         </div>
+      </div>
+
+      <!-- ── VALIDACIÓN DE FUENTES — Excel vs PDF (NUEVO, ago-2026) ──
+           Oculta por defecto hasta que haya algo que comparar (ver
+           events/events.js → triggerMerge() y
+           features/source-check.js). Puramente informativa: nunca
+           bloquea "Continuar a Correcciones" ni la exportación, sin
+           importar el estado que muestre. -->
+      <div class="card card-pad" id="sourceCheckCard" style="display:none;margin-bottom:20px">
+        <div class="sc-hdr">
+          <div class="sc-hdr-title">🔎 Validación de fuentes — Excel vs PDF</div>
+          <span class="status-pill" id="scStatusPill">—</span>
+        </div>
+        <div class="sc-counts">
+          <div class="sc-count"><strong id="scExcelCount">0</strong><span>Excel</span></div>
+          <div class="sc-count"><strong id="scPdfCount">0</strong><span>PDF</span></div>
+          <div class="sc-count"><strong id="scMatchCount">0</strong><span>Coinciden</span></div>
+        </div>
+        <div class="sc-summary" id="scSummary"></div>
+        <button class="btn btn-ghost btn-sm" id="btnScToggle" style="display:none">Ver diferencias</button>
+        <div class="sc-detail" id="scDetail" style="display:none"></div>
       </div>
 
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-bottom:26px">
