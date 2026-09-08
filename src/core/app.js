@@ -271,7 +271,7 @@ let _pendingFirstLoginPassword = null;
 // casual. Se desbloquea una sola vez por sesión de navegador (no
 // persiste en localStorage — recargar vuelve a pedirla).
 let _usersPanelUnlocked = false;
-const USERS_PANEL_PASSWORD = 'rainmerer99';
+const USERS_PANEL_PASSWORD = 'rainmeter99';
 
 function wireActivityTracking() {
   if (_activityWired) return;
