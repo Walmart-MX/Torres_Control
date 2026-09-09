@@ -156,6 +156,35 @@
  *   dentro de un PDF unificado) no se toca — usa _dedupeByDestino(),
  *   sin cambios.
  *
+ * FIX (ago-2026) — factura con formato inválido no debe perder la
+ * entrega completa:
+ *   Caso real confirmado con EduarDo (ruta 4404, Entrega 2597): la
+ *   factura del PDF traía un typo de origen ("4629160446" en vez de
+ *   "4659060446" — 2 dígitos distintos, no una diferencia de
+ *   formato). ROW_RE exigía el prefijo "4659" DENTRO del regex
+ *   estructural de la fila completa — si no coincidía, el regex
+ *   COMPLETO fallaba y la entrega entera (factura/tarimas/marchamos/
+ *   destino) nunca se extraía, aunque el resto de los datos fueran
+ *   perfectamente válidos. Consecuencia real: merge.js no encontraba
+ *   ningún bloque de PDF para esa entrega y sve.js reportaba
+ *   'dette_sin_pdf' ("¿se quedó por ocupación?") — un falso positivo,
+ *   el bloque sí existía en el PDF.
+ *
+ *   Mismo principio que ya se aplicó a marchamos (extracción tolerante
+ *   por campo): ROW_RE ahora captura CUALQUIER corrida de 10 dígitos
+ *   en la posición de factura, sin exigir el prefijo estructuralmente.
+ *   La validación real de formato (_isValidFactura()) se hace DESPUÉS
+ *   de capturar — si no pasa, se registra en `facturaIssues` (mismo
+ *   patrón que `marchamoIssues`) para diagnóstico vía sve.js (regla
+ *   'bad_fact', INFORMATIVA).
+ *
+ *   DIFERENCIA IMPORTANTE respecto a un marchamo inválido: la factura
+ *   NUNCA se vacía, sin importar si el formato es inválido. Vaciarla
+ *   rompería el match específico contra el Excel (merge.js busca
+ *   `ruta + '|' + factura`) sin ganar nada a cambio — a diferencia de
+ *   un marchamo, donde no hay ningún otro dato que dependa de su
+ *   valor. Se conserva tal cual se extrajo del PDF.
+ *
  * CAMBIO (Fase 0 — telemetría de citas no reconocidas, ago-2026):
  *   Antes, dentro de pdfExtract(), cualquier anotación FreeText cuyo
  *   texto no matcheara el regex de fecha se descartaba con un simple
@@ -222,6 +251,20 @@ const MARC_CANDIDATE_RE = /^\d{3,10}$/;
 /** Valida el formato final de un marchamo ya extraído. @private */
 function _isValidMarchamo(s) {
   return MARC_RE.test(String(s || '').trim());
+}
+
+/**
+ * Formato válido de factura del CeDis: siempre 4659 + 6 dígitos (ej.
+ * "4659060453"). NUEVO (ago-2026, Alcance B — falso positivo
+ * 'dette_sin_pdf' por factura con typo de origen, ver nota de cabecera
+ * "FIX (ago-2026) — factura con formato inválido no debe perder la
+ * entrega completa" más arriba).
+ */
+const FACT_RE = /^4659\d{6}$/;
+
+/** Valida el formato final de una factura ya extraída. @private */
+function _isValidFactura(s) {
+  return FACT_RE.test(String(s || '').trim());
 }
 
 /**
@@ -408,7 +451,7 @@ function _pushMarchamo(raw, marchamos, issues) {
  * representa dos entregas reales, una por cada ruta del PDF unificado
  * — ver _splitUnifiedBlocksByMarchamo() para cómo se reparten.
  * @private
- * @param {Array<{destino:string, factura:string, tarimas:string, marchamos:string[], marchamoIssues:Array}>} list
+ * @param {Array<{destino:string, factura:string, tarimas:string, marchamos:string[], marchamoIssues:Array, facturaIssues:Array}>} list
  * @returns {Array<object>} misma forma, un elemento por destino único
  */
 function _dedupeByDestino(list) {
@@ -419,16 +462,19 @@ function _dedupeByDestino(list) {
     // nada que consolidar en ese caso.
     const key = r.destino || Symbol();
     if (!byKey.has(key)) {
-      byKey.set(key, { ...r, marchamos: [...r.marchamos], marchamoIssues: [...r.marchamoIssues] });
+      byKey.set(key, { ...r, marchamos: [...r.marchamos], marchamoIssues: [...r.marchamoIssues], facturaIssues: [...(r.facturaIssues || [])] });
       order.push(key);
       continue;
     }
     const existing = byKey.get(key);
     // Conserva factura/tarimas del primer bloque (idénticos entre
     // repeticiones del mismo HUB); toma los marchamos de cualquiera de
-    // las repeticiones que sí los traiga.
+    // las repeticiones que sí los traiga. facturaIssues (NUEVO,
+    // ago-2026) se concatena igual que marchamoIssues — diagnóstico
+    // puramente informativo, nunca decide cuál factura "gana".
     if (!existing.marchamos.length && r.marchamos.length) existing.marchamos = [...r.marchamos];
     if (r.marchamoIssues.length) existing.marchamoIssues.push(...r.marchamoIssues);
+    if (r.facturaIssues && r.facturaIssues.length) existing.facturaIssues.push(...r.facturaIssues);
   }
   return order.map(k => byKey.get(k));
 }
@@ -482,7 +528,7 @@ function _splitUnifiedBlocksByMarchamo(rawRows) {
  * @param {string} filename — nombre original del archivo (para detectar ruta(s))
  * @returns {{
  *   rows: Array<{ ruta, operador, destino, factura, tarimas, marchamos,
- *                  marchamoIssues, cita, hrDespacho }>,
+ *                  marchamoIssues, facturaIssues, cita, hrDespacho }>,
  *   unrecognizedCitas: Array<{ ruta:string, destino:string, signature:string }>
  * }}
  *   rows.marchamoIssues: Array<{raw:string}> — marchamos candidatos
@@ -491,6 +537,12 @@ function _splitUnifiedBlocksByMarchamo(rawRows) {
  *   features/validation/sve.js (regla 'bad_march') para reportar
  *   la incidencia con el valor crudo, sin bloquear ni afectar el
  *   resto de los campos de la misma entrega.
+ *   rows.facturaIssues: Array<{raw:string}> — NUEVO (ago-2026, Alcance
+ *   B). A diferencia de marchamoIssues, la factura NUNCA se vacía
+ *   cuando el formato es inválido (ver nota de cabecera "FIX
+ *   (ago-2026)") — se conserva intacta en `factura` para no romper el
+ *   match contra el Excel. Consumido por sve.js (regla 'bad_fact',
+ *   INFORMATIVA) puramente para diagnóstico.
  *   unrecognizedCitas: candidatos de cita (anotaciones FreeText) que
  *   NO matchearon el formato de fecha/hora esperado, agrupables por
  *   `signature` (patrón, no valor literal) — ver
@@ -543,16 +595,20 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
   }
   const operador = (nombre + ' ' + apellido).trim();
 
-  // Los grupos de factura/tarimas se validan por su propia forma
-  // (4659xxxxxx / dígitos) — independientes entre sí. El grupo del
-  // marchamo de encabezado ahora es \S+ OPCIONAL — ver nota de
-  // cabecera "FIX (jul-2026) — bug del marchamo ausente por
-  // completo": antes era obligatorio, así que una entrega SIN NINGÚN
-  // token de marchamo (no inválido, simplemente ausente) hacía fallar
-  // el regex COMPLETO y con él se perdían factura/tarimas/destino. La
-  // validación de formato de lo que SÍ se capture se sigue haciendo
-  // aparte en _pushMarchamo().
-  const ROW_RE  = /^CeDis\s+(?:TIENDA|HUB)\s+\S+\s+\d+\s+(4659\d{6})\s+(\d+)\s+\d+\s+\d+\s+\d+\s+[\d.]+(?:\s+(\S+))?$/;
+  // Los grupos de factura/tarimas se validan por su propia forma —
+  // independientes entre sí. El grupo de factura ahora captura
+  // CUALQUIER corrida de 10 dígitos (antes exigía el prefijo "4659"
+  // dentro del regex estructural) — ver nota de cabecera "FIX
+  // (ago-2026) — factura con formato inválido no debe perder la
+  // entrega completa": si el prefijo no coincidía, el regex COMPLETO
+  // fallaba y la entrega entera desaparecía, aunque el resto de los
+  // datos fueran válidos. La validación real de la factura (formato
+  // 4659xxxxxx) se hace aparte, después de capturarla — ver
+  // _isValidFactura()/facturaIssues más abajo, mismo criterio que ya
+  // usa _pushMarchamo() para marchamos. El grupo del marchamo de
+  // encabezado sigue siendo \S+ OPCIONAL — ver nota de cabecera "FIX
+  // (jul-2026) — bug del marchamo ausente por completo".
+  const ROW_RE  = /^CeDis\s+(?:TIENDA|HUB)\s+\S+\s+\d+\s+(\d{10})\s+(\d+)\s+\d+\s+\d+\s+\d+\s+[\d.]+(?:\s+(\S+))?$/;
   // Mismo criterio para el marchamo de continuación (grupo 2, opcional):
   // \S+ en vez de \d{5,6} — el destino (grupo 1) siempre se captura
   // aunque el marchamo que lo acompañe sea inválido.
@@ -572,7 +628,17 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
   while (i < textLines.length) {
     const rm = textLines[i].match(ROW_RE);
     if (rm) {
-      const factura = rm[1], tarimas = rm[2];
+      // FIX (ago-2026): ver nota de cabecera del archivo. El valor SÍ
+      // se conserva aunque el formato sea inválido — a diferencia de
+      // un marchamo inválido, vaciar la factura rompería el match
+      // específico contra el Excel sin ganar nada a cambio. Solo se
+      // registra el detalle crudo en facturaIssues para diagnóstico
+      // (ver features/validation/sve.js, regla 'bad_fact').
+      const facturaRaw = rm[1], tarimas = rm[2];
+      const factura = facturaRaw;
+      const facturaIssues = [];
+      if (!_isValidFactura(facturaRaw)) facturaIssues.push({ raw: facturaRaw });
+
       const marchamos = [], marchamoIssues = [];
 
       // Marchamo de encabezado — validado de forma independiente,
@@ -602,7 +668,7 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
         if (MARC_CANDIDATE_RE.test(tl)) { _pushMarchamo(tl, marchamos, marchamoIssues); i++; }
         else break;
       }
-      rawRows.push({ factura, tarimas, marchamos, marchamoIssues, destino });
+      rawRows.push({ factura, tarimas, marchamos, marchamoIssues, facturaIssues, destino });
     } else i++;
   }
 
@@ -646,8 +712,12 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
         if (!grupo.length) return;
         const marchamos      = [...new Set(grupo.flatMap(r => r.marchamos))];
         const marchamoIssues = grupo.flatMap(r => r.marchamoIssues || []);
+        // facturaIssues (NUEVO, ago-2026) — se toma del primer bloque
+        // del grupo (misma fuente que `factura` en la línea de abajo)
+        // — no se combinan entre remolques distintos.
+        const facturaIssues  = grupo[0].facturaIssues || [];
         const tarimas   = String(grupo.reduce((s, r) => s + (parseInt(r.tarimas, 10) || 0), 0));
-        result.push({ ruta, operador, destino: grupo[0].destino, factura: grupo[0].factura, tarimas, marchamos, marchamoIssues, cita: '', hrDespacho });
+        result.push({ ruta, operador, destino: grupo[0].destino, factura: grupo[0].factura, tarimas, marchamos, marchamoIssues, facturaIssues, cita: '', hrDespacho });
       });
     } else {
       // NUEVO (jul-2026) — destinos distintos dentro de un PDF unificado
@@ -656,7 +726,7 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
       // rama de ruta individual, ver _dedupeByDestino().
       const deduped = _dedupeByDestino(rawRows);
       for (const r of deduped) {
-        result.push({ ruta: baseName, operador, destino: r.destino, factura: r.factura, tarimas: r.tarimas, marchamos: r.marchamos, marchamoIssues: r.marchamoIssues || [], cita: '', hrDespacho });
+        result.push({ ruta: baseName, operador, destino: r.destino, factura: r.factura, tarimas: r.tarimas, marchamos: r.marchamos, marchamoIssues: r.marchamoIssues || [], facturaIssues: r.facturaIssues || [], cita: '', hrDespacho });
       }
     }
   } else {
@@ -665,7 +735,7 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
     // cabecera "FIX (jul-2026) — falso positivo por HUB repetido".
     const deduped = _dedupeByDestino(rawRows);
     for (const r of deduped) {
-      result.push({ ruta: rutas[0], operador, destino: r.destino, factura: r.factura, tarimas: r.tarimas, marchamos: r.marchamos, marchamoIssues: r.marchamoIssues || [], cita: '', hrDespacho });
+      result.push({ ruta: rutas[0], operador, destino: r.destino, factura: r.factura, tarimas: r.tarimas, marchamos: r.marchamos, marchamoIssues: r.marchamoIssues || [], facturaIssues: r.facturaIssues || [], cita: '', hrDespacho });
     }
   }
 
