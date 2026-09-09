@@ -179,6 +179,18 @@
  *   sin cambios necesarios en ui.js/edit-system.js: EDITABLE_FIELDS ya
  *   expone MARCHAMO 1-5 como campos editables en el drawer.
  *
+ * CAMBIO (ago-2026 — nueva regla 'bad_fact', Alcance B): falso
+ *   positivo real de 'dette_sin_pdf' causado por una factura del PDF
+ *   con typo de origen (no cumplía el prefijo 4659 esperado) que hacía
+ *   fallar el regex COMPLETO de extracción en processors/pdf.js — la
+ *   entrega entera desaparecía del parseo aunque el resto de sus datos
+ *   fueran válidos. pdf.js ahora captura la factura sin exigir el
+ *   prefijo estructuralmente y valida el formato aparte
+ *   (_isValidFactura()); esta regla nueva expone esa validación como
+ *   INFORMATIVA (r._facturaIssues, poblado en merge.js) — mismo
+ *   patrón que J (bad_march), pero SIN vaciar el campo: la factura se
+ *   conserva intacta porque se necesita para el match contra el Excel.
+ *
  * Dependencias:
  *   - State (core/state.js) — lee rows ya vía parámetro, pero escribe
  *     State.sveHasCritical / sveHasWarnings / sveLastQuality
@@ -194,7 +206,7 @@ export const SVE_INFO = 'INFORMATIVA';
 export const SVE_ICONS = {
   'dup_march':'🔖','dup_march_ruta':'🔁','dup_march_self':'♻️','missing_ruta':'🔴','missing':'🟠',
   'no_march':'🔴','zero_tar':'📐','high_tar':'📐','no_pdf':'🟡',
-  'no_fac':'ℹ️','bad_march':'ℹ️','integrity':'🔗','no_ventana':'📇','no_pool':'🚚','cat_dup':'🗂️','time_anomaly':'⏱️',
+  'no_fac':'ℹ️','bad_march':'ℹ️','bad_fact':'🧾','integrity':'🔗','no_ventana':'📇','no_pool':'🚚','cat_dup':'🗂️','time_anomaly':'⏱️',
   'no_cita':'📅','pdf_ambiguous':'🧩','dette_sin_pdf':'🚫'
 };
 
@@ -574,6 +586,39 @@ export function runSVE(rows, screenCount, excludedCount) {
     rawAdd(SVE_INFO,'bad_march', ruta,'MARCHAMOS',
       `Ruta ${ruta} · Entrega ${dette||'—'}: ${vals.size} marchamo${vals.size>1?'s':''} con formato inválido detectado en el PDF (${sample}) — se dejó vacío, no se copió de ninguna otra entrega.`,
       'El texto extraído no cumple el formato esperado (5-6 dígitos). Verifica el PDF original y corrige manualmente el campo Marchamo.',
+      vals.size>1?`×${vals.size}`:'',
+      [...rowIds], dette);
+  });
+
+  // J-bis: Facturas con formato incorrecto — NUEVO (ago-2026, Alcance
+  // B). Caso real confirmado con EduarDo (ruta 4404, Entrega 2597):
+  // una factura del PDF con typo de origen ("4629160446" en vez de
+  // "4659060446") no cumplía el prefijo esperado por ROW_RE — antes
+  // eso hacía fallar el regex COMPLETO de la fila y la entrega entera
+  // desaparecía del parseo (falso 'dette_sin_pdf'). processors/pdf.js
+  // ahora captura la factura sin exigir el prefijo estructuralmente y
+  // valida el formato aparte (_isValidFactura()) — a diferencia de un
+  // marchamo inválido, la factura NUNCA se vacía (se necesita intacta
+  // para el match contra el Excel), así que esta regla es puramente
+  // informativa: no hay ningún campo vacío que corregir vía quickfix,
+  // solo un valor a verificar contra el documento original.
+  const badFactByRutaDette = new Map();
+  matched.forEach(r => {
+    const issues = r._facturaIssues || [];
+    if (!issues.length) return;
+    const ruta  = String(getMapped(r,'RUTA')||'').trim();
+    const dette = String(getMapped(r,'DET')||'').trim();
+    const groupKey = ruta + '||' + dette;
+    if (!badFactByRutaDette.has(groupKey)) badFactByRutaDette.set(groupKey, { ruta, dette, vals: new Set(), rowIds: new Set() });
+    const e = badFactByRutaDette.get(groupKey);
+    issues.forEach(iss => e.vals.add(iss.raw));
+    if (r._rowId) e.rowIds.add(r._rowId);
+  });
+  badFactByRutaDette.forEach(({ ruta, dette, vals, rowIds }) => {
+    const sample = [...vals].slice(0,3).join(', ') + (vals.size>3?'…':'');
+    rawAdd(SVE_INFO,'bad_fact', ruta,'FAC.',
+      `Ruta ${ruta} · Entrega ${dette||'—'}: factura con formato inesperado detectada en el PDF (${sample}) — se conservó tal cual para no perder el cruce con el Excel.`,
+      'El texto extraído no cumple el formato esperado (4659 + 6 dígitos). Verifica el PDF original contra la factura real.',
       vals.size>1?`×${vals.size}`:'',
       [...rowIds], dette);
   });
