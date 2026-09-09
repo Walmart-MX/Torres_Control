@@ -139,6 +139,17 @@
  *   error — solo se auto-resuelven incidencias de catálogos que
  *   realmente se evaluaron esta corrida.
  *
+ * CAMBIO (ago-2026, Alcance B — falso positivo 'dette_sin_pdf' por
+ * factura con typo de origen): pdfRow.facturaIssues (poblado en
+ * processors/pdf.js cuando la factura extraída no cumple el formato
+ * 4659xxxxxx, ver nota de cabecera de ese archivo) se copia a
+ * nr['_facturaIssues'] — mismo patrón exacto que ya existe para
+ * marchamoIssues. A diferencia de los marchamos, FAC_PDF nunca se
+ * vacía por esto — la factura se necesita intacta para el match
+ * específico contra el Excel. Consumido por features/validation/sve.js
+ * (regla 'bad_fact', INFORMATIVA) — puramente diagnóstico, no bloquea
+ * ni afecta ningún otro campo.
+ *
  * Dependencias:
  *   - State (core/state.js) — lee varias propiedades, escribe State.merged,
  *     State.catalogIndices, State.catalogDuplicates, State.excludedCount
@@ -300,12 +311,20 @@ export function runMerge() {
       // (regla 'bad_march') — nunca afecta OPERADOR/TARIMAS/FAC_PDF,
       // que se extrajeron de forma independiente.
       nr['_marchamoIssues'] = pdfRow.marchamoIssues || [];
+      // NUEVO (ago-2026, Alcance B — falso positivo 'dette_sin_pdf'
+      // por factura con typo de origen): a diferencia de un marchamo
+      // inválido, FAC_PDF NUNCA se vacía cuando la factura no cumple
+      // el formato 4659xxxxxx — se conserva tal cual para no romper
+      // el match específico contra el Excel (ver processors/pdf.js).
+      // Solo aporta diagnóstico para el SVE (regla 'bad_fact', INFO).
+      nr['_facturaIssues'] = pdfRow.facturaIssues || [];
     } else {
       nr['OPERADOR'] = '';
       nr['TARIMAS']  = '';
       for (let m = 0; m < MAX_MARCH; m++) nr['MARCHAMO ' + (m + 1)] = '';
       nr['_CITA_PDF'] = ''; nr['CITA'] = ''; nr['_LIC'] = ''; nr['_HR_DESP_PDF'] = '';
       nr['_marchamoIssues'] = [];
+      nr['_facturaIssues']  = [];
     }
 
     if (factRow) {
