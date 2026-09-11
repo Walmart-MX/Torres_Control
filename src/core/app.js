@@ -291,29 +291,79 @@ async function afterLoginSuccess(result) {
   }
   _pendingFirstLoginPassword = null;
   UI.setUser(State.currentUser);
-  UI.hideAuthOverlay();
-  // NUEVO (ago-2026 — login como primera vista): revela .shell — ver
-  // nota de cabecera de este archivo y la regla CSS en index.html.
-  document.body.classList.add('app-authed');
+  _revealAppWithTransition();
   Auth.startExpiryWatch(handleSessionExpired);
   wireActivityTracking();
   await continueInit();
 }
+const AUTH_ERROR_MESSAGES = {
+  user_not_found:     { title:'Usuario no encontrado',        body:'Tu usuario no se encuentra dado de alta. Contacta al administrador para solicitar tu alta.' },
+  invalid_password:   { title:'Contraseña incorrecta',         body:'Verifica tu contraseña e intenta nuevamente.' },
+  invalid_credentials:{ title:'Usuario o contraseña incorrectos', body:'Verifica tu usuario y tu contraseña e intenta nuevamente.' },
+  inactive:           { title:'Cuenta inactiva',               body:'Esta cuenta está desactivada. Contacta al administrador para reactivarla.' },
+  network:            { title:'Sin conexión',                  body:'No se pudo conectar con el servidor. Verifica tu conexión e intenta de nuevo.' },
+  generic:            { title:'No se pudo iniciar sesión',     body:'Verifica tus datos e intenta nuevamente.' }
+};
+
+function _setAuthError(elId, code) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (!code) { el.innerHTML = ''; return; }
+  const msg = AUTH_ERROR_MESSAGES[code] || AUTH_ERROR_MESSAGES.generic;
+  el.innerHTML = `<strong>${msg.title}</strong><span>${msg.body}</span>`;
+}
+
+function _setAuthButtonState(form, state) {
+  const btn = form.querySelector('button[type="submit"]');
+  if (!btn) return;
+  if (state === 'loading') {
+    btn.dataset.origText = btn.dataset.origText || btn.textContent;
+    btn.disabled = true;
+    btn.classList.remove('auth-success');
+    btn.innerHTML = '<span class="auth-spinner"></span>Iniciando sesión…';
+  } else if (state === 'success') {
+    btn.disabled = true;
+    btn.classList.add('auth-success');
+    btn.textContent = '✓ ¡Bienvenido!';
+  } else {
+    btn.disabled = false;
+    btn.classList.remove('auth-success');
+    if (btn.dataset.origText) btn.textContent = btn.dataset.origText;
+  }
+}
+
+function _revealAppWithTransition() {
+  const overlay = document.getElementById('authOverlay');
+  overlay.classList.add('authOverlay-leaving');
+  setTimeout(() => {
+    UI.hideAuthOverlay();
+    overlay.classList.remove('authOverlay-leaving');
+    document.body.classList.add('app-authed');
+  }, 280);
+}
+
+let _authSubmitting = false;
 
 function wireAuthForms() {
   document.getElementById('authFormKnown').addEventListener('submit', async e => {
     e.preventDefault();
+    if (_authSubmitting) return;
     const known  = Auth.getKnownUser();
     const pass   = document.getElementById('authKnownPassword').value;
-    const errEl  = document.getElementById('authKnownError');
-    errEl.textContent = '';
+    document.getElementById('authKnownError').innerHTML = '';
+    _authSubmitting = true;
+    _setAuthButtonState(e.target, 'loading');
     const result = await Auth.login(known.username, pass);
     if (!result.ok) {
-      errEl.textContent = result.error === 'inactive' ? 'Esta cuenta está inactiva.' : 'Contraseña incorrecta.';
+      _authSubmitting = false;
+      _setAuthButtonState(e.target, 'idle');
+      _setAuthError('authKnownError', result.error);
       return;
     }
+    _setAuthButtonState(e.target, 'success');
     _pendingFirstLoginPassword = pass;
     await afterLoginSuccess(result);
+    _authSubmitting = false;
   });
 
   document.getElementById('authChangeUser').addEventListener('click', () => {
@@ -323,19 +373,30 @@ function wireAuthForms() {
 
   document.getElementById('authFormFull').addEventListener('submit', async e => {
     e.preventDefault();
+    if (_authSubmitting) return;
     const user  = document.getElementById('authFullUsername').value.trim();
     const pass  = document.getElementById('authFullPassword').value;
     const errEl = document.getElementById('authFullError');
-    errEl.textContent = '';
-    if (!user || !pass) { errEl.textContent = 'Completa usuario y contraseña.'; return; }
+    errEl.innerHTML = '';
+    if (!user || !pass) { errEl.innerHTML = '<strong>Completa usuario y contraseña.</strong>'; return; }
+    _authSubmitting = true;
+    _setAuthButtonState(e.target, 'loading');
     const result = await Auth.login(user, pass);
-    if (!result.ok) { errEl.textContent = 'Usuario o contraseña incorrectos.'; return; }
+    if (!result.ok) {
+      _authSubmitting = false;
+      _setAuthButtonState(e.target, 'idle');
+      _setAuthError('authFullError', result.error);
+      return;
+    }
+    _setAuthButtonState(e.target, 'success');
     _pendingFirstLoginPassword = pass;
     await afterLoginSuccess(result);
+    _authSubmitting = false;
   });
 
   document.getElementById('authFormProfile').addEventListener('submit', async e => {
     e.preventDefault();
+    if (_authSubmitting) return;
     const displayName = document.getElementById('authProfileDisplay').value.trim();
     const captureName = document.getElementById('authProfileCapture').value.trim();
     const newPass      = document.getElementById('authProfileNewPassword').value;
@@ -343,21 +404,29 @@ function wireAuthForms() {
     errEl.textContent = '';
     if (!displayName || !captureName) { errEl.textContent = 'Completa ambos campos.'; return; }
 
+    _authSubmitting = true;
+    _setAuthButtonState(e.target, 'loading');
+
     const currentPass = _pendingFirstLoginPassword;
     const profResult  = await Auth.updateProfile(currentPass, displayName, captureName);
-    if (!profResult.ok) { errEl.textContent = 'No se pudo guardar tu perfil — intenta de nuevo.'; return; }
+    if (!profResult.ok) {
+      _authSubmitting = false;
+      _setAuthButtonState(e.target, 'idle');
+      errEl.textContent = 'No se pudo guardar tu perfil — intenta de nuevo.';
+      return;
+    }
     if (newPass) {
       const pwResult = await Auth.changePassword(currentPass, newPass);
       if (!pwResult.ok) errEl.textContent = 'Perfil guardado, pero no se pudo cambiar la contraseña.';
     }
     _pendingFirstLoginPassword = null;
     UI.setUser(State.currentUser);
-    UI.hideAuthOverlay();
-    // NUEVO (ago-2026 — login como primera vista): ver nota de cabecera.
-    document.body.classList.add('app-authed');
+    _setAuthButtonState(e.target, 'success');
+    _revealAppWithTransition();
     Auth.startExpiryWatch(handleSessionExpired);
     wireActivityTracking();
     await continueInit();
+    _authSubmitting = false;
   });
 }
 
