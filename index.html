@@ -709,8 +709,26 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 .modal-input:focus{border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-bg)}
 .modal-input::placeholder{color:var(--text4)}
 .modal-hint{font-size:11px;color:var(--text3);margin-bottom:18px}
-   .auth-error{font-size:11px;color:var(--red);min-height:14px;margin:4px 0 12px}
+  .auth-error{font-size:11px;color:var(--red);min-height:14px;margin:4px 0 12px}
+.auth-error strong{display:block;font-size:11.5px;font-weight:700;color:var(--red);margin-bottom:2px}
+.auth-error span{display:block;font-size:11px;color:var(--text2);line-height:1.5;font-weight:400}
 .auth-link{width:100%;background:none;border:none;color:var(--text3);font-size:11px;text-align:center;margin-top:10px;cursor:pointer;text-decoration:underline}
+   .auth-hint{display:flex;gap:8px;align-items:flex-start;background:var(--blue-bg);border:1px solid var(--blue-bd);border-radius:var(--r);padding:10px 12px;margin:2px 0 16px}
+.auth-hint-ico{font-size:14px;line-height:1;flex-shrink:0;margin-top:1px}
+.auth-hint-txt{font-size:11px;color:var(--text2);line-height:1.55}
+.auth-hint-txt strong{display:block;color:var(--blue);font-size:11.5px;margin-bottom:2px}
+.auth-hint-txt code{font-family:var(--mono);background:rgba(0,0,0,.06);border-radius:4px;padding:1px 5px;font-weight:600}
+[data-theme="dark"] .auth-hint-txt code{background:rgba(255,255,255,.1)}
+
+.auth-spinner{width:13px;height:13px;border-radius:50%;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;display:inline-block;vertical-align:-2px;margin-right:6px;animation:authSpin .6s linear infinite}
+@keyframes authSpin{to{transform:rotate(360deg)}}
+.modal-btn:disabled{opacity:.8;cursor:not-allowed}
+.modal-btn.auth-success{background:var(--green)}
+
+#authOverlay{transition:opacity .28s ease}
+#authOverlay.authOverlay-leaving{opacity:0;pointer-events:none}
+#authBox{transition:transform .28s ease}
+#authOverlay.authOverlay-leaving #authBox{transform:scale(.97)}
 .theme-opts{display:flex;gap:8px;margin-bottom:18px}
 .theme-opt{flex:1;border:2px solid var(--border2);border-radius:var(--r);padding:12px 8px;text-align:center;cursor:pointer;transition:all .15s;background:var(--surface2)}
 .theme-opt:hover{border-color:var(--blue)}
@@ -886,11 +904,13 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
       <div class="modal-title">Iniciar sesión</div>
       <div class="modal-sub">Ingresa tu usuario corporativo y tu contraseña de SmartDispatch.</div>
       <div class="modal-field-label">Usuario</div>
-      <input class="modal-input" id="authFullUsername" type="text" autocomplete="username" placeholder="Ej. e0g0913">
-      <div class="modal-field-label">Contraseña</div>
-      <input class="modal-input" id="authFullPassword" type="password" autocomplete="current-password" placeholder="••••••••">
-      <div class="auth-error" id="authFullError"></div>
-      <button type="submit" class="modal-btn">Ingresar</button>
+   <input class="modal-input" id="authFullPassword" type="password" autocomplete="current-password" placeholder="••••••••">
+<div class="auth-hint">
+  <span class="auth-hint-ico">💡</span>
+  <span class="auth-hint-txt"><strong>¿Es tu primera vez iniciando sesión?</strong>Ingresa tu usuario corporativo. Tu contraseña temporal es <code>pass</code>.</span>
+</div>
+<div class="auth-error" id="authFullError"></div>
+<button type="submit" class="modal-btn">Ingresar</button>
     </form>
 
     <!-- Primer login — confirmar perfil -->
