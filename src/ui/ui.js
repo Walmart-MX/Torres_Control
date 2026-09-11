@@ -308,18 +308,22 @@ export const UI = {
     ['authFormKnown', 'authFormFull', 'authFormProfile'].forEach(vid =>
       document.getElementById(vid).style.display = vid === id ? '' : 'none');
   },
-  showAuthKnown(greetingLine) {
-    UI._showAuthView('authFormKnown');
-    document.getElementById('authGreeting').textContent = greetingLine;
-    document.getElementById('authKnownError').textContent = '';
-    document.getElementById('authKnownPassword').value = '';
-    setTimeout(() => document.getElementById('authKnownPassword').focus(), 80);
-  },
-  showAuthFull() {
-    UI._showAuthView('authFormFull');
-    document.getElementById('authFullError').textContent = '';
-    setTimeout(() => document.getElementById('authFullUsername').focus(), 80);
-  },
+showAuthKnown(greetingLine) {
+  UI._showAuthView('authFormKnown');
+  document.getElementById('authGreeting').textContent = greetingLine;
+  document.getElementById('authKnownError').textContent = '';
+  document.getElementById('authKnownPassword').value = '';
+  const btn = document.querySelector('#authFormKnown button[type="submit"]');
+  if (btn) { btn.disabled = false; btn.classList.remove('auth-success'); if (btn.dataset.origText) btn.textContent = btn.dataset.origText; }
+  setTimeout(() => document.getElementById('authKnownPassword').focus(), 80);
+},
+showAuthFull() {
+  UI._showAuthView('authFormFull');
+  document.getElementById('authFullError').textContent = '';
+  const btn = document.querySelector('#authFormFull button[type="submit"]');
+  if (btn) { btn.disabled = false; btn.classList.remove('auth-success'); if (btn.dataset.origText) btn.textContent = btn.dataset.origText; }
+  setTimeout(() => document.getElementById('authFullUsername').focus(), 80);
+},
   showAuthProfile(prefill) {
     UI._showAuthView('authFormProfile');
     document.getElementById('authProfileDisplay').value = prefill.displayName;
