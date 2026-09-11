@@ -241,6 +241,8 @@ const MAX_MARCH_SLOTS = 5;
 /** Formato válido de marchamo: 5-6 dígitos, con o sin cero inicial. */
 const MARC_RE = /^0?\d{5,6}$/;
 
+const IGNORED_ALT_ROUTE_DESTINOS = new Set(['29999138', '29999227', '29999230']);
+
 /** Detección "candidata" de continuación de marchamo — más laxa que
  *  MARC_RE a propósito: solo sirve para decidir si una línea DEBE
  *  tratarse como un intento de marchamo (y por lo tanto seguir
@@ -671,6 +673,8 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
       rawRows.push({ factura, tarimas, marchamos, marchamoIssues, facturaIssues, destino });
     } else i++;
   }
+
+  const filteredRawRows = rawRows.filter(r => !IGNORED_ALT_ROUTE_DESTINOS.has(r.destino));
 
   let result = [];
   if (isUnified) {
