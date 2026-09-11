@@ -901,10 +901,12 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 
     <!-- Terminal nueva / tras "Cambiar usuario" -->
     <form id="authFormFull" class="auth-view" style="display:none">
-      <div class="modal-title">Iniciar sesión</div>
+           <div class="modal-title">Iniciar sesión</div>
       <div class="modal-sub">Ingresa tu usuario corporativo y tu contraseña de SmartDispatch.</div>
       <div class="modal-field-label">Usuario</div>
-   <input class="modal-input" id="authFullPassword" type="password" autocomplete="current-password" placeholder="••••••••">
+      <input class="modal-input" id="authFullUsername" type="text" autocomplete="username" placeholder="Ej. e0g0913">
+      <div class="modal-field-label">Contraseña</div>
+      <input class="modal-input" id="authFullPassword" type="password" autocomplete="current-password" placeholder="••••••••">
 <div class="auth-hint">
   <span class="auth-hint-ico">💡</span>
   <span class="auth-hint-txt"><strong>¿Es tu primera vez iniciando sesión?</strong>Ingresa tu usuario corporativo. Tu contraseña temporal es <code>pass</code>.</span>
