@@ -77,18 +77,14 @@
  *
  *   Se agrega _dedupeByDestino() — consolida bloques que comparten
  *   `destino` en UNA sola entrega, quedándose con los marchamos de
- *   cualquiera de las repeticiones que sí los traiga. Se aplica SOLO
- *   donde consolidar es seguro:
- *     - Ruta individual (rama `else` de parsePDF) — un HUB repetido es
- *       una sola entrega real, debe consolidarse.
- *     - PDF unificado con destinos DISTINTOS (rama `else` de
- *       `isUnified`, sameDestino === false) — un HUB puede repetirse
- *       ahí también, mismo criterio.
- *   NO se aplica cuando `sameDestino === true` (PDF unificado de dos
- *   rutas con el MISMO destino compartido): ahí la repetición del
- *   destino representa DOS entregas reales, una por cada ruta — ver
- *   FIX (ago-2026) más abajo para cómo se reparten correctamente entre
- *   las dos rutas.
+ *   cualquiera de las repeticiones que sí los traiga. Se aplica en la
+ *   ruta individual (rama `else` de parsePDF) — un HUB repetido es una
+ *   sola entrega real, debe consolidarse. NOTA (sep-2026): antes
+ *   también se aplicaba en la rama "destinos distintos" del PDF
+ *   unificado; esa rama se retiró por completo — ver FIX (sep-2026)
+ *   más abajo, "generalización de rutas unificadas con destinos
+ *   distintos". _dedupeByDestino() ahora es exclusivo de la ruta
+ *   individual.
  *
  * FIX (jul-2026) — HR. DESPACHO con fecha invertida:
  *   El sello "Impreso/enviado por fax" del PDF imprime la fecha en
@@ -151,10 +147,13 @@
  *        asumir que `rutas` (tomado tal cual del nombre del archivo)
  *        ya viene en ese orden.
  *
- *   Aplica ÚNICAMENTE a la rama sameDestino === true (destino
- *   compartido). El caso sameDestino === false (destinos distintos
- *   dentro de un PDF unificado) no se toca — usa _dedupeByDestino(),
- *   sin cambios.
+ *   NOTA (sep-2026): esta lógica de partición por remolque, que
+ *   originalmente solo se aplicaba cuando ambas rutas compartían
+ *   destino (`sameDestino === true`), ahora se aplica a TODA ruta
+ *   unificada sin importar sus destinos — ver FIX (sep-2026) más abajo,
+ *   "generalización de rutas unificadas con destinos distintos". La
+ *   regla física (un remolque = una ruta, primero el bloque de la ruta
+ *   con número mayor) no depende de si los destinos coinciden.
  *
  * FIX (ago-2026) — factura con formato inválido no debe perder la
  * entrega completa:
@@ -184,6 +183,79 @@
  *   `ruta + '|' + factura`) sin ganar nada a cambio — a diferencia de
  *   un marchamo, donde no hay ningún otro dato que dependa de su
  *   valor. Se conserva tal cual se extrajo del PDF.
+ *
+ * FIX (sep-2026) — HUBs de "ruta alterna" generan falsos positivos de
+ * ambigüedad/ausencia de PDF:
+ *   Caso real confirmado con EduarDo: los HUB 29999138, 29999227 y
+ *   29999230 aparecen en el PDF como una "Entrega 1" separada, con una
+ *   sola línea de datos de conteos triviales (GLS=1, Tarimas=1,
+ *   Posiciones=1, Cajas=1) seguida de su propio "Total de ordenes de
+ *   compra... Fin del informe" — un bloque de relleno que WTMS agrega
+ *   cuando la carga tomó alguna ruta alterna, NO una entrega real.
+ *
+ *   Antes de este fix, si la factura de ese bloque de relleno resultaba
+ *   tener 10 dígitos con prefijo 4659 (coincidencia de formato, caso
+ *   real: PDF 6204-6205), ROW_RE SÍ generaba un rawRow válido para él
+ *   — agregando un `destino` extra falso al documento unificado, lo
+ *   cual disparaba la generalización de destinos distintos (ver FIX
+ *   más abajo) y podía desalinear la asignación de bloques por
+ *   remolque. Se filtran estos tres HUB de IGNORED_ALT_ROUTE_DESTINOS
+ *   inmediatamente después de construir `rawRows` — antes de calcular
+ *   destinos, antes de dividir en bloques por remolque, y antes de
+ *   cualquier dedupe — para que nunca cuenten como una entrega real,
+ *   sin importar el formato accidental de su factura.
+ *
+ * FIX (sep-2026) — generalización de rutas unificadas con destinos
+ * distintos:
+ *   Antes de este fix, `parsePDF()` bifurcaba el manejo de una ruta
+ *   unificada según si ambas rutas compartían el mismo HUB destino
+ *   (`sameDestino`):
+ *     - sameDestino === true  → dividía por remolque (marchamo) y
+ *       asignaba cada bloque completo a su ruta real (ver FIX
+ *       ago-2026 arriba) — esto SÍ funcionaba correctamente.
+ *     - sameDestino === false → NUNCA dividía por remolque. Solo
+ *       deduplicaba por destino (_dedupeByDestino) sobre TODAS las
+ *       filas del documento mezcladas, y asignaba `ruta: baseName`
+ *       (el nombre completo del archivo, ej. "6204-6205") a TODAS las
+ *       entregas resultantes — un bug real: ninguna entrega podía
+ *       hacer match contra el número de ruta individual en merge.js,
+ *       así que AMBAS rutas del PDF terminaban reportadas como "sin
+ *       PDF asociado" (regla SVE 'no_pdf').
+ *
+ *   Caso real confirmado con EduarDo: las rutas unificadas no siempre
+ *   comparten el mismo HUB — hay ocasiones en que cada ruta combinada
+ *   entrega a un DETTE/HUB distinto. La partición por remolque
+ *   (_splitUnifiedBlocksByMarchamo) es una regla física de cómo WTMS
+ *   imprime el documento (un remolque = una ruta, primero el bloque de
+ *   la ruta con número mayor) que NO depende de si los destinos
+ *   coinciden — por lo tanto se generaliza y se aplica siempre a
+ *   cualquier ruta unificada, eliminando por completo la bifurcación
+ *   sameDestino/no-sameDestino.
+ *
+ *   Algoritmo unificado (reemplaza ambas ramas anteriores):
+ *     1. Se filtran los HUB de ruta alterna (ver FIX de arriba).
+ *     2. Se dividen las filas restantes en exactamente 2 bloques por
+ *        remolque (_splitUnifiedBlocksByMarchamo, con el mismo
+ *        respaldo de corte por mitad si no se detectan exactamente 2).
+ *     3. Se asignan los bloques a las rutas reales por magnitud
+ *        numérica descendente (mismo criterio ya validado en ago-2026).
+ *     4. NUEVO: dentro de CADA bloque ya asignado a su ruta real, se
+ *        agrupa por `destino` — si el bloque trae un solo destino, el
+ *        comportamiento es idéntico al de la rama sameDestino anterior
+ *        (tarimas sumadas de todas sus facturas/invoices, un solo
+ *        resultado); si el bloque trae destinos distintos (el caso que
+ *        antes rompía), se genera una entrega independiente por cada
+ *        destino, cada una con su propia ruta correcta.
+ *   El agrupado por destino DENTRO de un bloque nunca cruza bloques —
+ *   eso es justamente lo que garantiza que cada entrega quede asociada
+ *   a la ruta real que le corresponde, sin importar si dos rutas
+ *   combinadas comparten HUB o no.
+ *
+ *   _dedupeByDestino() deja de usarse en la rama de rutas unificadas
+ *   (su semántica — "quedarse con la primera aparición, no sumar" —
+ *   es para el caso distinto de un HUB físicamente repetido dentro de
+ *   UNA sola entrega de ruta individual, ver FIX jul-2026 arriba). Se
+ *   conserva sin cambios para esa rama.
  *
  * CAMBIO (Fase 0 — telemetría de citas no reconocidas, ago-2026):
  *   Antes, dentro de pdfExtract(), cualquier anotación FreeText cuyo
@@ -241,8 +313,6 @@ const MAX_MARCH_SLOTS = 5;
 /** Formato válido de marchamo: 5-6 dígitos, con o sin cero inicial. */
 const MARC_RE = /^0?\d{5,6}$/;
 
-const IGNORED_ALT_ROUTE_DESTINOS = new Set(['29999138', '29999227', '29999230']);
-
 /** Detección "candidata" de continuación de marchamo — más laxa que
  *  MARC_RE a propósito: solo sirve para decidir si una línea DEBE
  *  tratarse como un intento de marchamo (y por lo tanto seguir
@@ -268,6 +338,22 @@ const FACT_RE = /^4659\d{6}$/;
 function _isValidFactura(s) {
   return FACT_RE.test(String(s || '').trim());
 }
+
+/**
+ * HUB de "ruta alterna" — NUEVO (sep-2026, ver nota de cabecera "FIX
+ * (sep-2026) — HUBs de 'ruta alterna' generan falsos positivos").
+ * WTMS agrega estos HUB como una "Entrega" de relleno cuando la carga
+ * tomó alguna ruta alterna — NUNCA representan una entrega real, sin
+ * importar el formato de la factura que traigan. Se filtran los
+ * rawRows que apunten a cualquiera de estos destinos ANTES de calcular
+ * destinos/bloques/dedupe, para ambas ramas de parsePDF (ruta
+ * individual y ruta unificada).
+ *
+ * Confirmado con EduarDo — para agregar un HUB nuevo de este tipo en
+ * el futuro: una entrada más en este Set, ninguna otra parte de este
+ * archivo cambia.
+ */
+const IGNORED_ALT_ROUTE_DESTINOS = new Set(['29999138', '29999227', '29999230']);
 
 /**
  * Reduce un texto de anotación a su "forma" — colapsa espacios y
@@ -448,10 +534,17 @@ function _pushMarchamo(raw, marchamos, issues) {
  * por ruta+destino, último .set() gana) — falso positivo de "sin
  * marchamo principal" (regla SVE no_march).
  *
- * NO se aplica al caso de rutas COMBINADAS con destino compartido (ver
- * `sameDestino` en parsePDF): ahí la repetición del mismo destino SÍ
- * representa dos entregas reales, una por cada ruta del PDF unificado
- * — ver _splitUnifiedBlocksByMarchamo() para cómo se reparten.
+ * ÚNICO USO ACTUAL (sep-2026): la rama de ruta INDIVIDUAL de parsePDF()
+ * — un HUB repetido en el PDF de una sola ruta es una sola entrega
+ * real. Antes también se usaba en la rama "destinos distintos" de una
+ * ruta unificada; esa rama se retiró (ver FIX (sep-2026) —
+ * "generalización de rutas unificadas con destinos distintos" en la
+ * cabecera del archivo) porque su semántica (quedarse con la PRIMERA
+ * aparición sin sumar) es incorrecta para el caso de una ruta
+ * unificada, donde varias filas con el mismo destino dentro de un
+ * mismo bloque/remolque representan facturas/invoices DISTINTOS de una
+ * misma entrega y deben sumarse, no deduplicarse — ver el agrupado
+ * inline dentro de parsePDF() para ese caso.
  * @private
  * @param {Array<{destino:string, factura:string, tarimas:string, marchamos:string[], marchamoIssues:Array, facturaIssues:Array}>} list
  * @returns {Array<object>} misma forma, un elemento por destino único
@@ -482,9 +575,11 @@ function _dedupeByDestino(list) {
 }
 
 /**
- * Divide rawRows de una ruta unificada CON destino compartido en los
- * bloques físicos reales (uno por remolque) — ver nota de cabecera
- * "FIX (ago-2026) — bug del reparto desigual de marchamos".
+ * Divide rawRows de una ruta unificada en los bloques físicos reales
+ * (uno por remolque) — ver nota de cabecera "FIX (ago-2026) — bug del
+ * reparto desigual de marchamos" y su generalización en "FIX
+ * (sep-2026) — generalización de rutas unificadas con destinos
+ * distintos".
  *
  * WTMS solo imprime el marchamo en la PRIMERA fila de cada remolque —
  * el resto de filas del mismo remolque llegan sin marchamo propio. Esa
@@ -494,6 +589,11 @@ function _dedupeByDestino(list) {
  * marchamoIssues.length) — un marchamo con formato inválido sigue
  * siendo evidencia de que WTMS intentó imprimir uno ahí, así que
  * también cuenta como inicio de bloque.
+ *
+ * NOTA (sep-2026): esta función se aplica a TODA ruta unificada, sin
+ * importar si ambas rutas comparten el mismo HUB destino o no — la
+ * regla física (un remolque = una ruta) es independiente de esa
+ * coincidencia. La bifurcación anterior por `sameDestino` se retiró.
  *
  * @private
  * @param {Array<{marchamos:string[], marchamoIssues:Array}>} rawRows
@@ -516,6 +616,53 @@ function _splitUnifiedBlocksByMarchamo(rawRows) {
 }
 
 /**
+ * Agrupa las filas de UN bloque (ya asignado a su ruta real) por
+ * `destino`, sumando tarimas/consolidando marchamos e issues DENTRO de
+ * cada grupo — NUEVO (sep-2026, ver nota de cabecera "FIX (sep-2026) —
+ * generalización de rutas unificadas con destinos distintos").
+ *
+ * A diferencia de _dedupeByDestino() (que conserva solo la PRIMERA
+ * aparición sin sumar — pensada para un HUB literalmente repetido dos
+ * veces por WTMS), aquí cada fila del bloque representa una
+ * factura/invoice DISTINTA de una misma entrega física — todas las
+ * filas que comparten destino dentro de este bloque deben sumarse
+ * (mismo criterio que ya usaba, antes de esta generalización, el caso
+ * sameDestino === true para el bloque completo).
+ *
+ * Si el bloque trae un único destino, el resultado es un solo grupo —
+ * comportamiento idéntico al de la rama sameDestino anterior. Si trae
+ * más de un destino (el caso que antes rompía, ruta unificada con
+ * DETTE/HUB distintos por ruta), se genera un grupo independiente por
+ * cada destino, cada uno destinado a convertirse en una entrega propia
+ * con la ruta correcta ya resuelta por el caller.
+ * @private
+ * @param {Array<object>} blockRows — sub-arreglo contiguo de rawRows,
+ *   ya asignado a una ruta real por el caller
+ * @returns {Array<{destino:string, factura:string, tarimas:string,
+ *   marchamos:string[], marchamoIssues:Array, facturaIssues:Array}>}
+ */
+function _groupBlockByDestino(blockRows) {
+  const byDestino = new Map();
+  const order = [];
+  blockRows.forEach(r => {
+    const key = r.destino || Symbol();
+    if (!byDestino.has(key)) { byDestino.set(key, []); order.push(key); }
+    byDestino.get(key).push(r);
+  });
+  return order.map(key => {
+    const rows          = byDestino.get(key);
+    const marchamos      = [...new Set(rows.flatMap(r => r.marchamos))];
+    const marchamoIssues = rows.flatMap(r => r.marchamoIssues || []);
+    // facturaIssues/factura — se toma del PRIMER row del grupo, mismo
+    // criterio que ya usaba el caso sameDestino anterior: la factura
+    // "representativa" de la entrega es la de su primer invoice.
+    const facturaIssues = rows[0].facturaIssues || [];
+    const tarimas = String(rows.reduce((s, r) => s + (parseInt(r.tarimas, 10) || 0), 0));
+    return { destino: rows[0].destino, factura: rows[0].factura, tarimas, marchamos, marchamoIssues, facturaIssues };
+  });
+}
+
+/**
  * Interpreta las líneas extraídas por pdfExtract() según el formato
  * específico de los PDFs de carga de Walmart CeDis, y produce las filas
  * estructuradas del documento más — NUEVO (Fase 0, ago-2026) — el
@@ -524,7 +671,9 @@ function _splitUnifiedBlocksByMarchamo(rawRows) {
  * Maneja dos casos de nombre de archivo:
  *   - "12345.pdf"        → ruta única
  *   - "12345-67890.pdf"  → PDF unificado de dos rutas (se reparten
- *                            los destinos entre ambas)
+ *                            los destinos entre ambas — ver FIX
+ *                            (sep-2026), generalización de destinos
+ *                            distintos, en la cabecera del archivo)
  *
  * @param {{ lines: Array, annots: Array, citaMisses: Array }} extracted — salida de pdfExtract()
  * @param {string} filename — nombre original del archivo (para detectar ruta(s))
@@ -674,70 +823,63 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
     } else i++;
   }
 
+  // ── Filtro de HUBs de "ruta alterna" — NUEVO (sep-2026) ──
+  // Ver nota de cabecera "FIX (sep-2026) — HUBs de 'ruta alterna'...".
+  // Se aplica ANTES de cualquier otro cálculo (destinos, bloques por
+  // remolque, dedupe) para ambas ramas (ruta individual y unificada) —
+  // estos HUB nunca representan una entrega real, sin importar el
+  // formato accidental de su factura.
   const filteredRawRows = rawRows.filter(r => !IGNORED_ALT_ROUTE_DESTINOS.has(r.destino));
 
   let result = [];
   if (isUnified) {
-    const destinos    = [...new Set(rawRows.map(r => r.destino).filter(Boolean))];
-    const sameDestino = destinos.length <= 1;
-    if (sameDestino) {
-      // FIX (ago-2026) — ver nota de cabecera "bug del reparto
-      // desigual de marchamos". Se reemplaza el corte por conteo
-      // (mid = mitad de filas) por un corte basado en dónde WTMS
-      // realmente imprime el marchamo de cada remolque — la única
-      // señal fiable de "aquí empieza un bloque nuevo" cuando ambas
-      // rutas comparten destino y pueden traer un número distinto de
-      // entregas cada una.
-      const blocks = _splitUnifiedBlocksByMarchamo(rawRows);
-      let grupos;
-      if (blocks.length === 2) {
-        grupos = blocks;
-      } else {
-        // Respaldo — no se detectaron exactamente 2 bloques por
-        // marchamo (ej. ninguna fila trae marchamo en absoluto, o un
-        // patrón inesperado). Se conserva el corte por mitad como
-        // antes — nunca peor que el comportamiento previo — con aviso
-        // en consola para diagnóstico manual.
-        console.warn(`[PDF] ${baseName}: se esperaban 2 bloques por remolque (detección por marchamo) pero se detectaron ${blocks.length} — usando corte por mitad como respaldo.`);
-        const mid = Math.ceil(rawRows.length / 2);
-        grupos = [rawRows.slice(0, mid), rawRows.slice(mid)];
-      }
-
-      // Orden de asignación — confirmado con EduarDo (caso real
-      // 1205-1206.pdf): WTMS imprime de arriba hacia abajo primero el
-      // bloque de la ruta con número MAYOR, después el de número
-      // MENOR. `rutas` conserva el orden literal del nombre del
-      // archivo (no necesariamente ascendente), así que se ordena
-      // explícitamente por valor numérico antes de repartir.
-      const rutasPorMagnitud = [...rutas].sort((a, b) => parseInt(b, 10) - parseInt(a, 10));
-
-      rutasPorMagnitud.forEach((ruta, idx) => {
-        const grupo = grupos[idx] || [];
-        if (!grupo.length) return;
-        const marchamos      = [...new Set(grupo.flatMap(r => r.marchamos))];
-        const marchamoIssues = grupo.flatMap(r => r.marchamoIssues || []);
-        // facturaIssues (NUEVO, ago-2026) — se toma del primer bloque
-        // del grupo (misma fuente que `factura` en la línea de abajo)
-        // — no se combinan entre remolques distintos.
-        const facturaIssues  = grupo[0].facturaIssues || [];
-        const tarimas   = String(grupo.reduce((s, r) => s + (parseInt(r.tarimas, 10) || 0), 0));
-        result.push({ ruta, operador, destino: grupo[0].destino, factura: grupo[0].factura, tarimas, marchamos, marchamoIssues, facturaIssues, cita: '', hrDespacho });
-      });
+    // ── Generalizado (sep-2026) — ver nota de cabecera "FIX (sep-2026)
+    // — generalización de rutas unificadas con destinos distintos".
+    // Ya no se bifurca por sameDestino: SIEMPRE se divide por remolque
+    // primero, luego se agrupa por destino DENTRO de cada bloque ya
+    // asignado a su ruta real. Un bloque con un solo destino se
+    // comporta igual que antes; un bloque con destinos distintos ahora
+    // genera una entrega por cada uno, con la ruta correcta.
+    const blocks = _splitUnifiedBlocksByMarchamo(filteredRawRows);
+    let grupos;
+    if (blocks.length === 2) {
+      grupos = blocks;
     } else {
-      // NUEVO (jul-2026) — destinos distintos dentro de un PDF unificado
-      // también pueden repetirse físicamente (ej. un HUB entre varias
-      // entregas normales de las dos rutas) — mismo criterio que la
-      // rama de ruta individual, ver _dedupeByDestino().
-      const deduped = _dedupeByDestino(rawRows);
-      for (const r of deduped) {
-        result.push({ ruta: baseName, operador, destino: r.destino, factura: r.factura, tarimas: r.tarimas, marchamos: r.marchamos, marchamoIssues: r.marchamoIssues || [], facturaIssues: r.facturaIssues || [], cita: '', hrDespacho });
-      }
+      // Respaldo — no se detectaron exactamente 2 bloques por
+      // marchamo (ej. ninguna fila trae marchamo en absoluto, o un
+      // patrón inesperado). Se conserva el corte por mitad como
+      // antes — nunca peor que el comportamiento previo — con aviso
+      // en consola para diagnóstico manual.
+      console.warn(`[PDF] ${baseName}: se esperaban 2 bloques por remolque (detección por marchamo) pero se detectaron ${blocks.length} — usando corte por mitad como respaldo.`);
+      const mid = Math.ceil(filteredRawRows.length / 2);
+      grupos = [filteredRawRows.slice(0, mid), filteredRawRows.slice(mid)];
     }
+
+    // Orden de asignación — confirmado con EduarDo (caso real
+    // 1205-1206.pdf): WTMS imprime de arriba hacia abajo primero el
+    // bloque de la ruta con número MAYOR, después el de número
+    // MENOR. `rutas` conserva el orden literal del nombre del
+    // archivo (no necesariamente ascendente), así que se ordena
+    // explícitamente por valor numérico antes de repartir.
+    const rutasPorMagnitud = [...rutas].sort((a, b) => parseInt(b, 10) - parseInt(a, 10));
+
+    rutasPorMagnitud.forEach((ruta, idx) => {
+      const grupo = grupos[idx] || [];
+      if (!grupo.length) return;
+      // NUEVO (sep-2026): un bloque puede traer una o más entregas
+      // (destinos) reales — se agrupa por destino DENTRO del bloque ya
+      // asignado a esta ruta (nunca a través de bloques distintos, eso
+      // mezclaría datos de dos rutas). Ver _groupBlockByDestino().
+      const entregas = _groupBlockByDestino(grupo);
+      entregas.forEach(e => {
+        result.push({ ruta, operador, destino: e.destino, factura: e.factura, tarimas: e.tarimas, marchamos: e.marchamos, marchamoIssues: e.marchamoIssues, facturaIssues: e.facturaIssues, cita: '', hrDespacho });
+      });
+    });
   } else {
     // NUEVO (jul-2026) — ruta individual: un HUB repetido físicamente en
     // el PDF es UNA sola entrega real — ver _dedupeByDestino(), nota de
     // cabecera "FIX (jul-2026) — falso positivo por HUB repetido".
-    const deduped = _dedupeByDestino(rawRows);
+    const deduped = _dedupeByDestino(filteredRawRows);
     for (const r of deduped) {
       result.push({ ruta: rutas[0], operador, destino: r.destino, factura: r.factura, tarimas: r.tarimas, marchamos: r.marchamos, marchamoIssues: r.marchamoIssues || [], facturaIssues: r.facturaIssues || [], cita: '', hrDespacho });
     }
