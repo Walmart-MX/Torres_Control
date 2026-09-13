@@ -257,6 +257,42 @@
  *   UNA sola entrega de ruta individual, ver FIX jul-2026 arriba). Se
  *   conserva sin cambios para esa rama.
  *
+ * FIX (sep-2026) — segunda factura embebida en la línea de destino
+ * pierde la entrega completa ("caso Ruta 1111, Entrega 6154000"):
+ *   Caso real confirmado con EduarDo. Cuando una misma fila del PDF
+ *   agrupa DOS facturas bajo una sola Secuencia (celda "Facturas" con
+ *   texto envuelto en dos líneas, ej. "4659061458\n4659061457"), la
+ *   línea de continuación que trae el destino (CONT_RE) queda con TRES
+ *   tokens en vez de uno: destino + segunda factura + marchamo (ej.
+ *   "4659 6154000 4659061457 144661"). CONT_RE solo toleraba como
+ *   máximo UN token opcional después del destino — con dos tokens
+ *   extra, el regex completo no matcheaba la línea, así que el bloque
+ *   `if (cm) {...}` nunca se ejecutaba: `destino` se quedaba vacío
+ *   (valor inicial `''`), y las líneas siguientes de marchamo tampoco
+ *   se consumían (MARC_CANDIDATE_RE exige la línea completa en dígitos
+ *   puros, y esta línea tiene espacios). Resultado: la entrega entera
+ *   quedaba indexada con destino vacío en State.pdfData — no matcheaba
+ *   contra el DETTE del Excel ni por factura de encabezado ni por
+ *   destino, y el comparador informativo Excel-vs-PDF
+ *   (features/source-check.js) reportaba un falso "faltante en PDF" +
+ *   un falso "solo en PDF" (sin entrega) para la misma ruta.
+ *
+ *   Se extiende CONT_RE con un grupo opcional adicional para la
+ *   segunda factura (exactamente 10 dígitos — un marchamo real nunca
+ *   tiene más de 6, así que no hay ambigüedad posible con un marchamo
+ *   genuino). Cuando aparece, se registra como un `rawRow` ADICIONAL
+ *   (mismo destino, tarimas '0', sin marchamos propios — los
+ *   marchamos del bloque son compartidos y se siguen acumulando en el
+ *   row principal) y se empuja a `rawRows` DESPUÉS del row del
+ *   encabezado — así _dedupeByDestino()/_groupBlockByDestino() (que ya
+ *   existían) conservan factura/tarimas del encabezado (el dato
+ *   correcto y completo) y solo consolidan destino + marchamos, sin
+ *   perder la segunda factura por completo (queda disponible para
+ *   diagnóstico y para un eventual match por factura contra el Excel).
+ *   Validado contra los PDFs reales de las rutas 1111 (caso con el bug)
+ *   y 1310 (fila con un solo token de continuación, sin segunda
+ *   factura) — el segundo caso queda exactamente igual que antes.
+ *
  * CAMBIO (Fase 0 — telemetría de citas no reconocidas, ago-2026):
  *   Antes, dentro de pdfExtract(), cualquier anotación FreeText cuyo
  *   texto no matcheara el regex de fecha se descartaba con un simple
@@ -760,10 +796,17 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
   // encabezado sigue siendo \S+ OPCIONAL — ver nota de cabecera "FIX
   // (jul-2026) — bug del marchamo ausente por completo".
   const ROW_RE  = /^CeDis\s+(?:TIENDA|HUB)\s+\S+\s+\d+\s+(\d{10})\s+(\d+)\s+\d+\s+\d+\s+\d+\s+[\d.]+(?:\s+(\S+))?$/;
-  // Mismo criterio para el marchamo de continuación (grupo 2, opcional):
-  // \S+ en vez de \d{5,6} — el destino (grupo 1) siempre se captura
-  // aunque el marchamo que lo acompañe sea inválido.
-  const CONT_RE = /^4659\s+(\w+)(?:\s+(\S+))?$/;
+  // CONT_RE — línea de continuación que trae el destino real (grupo 1).
+  // FIX (sep-2026, ver nota de cabecera "segunda factura embebida"):
+  // se agrega un grupo opcional intermedio para una SEGUNDA factura de
+  // 10 dígitos que puede venir envuelta en la misma línea cuando dos
+  // facturas comparten una sola Secuencia (ej. "4659 6154000
+  // 4659061457 144661" — destino + segunda factura + marchamo). Se
+  // exige \d{10} exacto para ese grupo — un marchamo real nunca tiene
+  // más de 6 dígitos (ver MARC_RE), así que no hay ambigüedad posible.
+  // El grupo del marchamo (ahora grupo 3) sigue siendo \S+ OPCIONAL,
+  // sin cambios de criterio respecto a antes.
+  const CONT_RE = /^4659\s+(\w+)(?:\s+(\d{10}))?(?:\s+(\S+))?$/;
   const STOP_RE = /^(Total de ordenes|Fin del informe|Walmart)/i;
   const DEST_RE = /^(?:TIENDA|HUB)\s+(\d+)\s+-\s+Zona horaria/i;
 
@@ -799,11 +842,27 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
       _pushMarchamo(rm[3], marchamos, marchamoIssues);
 
       let destino = ''; i++;
+      // NUEVO (sep-2026) — ver nota de cabecera "segunda factura
+      // embebida". Si la línea de continuación trae una segunda
+      // factura (cm[2]), se guarda aparte para empujarla como rawRow
+      // independiente DESPUÉS del row principal (más abajo) — nunca
+      // antes, para que _dedupeByDestino()/_groupBlockByDestino()
+      // conserven factura/tarimas del ENCABEZADO (el dato completo y
+      // correcto de esta Secuencia), no los de la segunda factura.
+      let extraFacturaRow = null;
       if (i < textLines.length) {
         const cm = textLines[i].match(CONT_RE);
         if (cm) {
           destino = cm[1];
-          if (cm[2]) _pushMarchamo(cm[2], marchamos, marchamoIssues);
+          if (cm[2]) {
+            const raw2 = cm[2];
+            extraFacturaRow = {
+              factura: raw2, tarimas: '0', marchamos: [], marchamoIssues: [],
+              facturaIssues: _isValidFactura(raw2) ? [] : [{ raw: raw2 }],
+              destino: cm[1]
+            };
+          }
+          if (cm[3]) _pushMarchamo(cm[3], marchamos, marchamoIssues);
           i++;
         }
       }
@@ -820,6 +879,9 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
         else break;
       }
       rawRows.push({ factura, tarimas, marchamos, marchamoIssues, facturaIssues, destino });
+      // NUEVO (sep-2026): se empuja DESPUÉS del row principal — ver
+      // comentario junto a la declaración de extraFacturaRow arriba.
+      if (extraFacturaRow) rawRows.push(extraFacturaRow);
     } else i++;
   }
 
