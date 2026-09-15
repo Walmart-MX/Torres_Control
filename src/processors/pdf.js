@@ -339,12 +339,12 @@
  *   herramienta "Agregar texto" de Edge (NUNCA "Dibujar" — un trazo a
  *   mano alzada llega como anotación Ink, sin texto extraíble, eso NO
  *   sería viable sin OCR) para escribir el/los marchamo(s) correcto(s)
- *   directamente sobre el PDF, cerca de la fila de esa entrega en la
- *   tabla. Esas anotaciones son del mismo subtipo FreeText que ya lee
+ *   directamente sobre el PDF, dentro del recuadro de la tabla de esa
+ *   entrega. Esas anotaciones son del mismo subtipo FreeText que ya lee
  *   este archivo para las citas — verificado contra un PDF real
  *   (contenido de la anotación: "535054\n387358"), así que se resuelve
- *   con el mismo mecanismo de lectura/posicionamiento, sin tocar
- *   pdfjsLib ni agregar ninguna dependencia nueva.
+ *   con el mismo mecanismo de lectura, sin tocar pdfjsLib ni agregar
+ *   ninguna dependencia nueva.
  *
  *   Antes de este fix, CUALQUIER FreeText sin fecha caía directo a
  *   `citaMisses` (telemetría del Centro de Mantenimiento) — la
@@ -363,12 +363,7 @@
  *   primero cualquier posición vacía (hueco '' dejado por un marchamo
  *   inválido descartado) y agregando al final si no quedan huecos, sin
  *   exceder MAX_MARCH_SLOTS ni duplicar un valor ya presente — ver
- *   _mergeAnnotationMarchamos(). La asociación a la entrega correcta
- *   reutiliza _nearestDestino(), el mismo criterio de proximidad que
- *   ya usan las citas — se aplica DESPUÉS de construir `result`
- *   (unificado o individual), así que no interfiere con la partición
- *   por remolque ni con el agrupado por destino de las rutas
- *   unificadas.
+ *   _mergeAnnotationMarchamos().
  *
  *   EXCLUSIÓN DE ZONA DE ENCABEZADO: confirmado con EduarDo que la
  *   esquina superior de la página 1 se usa exclusivamente para notas
@@ -389,6 +384,40 @@
  *   de citas ya validada) y afecta tanto la clasificación de marchamo
  *   como el registro en `citaMisses` — una anotación en esa zona se
  *   ignora por completo, sin generar ninguna incidencia de telemetría.
+ *
+ * FIX (sep-2026) — ancla incorrecta al asociar marchamos de anotación
+ * a su entrega ("caso Ruta 3122, TIENDA 2289/2286 mezcladas"):
+ *   Bug real detectado tras validar el fix anterior con el PDF 3122
+ *   real: las DOS anotaciones de marchamo del documento (una junto a
+ *   TIENDA 2289, otra junto a TIENDA 2286, en la misma página) se
+ *   estaban asociando por proximidad contra `destPositions` — el
+ *   arreglo construido a partir de los bloques descriptivos
+ *   "Entrega N ... TIENDA X - Zona horaria" (que aparecen arriba en el
+ *   documento, junto a la dirección de la tienda), NO contra la
+ *   posición real de la FILA de la tabla de datos donde el equipo
+ *   efectivamente coloca la anotación (dentro del recuadro de esa
+ *   entrega en la tabla inferior). Ambas anotaciones, al estar lejos
+ *   de esos bloques descriptivos y cerca entre sí en la tabla, se
+ *   emparejaban con el MISMO destino más cercano — las 4 se aplicaron
+ *   a TIENDA 2286 en vez de 2 y 2 repartidas correctamente.
+ *
+ *   Se agrega `tableRowPositions` — un arreglo paralelo a
+ *   `destPositions`, pero construido en el momento exacto en que se
+ *   captura el `destino` de cada fila de la tabla (línea CONT_RE),
+ *   registrando la posición (pageNum, y) de esa línea específica —
+ *   literalmente el mismo recuadro donde el equipo escribe la
+ *   anotación. El merge de marchamos de anotación ahora usa
+ *   `tableRowPositions` en vez de `destPositions` — sin ningún cambio
+ *   para las citas (`annots`), que siguen usando `destPositions` sin
+ *   modificación, porque para ellas ese ancla SÍ es la correcta (las
+ *   citas de Edge se colocan cerca de la descripción de la entrega,
+ *   no de la fila de la tabla).
+ *
+ *   Deliberadamente SIN fallback a `destPositions` si
+ *   `tableRowPositions` sale vacío (documento con formato inesperado
+ *   donde CONT_RE nunca matcheó) — es preferible no aplicar ningún
+ *   marchamo de anotación (la incidencia 'no_march' queda visible para
+ *   revisión manual) a aplicarlo con el ancla equivocada otra vez.
  *
  *   Ningún otro comportamiento de pdf.js cambia. merge.js/constants.js
  *   no requieren ningún ajuste — siguen consumiendo `pdfRow.marchamos`
@@ -523,7 +552,10 @@ function _citaPatternSignature(text) {
  * `citaMisses` (no reconocidas) usen exactamente el mismo criterio de
  * proximidad, sin arriesgarse a que las dos implementaciones diverjan
  * con el tiempo. NUEVO (sep-2026): también la reutiliza la fusión de
- * marchamos por anotación de Edge — ver más abajo.
+ * marchamos por anotación de Edge — recibiendo `tableRowPositions` en
+ * vez de `destPositions` (ver nota de cabecera "FIX (sep-2026) — ancla
+ * incorrecta..."), la función en sí no cambia — es genérica sobre
+ * cualquier lista de {destino,pageNum,y}.
  * @private
  * @param {{pageNum:number, y_td:number}} item
  * @param {Array<{destino:string,pageNum:number,y:number}>} destPositions
@@ -911,9 +943,10 @@ function _groupBlockByDestino(blockRows) {
  *   NUEVO (sep-2026): `rows[].marchamos` ahora también puede incluir
  *   valores complementados desde una anotación de Edge (ver nota de
  *   cabecera "FIX (sep-2026) — corrección de marchamos vía anotación
- *   de Edge") — se fusionan al final, después de resolver las rutas
- *   unificadas/individuales, sin ningún campo nuevo expuesto en el
- *   objeto de retorno (el origen del valor no se distingue hacia
+ *   de Edge" y su corrección de ancla "FIX (sep-2026) — ancla
+ *   incorrecta...") — se fusionan al final, después de resolver las
+ *   rutas unificadas/individuales, sin ningún campo nuevo expuesto en
+ *   el objeto de retorno (el origen del valor no se distingue hacia
  *   afuera de este módulo).
  */
 export function parsePDF({ lines, annots, citaMisses, marchamoAnnots }, filename) {
@@ -996,6 +1029,16 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
   }
 
   const rawRows = [];
+  // NUEVO (sep-2026 — FIX ancla de marchamos de anotación, ver nota de
+  // cabecera "FIX (sep-2026) — ancla incorrecta..."): posición real
+  // (pageNum, y) de cada renglón de la tabla de datos, capturada en el
+  // momento exacto en que se resuelve el `destino` de esa fila (línea
+  // CONT_RE) — literalmente el mismo recuadro donde el equipo coloca
+  // la anotación de marchamo. A diferencia de destPositions (que apunta
+  // a los bloques descriptivos "Entrega N ... Zona horaria", lejos de
+  // la tabla), este es el ancla correcta para asociar marchamos de
+  // anotación a su entrega — ver el bloque de fusión más abajo.
+  const tableRowPositions = [];
   const textLines = lines.map(l => l.text);
   let i = 0;
   while (i < textLines.length) {
@@ -1033,6 +1076,11 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
         const cm = textLines[i].match(CONT_RE);
         if (cm) {
           destino = cm[1];
+          // NUEVO (sep-2026) — se registra la posición exacta de esta
+          // línea de tabla (lines[i], la misma que matchea CONT_RE,
+          // antes de avanzar i) — ver nota de cabecera "FIX (sep-2026)
+          // — ancla incorrecta...".
+          tableRowPositions.push({ destino: cm[1], pageNum: lines[i].pageNum, y: lines[i].y });
           if (cm[2]) {
             const raw2 = cm[2];
             extraFacturaRow = {
@@ -1137,14 +1185,20 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
 
   // ── NUEVO (sep-2026 — corrección de marchamos vía anotación de
   // Edge) — ver nota de cabecera "FIX (sep-2026) — corrección de
-  // marchamos...". Se aplica DESPUÉS de resolver rutas unificadas/
+  // marchamos..." y su corrección de ancla "FIX (sep-2026) — ancla
+  // incorrecta...". Se aplica DESPUÉS de resolver rutas unificadas/
   // individuales, así que nunca interfiere con la partición por
-  // remolque ni con el agrupado por destino. Mismo criterio de
-  // proximidad que las citas (_nearestDestino). La fusión NUNCA
-  // reemplaza un marchamo ya presente — ver _mergeAnnotationMarchamos().
-  if (marchamoAnnots && marchamoAnnots.length && destPositions.length) {
+  // remolque ni con el agrupado por destino. Usa `tableRowPositions`
+  // (posición real de la fila de tabla), NO `destPositions` (bloques
+  // descriptivos "Entrega N", lejos de donde el equipo anota) —
+  // deliberadamente SIN fallback a destPositions si tableRowPositions
+  // sale vacío: mejor no aplicar nada (incidencia 'no_march' visible
+  // para revisión) que aplicar con el ancla equivocada. La fusión
+  // NUNCA reemplaza un marchamo ya presente — ver
+  // _mergeAnnotationMarchamos().
+  if (marchamoAnnots && marchamoAnnots.length && tableRowPositions.length) {
     for (const ma of marchamoAnnots) {
-      const best = _nearestDestino(ma, destPositions);
+      const best = _nearestDestino(ma, tableRowPositions);
       if (!best) continue;
       const rows = result.filter(r => r.destino === best.destino);
       for (const row of rows) {
