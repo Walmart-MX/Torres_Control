@@ -332,6 +332,69 @@
  *   events.js, igual que ya hace processors/merge.js con los misses de
  *   catálogo.
  *
+ * FIX (sep-2026) — corrección de marchamos vía anotación de Edge
+ * ("Agregar texto") + exclusión de la esquina de identificación:
+ *   Caso real confirmado con EduarDo: cuando el marchamo impreso en el
+ *   PDF viene vacío/incompleto para una entrega, el equipo usa la
+ *   herramienta "Agregar texto" de Edge (NUNCA "Dibujar" — un trazo a
+ *   mano alzada llega como anotación Ink, sin texto extraíble, eso NO
+ *   sería viable sin OCR) para escribir el/los marchamo(s) correcto(s)
+ *   directamente sobre el PDF, cerca de la fila de esa entrega en la
+ *   tabla. Esas anotaciones son del mismo subtipo FreeText que ya lee
+ *   este archivo para las citas — verificado contra un PDF real
+ *   (contenido de la anotación: "535054\n387358"), así que se resuelve
+ *   con el mismo mecanismo de lectura/posicionamiento, sin tocar
+ *   pdfjsLib ni agregar ninguna dependencia nueva.
+ *
+ *   Antes de este fix, CUALQUIER FreeText sin fecha caía directo a
+ *   `citaMisses` (telemetría del Centro de Mantenimiento) — la
+ *   corrección del capturista nunca llegaba a `marchamos[]`. Ahora,
+ *   dentro de la rama "no es cita" de pdfExtract(), se prueba PRIMERO
+ *   si el texto tiene forma de lista de marchamos
+ *   (_extractMarchamoAnnotation — exige que TODOS los tokens separados
+ *   por salto de línea/coma/punto y coma pasen _isValidMarchamo(), lo
+ *   que ya excluye por diseño anotaciones con letras o símbolos, como
+ *   las de identificación de ruta/temperatura) antes de darla por
+ *   perdida como cita-no-reconocida.
+ *
+ *   DECISIÓN DE FUSIÓN (confirmada con EduarDo): la anotación NUNCA
+ *   reemplaza un marchamo ya detectado en la tabla impresa del PDF —
+ *   se conserva lo impreso y se complementa con lo anotado, llenando
+ *   primero cualquier posición vacía (hueco '' dejado por un marchamo
+ *   inválido descartado) y agregando al final si no quedan huecos, sin
+ *   exceder MAX_MARCH_SLOTS ni duplicar un valor ya presente — ver
+ *   _mergeAnnotationMarchamos(). La asociación a la entrega correcta
+ *   reutiliza _nearestDestino(), el mismo criterio de proximidad que
+ *   ya usan las citas — se aplica DESPUÉS de construir `result`
+ *   (unificado o individual), así que no interfiere con la partición
+ *   por remolque ni con el agrupado por destino de las rutas
+ *   unificadas.
+ *
+ *   EXCLUSIÓN DE ZONA DE ENCABEZADO: confirmado con EduarDo que la
+ *   esquina superior de la página 1 se usa exclusivamente para notas
+ *   de identificación del documento (ruta, operador, certificados,
+ *   tipo de mercancía — ej. "RUTA 3122\nADRIANA\nTIF", "TEMP -22°C"),
+ *   nunca para datos de una entrega puntual. Aunque el filtro de
+ *   contenido (_extractMarchamoAnnotation) ya descarta esas dos
+ *   anotaciones de ejemplo por traer letras, se agrega una segunda
+ *   barrera POR POSICIÓN (_inHeaderZone) como defensa adicional contra
+ *   el caso futuro de una anotación puramente numérica de 5-6 dígitos
+ *   que coincidiera por casualidad con esa zona (ej. un ID de
+ *   documento). HEADER_ZONE es una tabla de configuración explícita
+ *   (página + fracción de altura de la página, no puntos absolutos,
+ *   para tolerar variación de tamaño de página entre documentos) —
+ *   ajustar solo esa constante si aparecen falsos positivos/negativos
+ *   con más muestras reales; ningún otro código cambia. Se aplica
+ *   ÚNICAMENTE dentro de la rama "no es cita" (nunca toca la detección
+ *   de citas ya validada) y afecta tanto la clasificación de marchamo
+ *   como el registro en `citaMisses` — una anotación en esa zona se
+ *   ignora por completo, sin generar ninguna incidencia de telemetría.
+ *
+ *   Ningún otro comportamiento de pdf.js cambia. merge.js/constants.js
+ *   no requieren ningún ajuste — siguen consumiendo `pdfRow.marchamos`
+ *   exactamente igual, sin que les importe si un valor vino de la
+ *   tabla impresa o de una anotación.
+ *
  * Dependencia externa: pdfjsLib (cargado globalmente desde el CDN en
  * index.html, con su workerSrc ya configurado ahí). Este módulo no
  * configura el worker — eso es responsabilidad del bootstrap en index.html.
@@ -392,6 +455,35 @@ function _isValidFactura(s) {
 const IGNORED_ALT_ROUTE_DESTINOS = new Set(['29999138', '29999227', '29999230']);
 
 /**
+ * Zona de "encabezado administrativo" — NUEVO (sep-2026, ver nota de
+ * cabecera "FIX (sep-2026) — corrección de marchamos vía anotación de
+ * Edge... + exclusión de la esquina de identificación"). Anotaciones
+ * FreeText dentro de esta región de la página se ignoran por completo
+ * (ni marchamo ni citaMiss) — confirmado con EduarDo que esa zona se
+ * usa exclusivamente para notas de identificación del documento (ruta,
+ * operador, certificados, tipo de mercancía), nunca para datos de una
+ * entrega puntual.
+ *
+ * yMaxRatio se expresa como fracción de la altura de la página (no en
+ * puntos absolutos), para tolerar variación de tamaño de página entre
+ * documentos. Tabla de configuración explícita — para ajustar el
+ * alcance de la zona con más muestras reales, basta con cambiar esta
+ * constante; _inHeaderZone() y sus llamadores no cambian.
+ */
+const HEADER_ZONE = { page: 1, yMaxRatio: 0.40 };
+
+/**
+ * @private
+ * @param {number} pageNum
+ * @param {number} y_td — posición vertical medida desde arriba de la página
+ * @param {number} pageH — altura total de la página
+ * @returns {boolean}
+ */
+function _inHeaderZone(pageNum, y_td, pageH) {
+  return pageNum === HEADER_ZONE.page && y_td <= pageH * HEADER_ZONE.yMaxRatio;
+}
+
+/**
  * Reduce un texto de anotación a su "forma" — colapsa espacios y
  * reemplaza cada dígito por '#', preservando prefijos/sufijos/
  * separadores literales tal cual aparecen. NUEVO (Fase 0 — telemetría
@@ -430,7 +522,8 @@ function _citaPatternSignature(text) {
  * esa lógica — para que la asignación de citas reconocidas y la de
  * `citaMisses` (no reconocidas) usen exactamente el mismo criterio de
  * proximidad, sin arriesgarse a que las dos implementaciones diverjan
- * con el tiempo.
+ * con el tiempo. NUEVO (sep-2026): también la reutiliza la fusión de
+ * marchamos por anotación de Edge — ver más abajo.
  * @private
  * @param {{pageNum:number, y_td:number}} item
  * @param {Array<{destino:string,pageNum:number,y:number}>} destPositions
@@ -448,20 +541,24 @@ function _nearestDestino(item, destPositions) {
 /**
  * Extrae todas las líneas de texto (agrupadas por posición vertical),
  * las anotaciones de tipo FreeText (citas de cada destino) reconocidas,
- * y — NUEVO (Fase 0, ago-2026) — las anotaciones FreeText con texto que
- * NO matcheó el formato de fecha esperado (`citaMisses`), de un PDF.
+ * — NUEVO (Fase 0, ago-2026) — las anotaciones FreeText con texto que
+ * NO matcheó el formato de fecha esperado (`citaMisses`), y — NUEVO
+ * (sep-2026) — las anotaciones FreeText con forma de lista de
+ * marchamos (`marchamoAnnots`, ver nota de cabecera "FIX (sep-2026) —
+ * corrección de marchamos vía anotación de Edge"), de un PDF.
  *
  * @param {File} file
  * @returns {Promise<{
  *   lines: Array<{pageNum:number,y:number,text:string}>,
  *   annots: Array<{pageNum:number,y_td:number,cita:string}>,
- *   citaMisses: Array<{pageNum:number,y_td:number,signature:string}>
+ *   citaMisses: Array<{pageNum:number,y_td:number,signature:string}>,
+ *   marchamoAnnots: Array<{pageNum:number,y_td:number,marchamos:string[]}>
  * }>}
  */
 export async function pdfExtract(file) {
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-  const lines = [], annots = [], citaMisses = [];
+  const lines = [], annots = [], citaMisses = [], marchamoAnnots = [];
 
   for (let p = 1; p <= pdf.numPages; p++) {
     const page  = await pdf.getPage(p);
@@ -498,6 +595,28 @@ export async function pdfExtract(file) {
       const dateMatch = allText.match(/(\d{2}[\/\-]\d{2}[\/\-]\d{4})/);
       const timeMatch = allText.match(/(\d{1,2})[:.;]\s*(\d{2})(?![\/\-\d])/);
       if (!dateMatch) {
+        const y_td = pageH - a.rect[3];
+
+        // NUEVO (sep-2026 — exclusión de zona de encabezado): ver nota
+        // de cabecera "FIX (sep-2026) — corrección de marchamos vía
+        // anotación de Edge... + exclusión de la esquina de
+        // identificación". Notas de identificación del documento
+        // (ruta/operador/certificados/temperatura) nunca son marchamo
+        // ni cita — se ignoran por completo, sin generar ninguna
+        // incidencia de telemetría.
+        if (_inHeaderZone(p, y_td, pageH)) continue;
+
+        // NUEVO (sep-2026 — marchamos corregidos vía anotación de
+        // Edge): se prueba PRIMERO si el texto tiene forma de lista de
+        // marchamos antes de darlo por perdido como "cita no
+        // reconocida" — mismo tipo de anotación (FreeText), dos
+        // intenciones posibles del capturista.
+        const marchList = _extractMarchamoAnnotation(allText);
+        if (marchList) {
+          marchamoAnnots.push({ pageNum: p, y_td, marchamos: marchList });
+          continue;
+        }
+
         // NUEVO (Fase 0 — telemetría de citas no reconocidas, ago-2026):
         // antes esta anotación se descartaba en silencio (`continue`),
         // sin dejar ningún rastro de que existía texto que no matcheó
@@ -512,7 +631,7 @@ export async function pdfExtract(file) {
         if (trimmed) {
           citaMisses.push({
             pageNum: p,
-            y_td: pageH - a.rect[3],
+            y_td,
             signature: _citaPatternSignature(trimmed)
           });
         }
@@ -531,7 +650,7 @@ export async function pdfExtract(file) {
       annots.push({ pageNum: p, y_td: pageH - a.rect[3], cita: cita.trim() });
     }
   }
-  return { lines, annots, citaMisses };
+  return { lines, annots, citaMisses, marchamoAnnots };
 }
 
 /**
@@ -553,6 +672,58 @@ function _pushMarchamo(raw, marchamos, issues) {
     marchamos.push('');
     issues.push({ raw: val });
   }
+}
+
+/**
+ * Detecta si el texto de una anotación FreeText tiene "forma de lista
+ * de marchamos" — NUEVO (sep-2026, ver nota de cabecera "FIX (sep-2026)
+ * — corrección de marchamos vía anotación de Edge"). El equipo usa la
+ * herramienta "Agregar texto" de Edge (nunca "Dibujar" — eso llegaría
+ * como anotación Ink, sin texto extraíble) para escribir marchamos
+ * corregidos directamente sobre el PDF cuando la tabla impresa viene
+ * vacía o incompleta.
+ *
+ * Criterio: TODOS los tokens (separados por salto de línea, coma o
+ * punto y coma) deben pasar _isValidMarchamo() — cualquier letra,
+ * símbolo o separador de fecha ("/", "-") hace fallar el token
+ * individual, así que anotaciones de otro tipo (ej.
+ * "RUTA 3122\nADRIANA\nTIF", "TEMP -22°C") nunca se confunden con
+ * esto. Se evalúa DESPUÉS del chequeo de fecha (dateMatch) en
+ * pdfExtract() — una cita real nunca llega a probarse aquí.
+ * @private
+ * @param {string} text
+ * @returns {string[]|null} lista de marchamos válidos, o null si el
+ *   texto no tiene esa forma (algún token no pasa _isValidMarchamo)
+ */
+function _extractMarchamoAnnotation(text) {
+  const tokens = String(text || '').trim().split(/[\s,;]+/).map(t => t.trim()).filter(Boolean);
+  if (!tokens.length) return null;
+  return tokens.every(t => _isValidMarchamo(t)) ? tokens : null;
+}
+
+/**
+ * Fusiona marchamos de anotación de Edge con los ya extraídos de la
+ * tabla impresa — NUEVO (sep-2026). Decisión confirmada con EduarDo: la
+ * anotación NUNCA reemplaza un marchamo ya válido — se conserva lo
+ * detectado y se complementa, ocupando primero cualquier posición
+ * vacía (hueco '' dejado por un marchamo inválido descartado, ver
+ * _pushMarchamo) y agregando al final si no quedan huecos, sin exceder
+ * MAX_MARCH_SLOTS. Valores ya presentes se ignoran (no duplica).
+ * @private
+ * @param {string[]} marchamos — arreglo de salida (mutado in-place)
+ * @param {string[]} values — marchamos detectados en la anotación
+ * @returns {boolean} true si agregó al menos un valor nuevo
+ */
+function _mergeAnnotationMarchamos(marchamos, values) {
+  let applied = false;
+  for (const val of values) {
+    if (marchamos.includes(val)) continue;
+    if (marchamos.length >= MAX_MARCH_SLOTS) break;
+    const emptyIdx = marchamos.indexOf('');
+    if (emptyIdx !== -1) marchamos[emptyIdx] = val; else marchamos.push(val);
+    applied = true;
+  }
+  return applied;
 }
 
 /**
@@ -711,7 +882,7 @@ function _groupBlockByDestino(blockRows) {
  *                            (sep-2026), generalización de destinos
  *                            distintos, en la cabecera del archivo)
  *
- * @param {{ lines: Array, annots: Array, citaMisses: Array }} extracted — salida de pdfExtract()
+ * @param {{ lines: Array, annots: Array, citaMisses: Array, marchamoAnnots: Array }} extracted — salida de pdfExtract()
  * @param {string} filename — nombre original del archivo (para detectar ruta(s))
  * @returns {{
  *   rows: Array<{ ruta, operador, destino, factura, tarimas, marchamos,
@@ -736,8 +907,16 @@ function _groupBlockByDestino(blockRows) {
  *   Events.handlePDFs() (events/events.js), que los sincroniza con
  *   el Centro de Mantenimiento (features/incidents/). NO afecta a
  *   `rows` de ninguna forma — es un canal de diagnóstico aparte.
+ *
+ *   NUEVO (sep-2026): `rows[].marchamos` ahora también puede incluir
+ *   valores complementados desde una anotación de Edge (ver nota de
+ *   cabecera "FIX (sep-2026) — corrección de marchamos vía anotación
+ *   de Edge") — se fusionan al final, después de resolver las rutas
+ *   unificadas/individuales, sin ningún campo nuevo expuesto en el
+ *   objeto de retorno (el origen del valor no se distingue hacia
+ *   afuera de este módulo).
  */
-export function parsePDF({ lines, annots, citaMisses }, filename) {
+export function parsePDF({ lines, annots, citaMisses, marchamoAnnots }, filename) {
  const baseName     = filename.replace(/\.pdf$/i, '').replace(/^\d+_/, '');
 const unifiedMatch = baseName.match(/^(\d+)-(\d+)$/);
 
@@ -953,6 +1132,24 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
       if (!best) continue;
       const citaRows = result.filter(r => r.destino === best.destino && !r.cita);
       for (const row of citaRows) row.cita = ann.cita;
+    }
+  }
+
+  // ── NUEVO (sep-2026 — corrección de marchamos vía anotación de
+  // Edge) — ver nota de cabecera "FIX (sep-2026) — corrección de
+  // marchamos...". Se aplica DESPUÉS de resolver rutas unificadas/
+  // individuales, así que nunca interfiere con la partición por
+  // remolque ni con el agrupado por destino. Mismo criterio de
+  // proximidad que las citas (_nearestDestino). La fusión NUNCA
+  // reemplaza un marchamo ya presente — ver _mergeAnnotationMarchamos().
+  if (marchamoAnnots && marchamoAnnots.length && destPositions.length) {
+    for (const ma of marchamoAnnots) {
+      const best = _nearestDestino(ma, destPositions);
+      if (!best) continue;
+      const rows = result.filter(r => r.destino === best.destino);
+      for (const row of rows) {
+        _mergeAnnotationMarchamos(row.marchamos, ma.marchamos);
+      }
     }
   }
 
