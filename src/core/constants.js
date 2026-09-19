@@ -135,6 +135,12 @@ export const WTMS_ALIASES = {
   siguienteCarga: /^siguiente\s*carga$/i
 };
 
+// Valores fijos del archivo final — se escriben en TODAS las filas al
+// exportar (antes se capturaban a mano cada día). Cambiar el texto aquí
+// es el único punto de edición.
+export const STATUS_IDA_DEFAULT     = 'EN TRANSITO';
+export const STATUS_RETORNO_DEFAULT = 'ACEPTADO';
+
 export const COL_MAP = {
   // AJUSTE (jul-2026 — archivo final, TERCER intento): prioriza
   // r['_FECHA_DMY'] — {dd,mm,yyyy} decodificado del serial numérico
@@ -175,6 +181,8 @@ export const COL_MAP = {
   'MARCHAMO 5':           r => r['MARCHAMO 5']   ?? '',
   'CITA':                 r => r['CITA']         ?? '',
   'ID IDA':               r => r['_ID_IDA']      ?? '',
+    'STATUS IDA':           _r => STATUS_IDA_DEFAULT,
+  'STATUS RETORNO':       _r => STATUS_RETORNO_DEFAULT,
   'HORA DE FACTURACION':  r => r['_HORA_FACT']   ?? '',
   'HR. DESPACHO':         r => r['_HR_DESP'] || r['_HR_DESP_PDF'] || '',
   'USUARIO WTMS':         r => r['_WTMS']        ?? '',
