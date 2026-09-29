@@ -172,6 +172,31 @@
  *   aquí: los listeners viven en core/app.js y la lógica en
  *   features/incidents/inline-fix.js vía Events.
  *
+ * CAMBIO (sep-2026 — "Reemplazar fuentes" por fuente + barra de PDFs):
+ *   - _prepEditMode (variable de módulo, estado puramente visual, igual
+ *     que _tableFilter): cuando las 4 fuentes están cargadas, el botón
+ *     "Reemplazar fuentes" YA NO reinicia todo — activa este modo, que
+ *     vuelve a mostrar la grilla de las 4 tarjetas (más la barra
+ *     #prepEditBar con "Listo"/"Reiniciar las 4") para recargar solo
+ *     la fuente que se quiera. Ver core/app.js (listeners) y
+ *     events.js (handlers de cada fuente).
+ *   - updatePrepView(missing) ahora decide tres vistas: grilla (faltan
+ *     fuentes, o modo reemplazo), vista contraída (todo cargado, modo
+ *     normal) y barra de edición (todo cargado + modo reemplazo). Si
+ *     faltan fuentes, sale automáticamente del modo reemplazo (la
+ *     grilla ya es visible). Firma pública sin cambios.
+ *   - setPrepEditMode(on) — NUEVO. Entra/sale del modo. Usa
+ *     Events.checkSources().ok (no solo `missing`) para respetar el
+ *     bypass de "sesión reabierta desde Historial".
+ *   - _renderPdfTools(showGrid) — NUEVO. Pinta #pdfTools (resumen de
+ *     rutas/entregas PDF en memoria + checkbox #pdfReplaceAll) solo
+ *     cuando la grilla es visible y hay PDFs cargados. Al ocultarse
+ *     desmarca el checkbox para no dejar "reemplazar todos" activo por
+ *     accidente. La lógica de agregar/reemplazar vive en
+ *     events.js → handlePDFs(), no aquí.
+ *   - resetAll() sale del modo reemplazo vía updatePrepView (que ya
+ *     recibe todas las fuentes como faltantes).
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - escH (utils/dom.js)
@@ -213,6 +238,11 @@ export function _setEvents(ev) { Events = ev; }
 // Se resetea junto con el resto en UI.resetAll().
 let _tableFilter = 'all';
 let _tableSearch = '';
+
+// ── Modo "Reemplazar fuentes" de Preparación (NUEVO, sep-2026) ──
+// Estado puramente visual — ver nota de cabecera. true = con las 4
+// fuentes cargadas, se muestra la grilla para recargar cualquiera.
+let _prepEditMode = false;
 
 // ── Correcciones — clasificación de incidencias (NUEVO, mockup jul-2026) ──
 // Reglas cuyo issue mapea 1:1 a UN solo campo editable — candidatas a
@@ -428,16 +458,31 @@ showAuthFull() {
   },
 
   /**
-   * Colapsa/expande la grilla de Preparación según falten fuentes o no.
+   * Decide qué vista de Preparación mostrar según falten fuentes o no:
+   *   - faltan fuentes           → grilla de las 4 tarjetas
+   *   - todo cargado             → vista contraída (chips resumen)
+   *   - todo cargado + modo
+   *     "Reemplazar fuentes"     → grilla + barra #prepEditBar
+   * CAMBIO (sep-2026): antes solo alternaba grilla/contraída; ahora
+   * también gobierna el modo reemplazo y la barra de PDFs (ver nota de
+   * cabecera). Firma pública sin cambios.
    * @param {string[]} missing — salida de Events.checkSources().missing
    */
   updatePrepView(missing) {
     const grid      = document.getElementById('prepGrid');
     const collapsed = document.getElementById('prepCollapsed');
+    const editBar   = document.getElementById('prepEditBar');
     if (!grid || !collapsed) return;
     const allDone = missing.length === 0;
-    grid.style.display      = allDone ? 'none' : '';
-    collapsed.style.display = allDone ? '' : 'none';
+    // Con fuentes faltantes la grilla ya es visible — no tiene sentido
+    // seguir en modo reemplazo.
+    if (!allDone) _prepEditMode = false;
+    const showGrid = !allDone || _prepEditMode;
+
+    grid.style.display      = showGrid ? '' : 'none';
+    collapsed.style.display = (allDone && !_prepEditMode) ? '' : 'none';
+    if (editBar) editBar.style.display = (allDone && _prepEditMode) ? '' : 'none';
+    UI._renderPdfTools(showGrid);
     if (!allDone) return;
 
     const chipsEl = document.getElementById('prepChips');
@@ -453,6 +498,48 @@ showAuthFull() {
       <span class="chip ok">📋 ${despCount} despacho</span>`;
     const timeEl = document.getElementById('prepCollapsedTime');
     if (timeEl) timeEl.textContent = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+  },
+
+  /**
+   * Entra/sale del modo "Reemplazar fuentes" (grilla visible con las 4
+   * fuentes cargadas). NUEVO (sep-2026). Usa Events.checkSources().ok
+   * (no solo `missing`) para respetar el bypass de sesión reabierta
+   * desde Historial: en ese caso `ok` es true aunque `missing` no esté
+   * vacío, y se pasa [] igual que hace Events.reopenSession().
+   * @param {boolean} on
+   */
+  setPrepEditMode(on) {
+    _prepEditMode = !!on;
+    const { ok, missing } = Events ? Events.checkSources() : { ok: false, missing: ['x'] };
+    UI.updatePrepView(ok ? [] : missing);
+  },
+
+  /**
+   * Barra de PDFs de Preparación: resumen de lo que hay en memoria +
+   * checkbox "Reemplazar todos los PDFs con la próxima carga" (ver
+   * events.js → handlePDFs()). Solo visible con la grilla visible y al
+   * menos un PDF cargado; al ocultarse desmarca el checkbox para no
+   * dejar "reemplazar todos" activo por accidente. NUEVO (sep-2026).
+   * @private
+   * @param {boolean} showGrid
+   */
+  _renderPdfTools(showGrid) {
+    const el = document.getElementById('pdfTools');
+    if (!el) return;
+    const blocks = new Set(State.pdfData.values());
+    if (!showGrid || !blocks.size) {
+      el.style.display = 'none';
+      const cb = document.getElementById('pdfReplaceAll');
+      if (cb) cb.checked = false;
+      return;
+    }
+    const rutas = new Set([...blocks].map(b => b.ruta)).size;
+    const info  = document.getElementById('pdfToolsInfo');
+    if (info) {
+      info.textContent =
+        `📄 ${rutas} ruta${rutas !== 1 ? 's' : ''} · ${blocks.size} entrega${blocks.size !== 1 ? 's' : ''} en memoria — los PDFs nuevos se agregan a estos`;
+    }
+    el.style.display = '';
   },
 
   // ═══════════════════════════════════════════════════════════════
@@ -1843,6 +1930,8 @@ showAuthFull() {
     // NUEVO (ago-2026 — validación Excel vs PDF): oculta la tarjeta al
     // reiniciar por completo — ver features/source-check.js.
     UI.renderSourceCheck(null);
+    // updatePrepView recibe las 4 fuentes como faltantes → también
+    // apaga _prepEditMode y oculta #prepEditBar/#pdfTools (sep-2026).
     UI.updatePrepView(['PDFs de cargas','Excel macro (RUTEO NUEVO)',"Status de despacho (RUTA + ID'S MASTER)",'Reporte WTMS']);
     UI.renderTable();
     UI.renderFixList();
