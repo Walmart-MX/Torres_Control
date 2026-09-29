@@ -1,882 +1,917 @@
 /**
- * events/events.js
- * EVENTS — coordinador central de todos los manejadores de eventos.
+ * core/app.js
+ * Bootstrap de SmartDispatch — punto de entrada de la aplicación.
  *
- * CAMBIO (integración Reporte WTMS — 4ª fuente obligatoria, jul-2026):
- *   Ninguna de las 4 fuentes es opcional. checkSources() y triggerMerge()
- *   bloquean el merge completo si falta cualquiera.
+ * CAMBIO (rediseño completo — mockup jul-2026, Fases 1-4):
+ *   Las 6 pantallas del mockup (Preparación, Mesa de Trabajo,
+ *   Correcciones, Calidad, Exportación, Administración) ya tienen
+ *   diseño propio — el mecanismo de "alias hacia #legacyPanel" de las
+ *   fases anteriores se retira por completo: #legacyPanel ya no existe,
+ *   su contenido se redistribuyó a sus pantallas definitivas (ver
+ *   índice más abajo). goStep()/renderStepper() vuelven a su forma
+ *   simple: togglear .screen y, si el id pertenece a STEPS (los 5
+ *   pasos numerados), actualizar el indicador.
  *
- * CAMBIO (rediseño Mesa de Trabajo/Preparación — mockup jul-2026):
- *   La pantalla de Preparación reemplaza la barra de pipeline (3/4 pasos
- *   con pipeStep1..4) y los badges sueltos (pdfBadge/xlsBadge/bdgDesp)
- *   por 4 tarjetas de fuente ("up-card"). Los handlers de cada fuente ya
- *   no llaman UI.setBadge()/UI.setDZDone()/UI.setPipeStep() (retirados
- *   de ui.js, sus IDs de destino no existen en el nuevo HTML) — ahora
- *   llaman UI.setSourceStatus(key, done, statusText, subText), un único
- *   método que actualiza la tarjeta completa. triggerMerge() reemplaza
- *   UI.renderSourceGate(missing) (nunca definido en ui.js — gap
- *   detectado durante el rediseño) por UI.updatePrepView(missing), que
- *   además colapsa/expande la grilla de Preparación según
- *   Events.checkSources().ok.
- *
- * CAMBIO (jul-2026 — feedback visual de carga/procesamiento):
- *   handlePDFs/handleXLS/handleWTMS ahora alternan UI.setSourceProcessing
- *   (key, true/false) alrededor de la lectura async del archivo, siempre
- *   dentro de un try/finally — así la animación de "respiración" de la
- *   tarjeta (ver index.html, .up-card.processing) se apaga sin importar
- *   si la lectura terminó en éxito o en error. La animación de arrastre
- *   (.up-card.drag) no requiere cambios aquí: Events.setupDrop ya
- *   alternaba esa clase, lo único que faltaba era el CSS (ver index.html).
+ *   Dónde quedó cada pieza de #legacyPanel:
+ *     - Botón de exportar (antes btnExport/btnExport2 duplicados) →
+ *       UN solo #btnExport, ahora el CTA principal de la pantalla
+ *       Exportación. btnExport2 se retira (ver ui.js).
+ *     - #exportGate (incluye "Exportar de todas formas") → vive
+ *       visible dentro de la pantalla Exportación, debajo del stage.
+ *     - Resto de #svePanel (resumen/incidencias) → se conserva en el
+ *       DOM permanentemente oculto (Correcciones ya cubre esa lista de
+ *       forma accionable) — sigue existiendo porque ui.js/events.js/
+ *       warn-modal.js leen sus IDs directamente.
+ *     - Catálogo de operadores, catálogos maestros, caché de facturas →
+ *       pantalla Administración, cada uno en su propia pestaña del
+ *       admin-nav (ya no hay acordeones .cat-toggle ni pestañas
+ *       .ref-tabs internas — el admin-nav las reemplaza).
+ *     - Botón de Historial → sigue en el topbar Y se agrega un acceso
+ *       directo en Administración → Historial (mismo Events.openHistory()).
  *
  * CAMBIO (jul-2026 — administración de catálogos maestros fila por fila):
- *   Se agregan addCatalogRow()/deleteCatalogRow() — contraparte de
- *   addCatalogEntry()/delOp() (catálogo de operadores) pero para
- *   Ventana de Recibo/Pool Real vía CatalogStore.addRow()/deleteRow().
- *   importMasterCatalog() ahora también refresca UI.renderCatalogAdmin()
- *   tras un reemplazo completo, para que la tabla fila-por-fila quede
- *   sincronizada con el Excel recién importado.
+ *   Se agrega wireCatalogAdmin(catalogId, containerId) — delegación de
+ *   eventos GENÉRICA (un solo listener por contenedor) para los botones
+ *   "+ Agregar"/"✕" que UI.renderCatalogAdmin() genera dinámicamente
+ *   dentro de #mcVentanaAdmin/#mcPoolAdmin. No se listean los inputs
+ *   individualmente porque UI.renderCatalogAdmin() los reconstruye una
+ *   sola vez (guard por dataset.built) — igual patrón que el resto de
+ *   la app usa para tablas dinámicas (ver mainTbody/fixList/catTbody).
  *
  * CAMBIO (Centro de Mantenimiento — Fase 2, jul-2026):
- *   Se agregan loadMaintenanceCenter()/resolveIncident()/
- *   toggleResolvedIncidents() — orquestación del panel nuevo de
- *   Administración → Centro de Mantenimiento. Events es responsable de
- *   ir a buscar los datos a IncidentStore y pasarlos a UI para pintar;
- *   UI no importa Supabase directamente (mismo contrato que el resto
- *   de la app — ver ui.js, cabecera). El sync propiamente dicho
- *   (agrupar/persistir incidencias) ocurre en processors/merge.js tras
- *   cada corrida, no aquí — este módulo solo LEE y resuelve.
+ *   El listener de adminNav gana una línea: al entrar al sub-panel
+ *   'maint' se dispara Events.loadMaintenanceCenter() — igual criterio
+ *   que Historial (Events.openHistory()), que también refresca sus
+ *   datos cada vez que se abre en vez de cachear. Se agregan dos
+ *   listeners nuevos: resolver una incidencia individual (delegado
+ *   sobre #mcOpenTbody, mismo patrón que #catTbody/#mainTbody) y
+ *   mostrar/ocultar el histórico de resueltas (#btnMcToggleResolved).
  *
  * CAMBIO (jul-2026 — confirmación de entregas sin PDF, "se quedó por
  * ocupación"):
- *   Se agrega confirmExcludedDette(ruta, dette) — contraparte de
- *   quickFix()/addCatalogRow() para la nueva regla SVE 'dette_sin_pdf'
- *   (ver features/validation/sve.js). El usuario confirma desde
- *   Correcciones que una entrega sin ningún bloque de PDF no se va a
- *   realizar; este método agrega la clave a State.excludedDettes y
- *   dispara un nuevo merge — processors/merge.js filtra la fila por
- *   completo (nunca llega a State.merged), así que el Excel final y el
- *   historial de Supabase quedan automáticamente fieles a la decisión,
- *   sin que este módulo (ni export.js ni dispatch-history.js) necesiten
- *   ningún filtro adicional. La confirmación de seguridad (diálogo
- *   nativo) vive en core/app.js, mismo patrón que deleteCatalogRow().
+ *   handleFixCardClick() gana un manejo nuevo, ANTES del de
+ *   saveBtn/reviewBtn: el botón ".fix-confirm-btn" que
+ *   UI._fixCardConfirm() genera para la regla SVE 'dette_sin_pdf' (ver
+ *   sve.js). Pide confirmación explícita vía diálogo nativo (la acción
+ *   es irreversible una vez exportado: elimina la fila por completo
+ *   del Excel final y del historial de Supabase — ver
+ *   processors/merge.js) y, si se confirma, delega en
+ *   Events.confirmExcludedDette(ruta, dette). Mismo contenedor
+ *   (#fixList/#fixInfoList) y mismo listener delegado que ya existía —
+ *   no se agrega ningún listener nuevo al DOM, solo una rama más
+ *   dentro del handler compartido.
  *
- * CAMBIO (jul-2026 — regla SVE 'integrity'/K, descuento de exclusiones):
- *   triggerMerge() ahora pasa State.excludedCount como tercer argumento
- *   a runSVE() (ver features/validation/sve.js) — permite que la regla K
- *   descuente del conteo esperado las entregas excluidas confirmadas en
- *   ESTA corrida de runMerge() (ver processors/merge.js), evitando una
- *   alerta crítica falsa cuando la diferencia se explica por completo
- *   por una exclusión legítima (ej. DETTE cancelada y confirmada). No
- *   cambia ningún otro comportamiento de triggerMerge().
+ * CAMBIO (jul-2026 — botón "Continuar a Exportación" tricolor):
+ *   Se agrega el listener de #btnFixContinue (ver index.html/ui.js) —
+ *   navega a la pantalla Exportación con goStep('export'), mismo
+ *   mecanismo que btnGoQuality/btnGoTable. El color/estado del botón
+ *   ya lo gobierna UI._updateFixContinueBtn() (llamado desde
+ *   renderFixList()); este listener solo maneja la navegación, nunca
+ *   bloquea el click — el gate real de exportación sigue viviendo,
+ *   sin cambios, en la pantalla Exportación.
  *
- * FIX DE INTEGRIDAD DE DATOS (jul-2026) — handlePDFs():
- *   Antes se indexaba SIEMPRE `ruta + '|' + r.factura` y
- *   `ruta + '|D|' + r.destino` en State.pdfData, aunque factura/destino
- *   llegaran vacíos (entrega con bloque de PDF parcialmente ilegible).
- *   Si dos entregas de la misma ruta tenían ese campo vacío, ambas
- *   compartían la misma clave del Map y la última sobreescribía a la
- *   primera — un match "específico" podía terminar apuntando al bloque
- *   equivocado sin que nada lo detectara. Ahora solo se indexa una
- *   clave cuando el valor correspondiente NO está vacío — así una
- *   entrega sin factura/destino detectado simplemente no es alcanzable
- *   por búsqueda específica (lo cual es correcto: no hay certeza), en
- *   vez de colisionar con otra. Complementa el fix de
- *   processors/merge.js (fallback por ruta ya no adivina cuando hay
- *   más de un candidato) y el de processors/pdf.js (extracción
- *   tolerante por campo — un marchamo inválido ya no vacía
- *   factura/destino, así que esta colisión de claves vacías será cada
- *   vez menos frecuente, pero se corrige de raíz de todas formas).
+ * CAMBIO (jul-2026 — captura dinámica de hasta 5 marchamos):
+ *   handleFixCardClick() gana tres manejos nuevos para la tarjeta
+ *   .fix-card-marchamo (ver ui.js → _fixCardMarchamo()/MULTI_RULES):
+ *   "+ Agregar marchamo" (revela el siguiente input, hasta el máximo
+ *   de slots vacíos que trae la tarjeta en data-fix-slots), "✕" por
+ *   fila agregada (la quita y reactiva el botón de agregar si estaba
+ *   deshabilitado por haber llegado al máximo), y "✓ Guardar" (junta
+ *   los valores no vacíos de todos los inputs de la tarjeta y llama a
+ *   EditSystem.quickFixMulti()). Los tres viven en el mismo listener
+ *   delegado que ya existía sobre #fixList/#fixInfoList — ningún
+ *   listener nuevo agregado al DOM. Deliberadamente usan clases CSS
+ *   propias (.fix-marchamo-add/.fix-marchamo-remove/.fix-save-
+ *   marchamo) distintas de .fix-save/.fix-review-btn para no colisionar
+ *   con los checks existentes de esas clases más abajo en el mismo
+ *   handler.
  *
- * CAMBIO (Fase 0 — telemetría de citas no reconocidas, ago-2026):
- *   processors/pdf.js → parsePDF() cambia su retorno de un array plano
- *   a { rows, unrecognizedCitas } — ver cabecera de ese archivo para el
- *   detalle completo. handlePDFs() se actualiza para desestructurar
- *   `rows` (mismo uso que antes, sin cambio de comportamiento) y además
- *   recolecta `unrecognizedCitas` de TODOS los PDFs del lote en
- *   `citaMissesRaw`. Al terminar el lote, se sincroniza una sola vez
- *   con el Centro de Mantenimiento vía IncidentStore.sync() — mismo
- *   patrón fire-and-forget que ya usa processors/merge.js para los
- *   misses de catálogo (nunca bloquea el flujo ni el merge). Objetivo:
- *   visibilidad de qué formatos de cita el detector actual no
- *   reconoce, sin tocar la detección misma en absoluto — ver
- *   features/incidents/incident-types.js (tipo 'cita_unrecognized') y
- *   processors/pdf.js para el resto del diseño.
+ * CAMBIO (jul-2026 — simplificación del flujo, Etapa 4):
+ *   Ver nota completa junto a STEPS más abajo. Tres ajustes de
+ *   navegación, ninguno de lógica de negocio:
+ *     1) El botón de Preparación (id conservado: btnGoTable — el
+ *        nombre ya no describe su destino, se documenta aquí en vez de
+ *        renombrarlo para minimizar el diff) ahora navega a
+ *        goStep('fix') en vez de goStep('table') — el flujo diario
+ *        pasa directo de Preparación a Correcciones.
+ *     2) El listener de #adminNav gana un chequeo ANTES del toggle de
+ *        paneles: cualquier botón con [data-admin-goto] navega
+ *        directamente a esa pantalla (goStep) en vez de activar un
+ *        sub-panel de Administración — usado por el nuevo acceso
+ *        directo a Mesa de Trabajo.
+ *     3) Se agrega el listener de #btnGoQualityHeader — mismo destino
+ *        (goStep('quality')) que el #btnGoQuality ya existente dentro
+ *        del estado vacío de Correcciones; ahora también accesible
+ *        siempre, desde la cabecera, sin esperar a que no queden
+ *        incidencias pendientes.
  *
- * CAMBIO (ago-2026 — "reabrir para corregir", Historial como punto de
- * retoma):
- *   Contexto: se evaluó y se descartó (decisión de EduarDo, confirmada
- *   tras auditoría arquitectónica) un modelo colaborativo en tiempo
- *   real (dos usuarios trabajando simultáneamente sobre la misma
- *   sesión, con Realtime/Presence/locking de Supabase). El caso de uso
- *   real es mucho más simple y mucho más frecuente: el 90% del tiempo
- *   se trabaja solo; el escenario a cubrir es que el Usuario A procese
- *   el día pero la calidad quede baja, y el Usuario B (o el mismo A más
- *   tarde) retome esa sesión YA EXPORTADA desde el Historial para
- *   seguir corrigiendo y volver a exportar con mejor calidad — nunca
- *   simultáneo, siempre secuencial.
+ * CAMBIO (ago-2026 — "reabrir para corregir"):
+ *   Se agrega el listener de #btnHistoryReopen, junto al de
+ *   #btnHistoryRedownload — reutiliza Events._currentHistorySession
+ *   (mismo dato ya fijado por selectHistorySession()/
+ *   previewTodaySession()). Llama a Events.reopenSession(), cierra el
+ *   modal de Historial y navega a Correcciones (goStep('fix')) para
+ *   que el usuario continúe corrigiendo de inmediato. Ver
+ *   events/events.js (reopenSession()/checkSources()) y ui/ui.js
+ *   (renderFixList(), aviso contextual) para el resto del mecanismo.
  *
- *   Se agrega reopenSession(sessionId) — carga las filas ya mergeadas
- *   de una sesión completada (DispatchHistory.getSessionRows(), mismo
- *   shape que State.merged, _rowId incluido) directamente en memoria y
- *   marca State.reviewSessionId. NO llama a runMerge(): no hay fuentes
- *   crudas que cruzar, el resultado del cruce ya es lo que se está
- *   cargando. Corre runSVE() de inmediato (sin screenCount — la regla K
- *   de integridad Excel-vs-memoria se salta automáticamente cuando ese
- *   parámetro se omite, comportamiento ya documentado en sve.js —
- *   correcto aquí, porque no hay Excel crudo contra qué comparar) para
- *   que Correcciones/Calidad/Exportación reflejen el estado real sin
- *   esperar a otra acción del usuario.
+ * CAMBIO (ago-2026 — login como primera vista, sin "flash" de la app):
+ *   La app entera (.shell) queda oculta por CSS hasta que
+ *   <body> tenga la clase 'app-authed' (ver regla en index.html:
+ *   body:not(.app-authed) .shell{display:none!important}). Se agrega
+ *   document.body.classList.add('app-authed') en los TRES puntos donde
+ *   ya se decidía "el usuario está autenticado, mostrar la app":
+ *     1) init() → rama Auth.restoreSession() exitosa (sesión ya
+ *        vigente en esta terminal, no requiere overlay de login)
+ *     2) afterLoginSuccess() → login normal completado
+ *     3) el submit handler de authFormProfile → primer login,
+ *        tras confirmar perfil
+ *   NO se toca la lógica de Auth/RPCs en absoluto — es un cambio
+ *   puramente de visibilidad, complementario a UI.hideAuthOverlay()
+ *   (que ya se llamaba en los mismos 3 puntos, salvo el 1, donde el
+ *   overlay nunca llegó a mostrarse).
  *
- *   checkSources() gana un bypass: ok = missing.length === 0 ||
- *   !!State.reviewSessionId — una sesión reabierta trae State.merged
- *   ya resuelto, no tiene (ni necesita) PDFs/Excel/paste/WTMS crudos en
- *   memoria. `missing` se sigue devolviendo igual que antes por si algún
- *   caller lo usa para otra cosa además de `ok`.
- *
- *   triggerMerge() NO resetea el pico de Correcciones/baseline de
- *   Calidad cuando State.reviewSessionId está activo — evita perder el
- *   progreso visual si, estando en modo revisión, se edita un catálogo
- *   maestro (lo cual re-dispara triggerMerge() como efecto colateral,
- *   ver importMasterCatalog()/addCatalogRow()/deleteCatalogRow()) —
- *   runMerge() ya es un no-op seguro en ese caso porque State.xlsData
- *   es null.
- *
- *   handlePDFs/handleXLS/handleWTMS/handlePaste limpian
- *   State.reviewSessionId al inicio — cargar cualquier fuente cruda
- *   nueva saca a la app del modo revisión y la regresa al flujo normal
- *   de captura, evitando quedar en un estado híbrido confuso.
- *
- *   No se toca merge.js, sve.js (salvo el uso ya soportado de omitir
- *   screenCount), dispatch-history.js, ni ninguna tabla de Supabase —
- *   el cambio es puramente de orquestación en memoria.
+ * CAMBIO (ago-2026 — cerrar el modal de configuración de usuario):
+ *   UI.closeModal() ya existía pero no tenía ningún disparador en el
+ *   DOM. Se agregan dos listeners nuevos, mismo patrón que
+ *   #historyModalOverlay: click en el botón "×" (#btnCfgClose) y click
+ *   en el "Cancelar" (#btnCfgCancel) → UI.closeModal(); click en el
+ *   overlay FUERA de .modal-box (mismo filtro e.target === overlay que
+ *   ya usan warnModalOverlay/routePickerOverlay/historyModalOverlay) →
+ *   UI.closeModal(). No se toca el guardado (#nameModalBtn) en
+ *   absoluto.
  *
  * CAMBIO (ago-2026 — validación informativa Excel vs PDF en
- * Preparación, ver features/source-check.js):
- *   triggerMerge() ahora llama compareExcelPdf() y UI.renderSourceCheck()
- *   como PRIMER paso, ANTES de Events.checkSources() — así la tarjeta
- *   se actualiza en cuanto Excel+PDF están cargados, sin esperar a que
- *   las 4 fuentes obligatorias estén completas (WTMS/despacho pueden
- *   faltar todavía). Es deliberadamente independiente del gate de
- *   checkSources(): compareExcelPdf() devuelve null por sí solo si
- *   falta Excel o PDF, y UI.renderSourceCheck(null) oculta la tarjeta
- *   — no se necesita ningún condicional adicional aquí. Puramente
- *   informativo — no participa en runMerge()/runSVE() ni en el gate de
- *   exportación, ver features/source-check.js para el detalle completo
- *   de diseño.
+ * Preparación):
+ *   Se agrega el listener de #btnScToggle → UI.toggleSourceCheckDetail()
+ *   (ver ui.js/features/source-check.js). Simple toggle de visibilidad,
+ *   sin ninguna llamada a Events — la tarjeta ya se actualiza sola
+ *   desde Events.triggerMerge().
  *
  * CAMBIO (sep-2026 — captura rápida en el Centro de Mantenimiento):
- *   Se agregan saveMaintenanceFix()/saveAllMaintenanceFixes() y la
- *   propiedad Events._maintIncidents (última lista cargada por
- *   loadMaintenanceCenter(), para resolver id → incidencia sin volver a
- *   consultar Supabase). Permiten resolver una incidencia de registro
- *   faltante en catálogo escribiendo los datos junto al valor faltante
- *   (placas de tractor/remolque en Pool Real, formato/tienda/estado en
- *   Ventana de Recibo) — la validación, el alta en el catálogo y el
- *   cierre de la incidencia viven en features/incidents/inline-fix.js
- *   (ver su cabecera y su tabla INLINE_FIX); este módulo solo
- *   orquesta: llama a saveInlineFix(), refresca la UI de los catálogos
- *   afectados, re-dispara el merge para que el dato aparezca de
- *   inmediato en el archivo, y recarga el panel. En el guardado por
- *   lote el merge se dispara UNA sola vez al final, no por incidencia.
+ *   El listener delegado de #mcOpenTbody (antes solo resolvía
+ *   incidencias con [data-mc-resolve]) gana dos ramas: el botón ✓ de
+ *   captura rápida ([data-mc-fix-save], junta los inputs
+ *   [data-mc-fix-input] de ESA fila y llama a
+ *   Events.saveMaintenanceFix()) y la tecla Enter dentro de cualquiera
+ *   de esos inputs (mismo efecto). Se agrega además el listener de
+ *   #btnMcSaveAll, que junta TODAS las filas con algo capturado y las
+ *   guarda por lote vía Events.saveAllMaintenanceFixes(). Una fila con
+ *   campos obligatorios incompletos no se descarta en silencio: llega a
+ *   Events y la validación de features/incidents/inline-fix.js reporta
+ *   qué falta. Ver ui.js → renderMaintenanceCenter() para el HTML de
+ *   cada celda de captura y features/incidents/inline-fix.js para la
+ *   tabla de campos (INLINE_FIX).
+ *
+ * CAMBIO (sep-2026 — "Reemplazar fuentes" por fuente, sin reiniciar todo):
+ *   #btnPrepReset (id conservado) ya NO llama a UI.resetAll(): ahora
+ *   entra al modo "Reemplazar fuentes" (UI.setPrepEditMode(true)), que
+ *   vuelve a mostrar la grilla de las 4 fuentes para recargar solo la
+ *   que se quiera — las demás se conservan. Si ya hay correcciones
+ *   manuales (State.edits), pide confirmación antes de entrar, porque
+ *   volver a cruzar (runMerge) reconstruye State.merged desde cero y
+ *   esas correcciones podrían perderse. Se agregan los listeners de
+ *   #btnPrepEditDone ("✓ Listo" → sale del modo) y
+ *   #btnPrepEditResetAll ("↺ Reiniciar las 4" → UI.resetAll() con
+ *   confirmación — el comportamiento anterior de #btnPrepReset). Ver
+ *   ui.js → setPrepEditMode()/updatePrepView()/_renderPdfTools() y
+ *   events.js → handlePDFs() para el resto del mecanismo.
+ *
+ * Dependencias: todos los módulos de la aplicación.
  */
-import { State } from '../core/state.js';
-import { normOp } from '../utils/format.js';
-import { UI } from '../ui/ui.js';
-import { EditSystem } from '../editing/edit-system.js';
-import { WarnModal } from '../editing/warn-modal.js';
+import { Auth } from '../features/auth.js';
+import { State } from './state.js';
+import { UI, _setEvents } from '../ui/ui.js';
+import { Events } from '../events/events.js';
+import { EditSystem, _setRoutePicker } from '../editing/edit-system.js';
+import { WarnModal, _setEvents as _setWarnModalEvents } from '../editing/warn-modal.js';
 import { RoutePicker } from '../editing/route-picker.js';
 import { FactCache } from '../features/fact-cache.js';
-import { pdfExtract, parsePDF } from '../processors/pdf.js';
-import { processXLS } from '../processors/excel.js';
-import { processPaste } from '../processors/paste.js';
-import { processWTMS } from '../processors/wtms.js';
-import { runMerge } from '../processors/merge.js';
-import { runSVE } from '../features/validation/sve.js';
-import { exportXLSX } from '../features/export.js';
-import { addOperator, deleteOperator, importOperators } from '../features/catalog.js';
+import { initCatalog } from '../features/catalog.js';
 import { DispatchHistory } from '../features/dispatch-history.js';
 import { CatalogStore } from '../features/catalogs/catalog-store.js';
-import { IncidentStore } from '../features/incidents/incident-store.js';
-import { INCIDENT_TYPES } from '../features/incidents/incident-types.js';
-import { saveInlineFix } from '../features/incidents/inline-fix.js';
-import { compareExcelPdf } from '../features/source-check.js';
 
-export const Events = {
+// ── Stepper — navegación entre pantallas ──
+// CAMBIO (jul-2026 — simplificación del flujo, Etapa 4): STEPS baja de
+// 5 a 3 entradas tras varios meses de uso real. Mesa de Trabajo y
+// Calidad NO se eliminan — siguen siendo pantallas completas y
+// funcionales (ver data-screen="table"/"quality" en index.html,
+// goStep() sigue aceptando cualquier id) — solo salen del indicador
+// numerado porque en el día a día no aportaban un paso obligatorio:
+//   - Mesa de Trabajo: útil para buscar/editar CUALQUIER registro,
+//     incluso uno sin incidencias, pero eso es una tarea ocasional, no
+//     parte del flujo diario. Ahora se accede desde Administración
+//     (ver adminNav más abajo, botón con data-admin-goto="table").
+//   - Calidad: sus métricas siguen siendo útiles como diagnóstico,
+//     pero el Dashboard es redundante con el contador/progreso de
+//     Correcciones para la decisión diaria de "¿ya puedo exportar?"
+//     — esa decisión ahora la resuelve el botón tricolor "Continuar a
+//     Exportación" (ver ui.js → _updateFixContinueBtn(), Etapa 2).
+//     Se agrega un acceso siempre visible "📊 Ver detalle de calidad"
+//     en la cabecera de Correcciones (#btnGoQualityHeader) para quien
+//     sí quiera profundizar.
+// goStep()/renderStepper() NO cambian de comportamiento — goStep(id)
+// ya toleraba ids fuera de STEPS (el indicador simplemente no se
+// mueve), así que navegar a 'table'/'quality' sigue funcionando
+// exactamente igual que antes.
+const STEPS = [
+  { id: 'prep',    label: 'Preparación' },
+  { id: 'fix',     label: 'Correcciones' },
+  { id: 'export',  label: 'Exportación' },
+];
+let currentStepIdx = 0;
 
-  setupDrop(zoneId, inputId, handler) {
-    const zone  = document.getElementById(zoneId);
-    const input = document.getElementById(inputId);
-    zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag'); });
-    zone.addEventListener('dragleave', ()=> zone.classList.remove('drag'));
-    zone.addEventListener('drop',      e => { e.preventDefault(); zone.classList.remove('drag'); handler([...e.dataTransfer.files]); });
-    input.addEventListener('change',   ()=> { handler([...input.files]); input.value = ''; });
-  },
+function renderStepper() {
+  const el = document.getElementById('stepper');
+  if (!el) return;
+  el.innerHTML = STEPS.map((s, i) => {
+    const cls = i < currentStepIdx ? 'done' : i === currentStepIdx ? 'active' : '';
+    const dotContent = i < currentStepIdx ? '✓' : (i + 1);
+    const conn = i < STEPS.length - 1 ? '<div class="step-connector"></div>' : '';
+    return `<div class="step ${cls}" data-goto="${s.id}"><div class="step-dot">${dotContent}</div><div class="step-label">${s.label}</div></div>${conn}`;
+  }).join('');
+  el.querySelectorAll('.step').forEach(elm => elm.addEventListener('click', () => goStep(elm.dataset.goto)));
+}
 
-  async importMasterCatalog(catalogId, file) {
-    if (!file) return;
-    UI.setMasterCatStatus('Importando…', 'ok');
-    try {
-      const buf  = await file.arrayBuffer();
-      const wb   = XLSX.read(buf, { type: 'array' });
-      const ws   = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+/**
+ * Navega a cualquiera de las 6 pantallas reales de la app. Si el id
+ * pertenece a STEPS (los 5 pasos numerados del flujo operativo), el
+ * indicador del stepper se actualiza; Administración ('admin') está
+ * fuera de ese flujo — se accede por su propio botón en el topbar y no
+ * mueve el indicador de progreso.
+ */
+function goStep(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.dataset.screen === id));
+  const idx = STEPS.findIndex(s => s.id === id);
+  if (idx > -1) { currentStepIdx = idx; renderStepper(); }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
 
-      const result = await CatalogStore.replaceCatalog(catalogId, rows, State.user);
-      UI.renderCatalogMasterStatus(catalogId);
-      UI.renderCatalogAdmin(catalogId);
-      UI.setMasterCatStatus(`✓ ${result.count} registros cargados`, 'ok');
-      if (State.merged.length) Events.triggerMerge();
-    } catch (e) {
-      UI.setMasterCatStatus('Error: ' + e.message, 'err');
-    }
-  },
-
-  /**
-   * Agrega UN registro individual a un catálogo maestro desde el panel
-   * de Administración — contraparte de addCatalogEntry() (operadores),
-   * pero genérica sobre CATALOGS (ver ui.js → renderCatalogAdmin()).
-   * @param {string} catalogId — 'ventanaRecibo' | 'poolReal'
-   * @param {object} values — { columnaCanonica: valor } capturado del formulario
-   */
-  async addCatalogRow(catalogId, values) {
-    UI.setCatalogAdminStatus(catalogId, 'Guardando…', 'ok');
-    try {
-      await CatalogStore.addRow(catalogId, values, State.user);
-      UI.renderCatalogAdmin(catalogId);
-      UI.renderCatalogMasterStatus(catalogId);
-      UI.setCatalogAdminStatus(catalogId, '✓ Registro agregado', 'ok');
-      if (State.merged.length) Events.triggerMerge();
-    } catch (e) {
-      UI.setCatalogAdminStatus(catalogId, e.message, 'err');
-    }
-  },
-
-  /**
-   * Elimina UN registro individual de un catálogo maestro por su _id.
-   * @param {string} catalogId — 'ventanaRecibo' | 'poolReal'
-   * @param {string} id — _id del registro (uuid de Supabase)
-   */
-  async deleteCatalogRow(catalogId, id) {
-    UI.setCatalogAdminStatus(catalogId, 'Eliminando…', 'ok');
-    try {
-      await CatalogStore.deleteRow(catalogId, id, State.user);
-      UI.renderCatalogAdmin(catalogId);
-      UI.renderCatalogMasterStatus(catalogId);
-      UI.setCatalogAdminStatus(catalogId, 'Eliminado', 'ok');
-      if (State.merged.length) Events.triggerMerge();
-    } catch (e) {
-      UI.setCatalogAdminStatus(catalogId, e.message, 'err');
-    }
-  },
-
-  async handlePDFs(files) {
-    files = files.filter(f => f.type === 'application/pdf');
-    if (!files.length) return;
-    // NUEVO (ago-2026 — "reabrir para corregir"): cargar una fuente
-    // cruda nueva sale del modo "sesión reabierta" — vuelve al flujo
-    // normal de captura. Ver nota de cabecera de este archivo.
-    State.reviewSessionId = null;
-    UI.showProgress('Procesando PDFs…');
-    UI.setSourceProcessing('pdf', true);
-    const errors = [];
-    let ok = 0;
-    // NUEVO (Fase 0 — telemetría de citas no reconocidas, ago-2026):
-    // acumula los candidatos de TODOS los PDFs de este lote — ver
-    // processors/pdf.js → parsePDF() (campo `unrecognizedCitas`) y la
-    // sincronización al final de este método.
-    const citaMissesRaw = [];
-    try {
-      for (let i = 0; i < files.length; i++) {
-        try {
-          const extracted = await pdfExtract(files[i]);
-          // CAMBIO (Fase 0): parsePDF() ahora devuelve
-          // { rows, unrecognizedCitas } en vez de un array plano — ver
-          // processors/pdf.js. `parsed` conserva exactamente el mismo
-          // contenido/uso que antes (se sigue iterando igual abajo).
-          const { rows: parsed, unrecognizedCitas } = parsePDF(extracted, files[i].name);
-          for (const r of parsed) {
-            // FIX (jul-2026) — ver nota de cabecera "FIX DE INTEGRIDAD DE
-            // DATOS": nunca indexar una clave con factura/destino vacío.
-            // Una entrega sin ese dato detectado queda fuera del match
-            // específico (correcto: no hay certeza) en vez de arriesgarse
-            // a colisionar con otra entrega de la misma ruta.
-            if (r.factura) State.pdfData.set(r.ruta + '|' + r.factura,   r);
-            if (r.destino) State.pdfData.set(r.ruta + '|D|' + r.destino, r);
-          }
-          // NUEVO (Fase 0): cada candidato ya trae `ruta`/`destino`/
-          // `signature` — se traduce al shape genérico que espera
-          // IncidentStore.sync() (mismo contrato que usa
-          // processors/merge.js para catalog_miss). sourceId es
-          // siempre el literal 'pdf' — no hay múltiples catálogos como
-          // en ese otro tipo de incidencia.
-          (unrecognizedCitas || []).forEach(m => {
-            citaMissesRaw.push({ sourceId: 'pdf', keyName: 'patron_texto', keyValue: m.signature, ruta: m.ruta });
-          });
-          if (parsed.length) ok++;
-          else errors.push('Sin datos: ' + files[i].name);
-        } catch (e) { errors.push('Error: ' + files[i].name + ' — ' + e.message); }
-        UI.setProgress(i + 1, files.length, files[i].name);
-      }
-    } finally {
-      UI.setSourceProcessing('pdf', false);
-    }
-    UI.hideProgress();
-
-    const uniqueCount = new Set([...State.pdfData.keys()].filter(k => !k.includes('|D|'))).size;
-    UI.setSourceStatus('pdf', true, '✓ Completo', `${ok} archivos · ${uniqueCount} entregas`);
-
-    if (errors.length) UI.showErrors(errors);
-
-    // NUEVO (Fase 0 — telemetría de citas no reconocidas, ago-2026):
-    // fire-and-forget, mismo patrón que processors/merge.js con los
-    // misses de catálogo — nunca bloquea el flujo de Preparación ni el
-    // merge que sigue abajo. sourceIds=['pdf'] marca 'pdf' como
-    // "evaluado en esta corrida" para que IncidentStore pueda
-    // auto-resolver patrones que ya no aparecieron (ver
-    // incident-store.js, nota "AUTO-RESOLUCIÓN SEGURA").
-    if (citaMissesRaw.length) {
-      IncidentStore.sync(INCIDENT_TYPES.cita_unrecognized.id, ['pdf'], citaMissesRaw)
-        .catch(e => console.warn('[Events] No se pudo sincronizar telemetría de citas no reconocidas:', e.message));
-    }
-
-    Events.triggerMerge();
-  },
-
-  async handleXLS(files) {
-    const file = files.find(f => f.name.match(/\.xlsx?$/i));
-    if (!file) return;
-    // NUEVO (ago-2026 — "reabrir para corregir"): ver nota de cabecera.
-    State.reviewSessionId = null;
-    UI.showProgress('Leyendo Excel…');
-    UI.setSourceProcessing('xls', true);
-    try {
-      const { rows, factData, ruteoName, factSheetLabel } = await processXLS(file);
-      State.xlsData  = rows;
-      State.factData = factData;
-
-      State.cacheUpdating = true;
-      UI.renderCacheHistory();
-      FactCache.persist(factData).finally(() => {
-        State.cacheUpdating = false;
-        UI.renderCacheHistory();
+/**
+ * Delegación de eventos GENÉRICA para el panel de administración
+ * fila-por-fila de un catálogo maestro (Ventana de Recibo / Pool Real).
+ * Ver nota de cabecera "CAMBIO (jul-2026 — administración de catálogos
+ * maestros fila por fila)". Un solo listener por contenedor cubre tanto
+ * el botón "+ Agregar" (data-mc-role="add") como cualquier botón "✕"
+ * de eliminar fila (data-mc-del="<uuid>") — ambos regenerados en cada
+ * UI.renderCatalogAdmin(catalogId).
+ * @param {string} catalogId — 'ventanaRecibo' | 'poolReal'
+ * @param {string} containerId — id del contenedor en index.html
+ */
+function wireCatalogAdmin(catalogId, containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.addEventListener('click', e => {
+    const addBtn = e.target.closest('[data-mc-role="add"]');
+    if (addBtn) {
+      const inputs = container.querySelectorAll('[data-mc-field]');
+      const values = {};
+      inputs.forEach(inp => { values[inp.dataset.mcField] = inp.value.trim(); });
+      Events.addCatalogRow(catalogId, values).then(() => {
+        // Limpia el formulario solo si el alta fue exitosa — si falló
+        // (ej. faltó el índice requerido), el usuario conserva lo ya
+        // capturado para corregir sin volver a escribir todo.
+        const statusEl = container.querySelector('[data-mc-role="status"]');
+        if (statusEl && statusEl.classList.contains('ok')) {
+          inputs.forEach(inp => { inp.value = ''; });
+        }
       });
-
-      UI.setSourceStatus('xls', true, '✓ Completo', `${rows.length} rutas · ${factSheetLabel}`);
-
-      UI.hideProgress();
-      Events.triggerMerge();
-    } catch (e) {
-      UI.hideProgress();
-      UI.showErrors([e.message]);
-    } finally {
-      UI.setSourceProcessing('xls', false);
-    }
-  },
-
-  // ── Reporte WTMS handler (4ª fuente obligatoria) ──
-  async handleWTMS(files) {
-    const file = files.find(f => f.name.match(/\.csv$/i));
-    if (!file) { if (files.length) UI.showErrors(['El Reporte WTMS debe ser un archivo .csv']); return; }
-    // NUEVO (ago-2026 — "reabrir para corregir"): ver nota de cabecera.
-    State.reviewSessionId = null;
-    UI.showProgress('Leyendo Reporte WTMS…');
-    UI.setSourceProcessing('wtms', true);
-    try {
-      const raw = await file.text();
-      const { data } = processWTMS(raw);
-      State.wtmsData = data;
-
-      UI.setSourceStatus('wtms', true, '✓ Completo', `${data.size} cargas`);
-
-      UI.hideProgress();
-      Events.triggerMerge();
-    } catch (e) {
-      UI.hideProgress();
-      UI.showErrors([e.message]);
-    } finally {
-      UI.setSourceProcessing('wtms', false);
-    }
-  },
-
-  handlePaste() {
-    const raw = document.getElementById('pasteArea').value.trim();
-    if (!raw) { UI.setPasteSt('Pega datos primero', 'err'); return; }
-    // NUEVO (ago-2026 — "reabrir para corregir"): ver nota de cabecera.
-    State.reviewSessionId = null;
-    UI.setPasteSt('Procesando…', 'proc');
-    try {
-      const { data, preview, idx } = processPaste(raw);
-      State.despData = data;
-      UI.setPasteSt(`✓ ${data.size} rutas detectadas`, 'ok');
-      UI.setSourceStatus('desp', true, '✓ Completo', `${data.size} rutas detectadas`);
-      if (preview.length) UI.renderPastePreview(preview, idx);
-      Events.triggerMerge();
-    } catch (e) {
-      UI.setPasteSt(e.message, 'err');
-    }
-  },
-
-  clearPaste() {
-    document.getElementById('pasteArea').value = '';
-    document.getElementById('pastePreview').classList.remove('on');
-    State.despData = new Map();
-    UI.setPasteSt('', '');
-    UI.setSourceStatus('desp', false, 'Pega desde Excel', 'Copia RUTA · CASETA · WTMS · ID\'S MASTER');
-    Events.triggerMerge();
-  },
-
-  // ── Validación de fuentes obligatorias ──
-  checkSources() {
-    const missing = [];
-    if (State.pdfData.size === 0) missing.push('PDFs de cargas');
-    if (!State.xlsData || !State.xlsData.length) missing.push('Excel macro (RUTEO NUEVO)');
-    if (State.despData.size === 0) missing.push("Status de despacho (RUTA + ID'S MASTER)");
-    if (State.wtmsData.size === 0) missing.push('Reporte WTMS');
-    // NUEVO (ago-2026 — "reabrir para corregir"): una sesión reabierta
-    // desde Historial (ver Events.reopenSession()) trae State.merged
-    // ya resuelto por un merge anterior — no hay fuentes crudas que
-    // exigir ni volver a cruzar. `missing` se sigue devolviendo tal
-    // cual (por si algún caller lo usa para otra cosa además de `ok`)
-    // — solo `ok` se bypassa.
-    const ok = missing.length === 0 || !!State.reviewSessionId;
-    return { ok, missing };
-  },
-
-  triggerMerge() {
-    // NUEVO (ago-2026 — validación informativa Excel vs PDF, ver nota de
-    // cabecera de este archivo y features/source-check.js). Deliberadamente
-    // ANTES de checkSources()/el gate de las 4 fuentes: compareExcelPdf()
-    // solo necesita Excel+PDF, así que la tarjeta debe reflejar su estado
-    // aunque falten WTMS/despacho. compareExcelPdf() devuelve null por sí
-    // solo si falta alguna de las dos, y UI.renderSourceCheck(null) oculta
-    // la tarjeta — no requiere ningún condicional adicional aquí. Nunca
-    // afecta el resto de este método ni el gate de exportación.
-    UI.renderSourceCheck(compareExcelPdf());
-
-    const { ok, missing } = Events.checkSources();
-    UI.updatePrepView(missing);
-
-    if (!ok) {
-      State.merged = [];
-      State.sveIssues = [];
-      UI.renderTable();
-      UI.renderFixList();
-      UI.renderQualityScreen();
-      UI.renderExportScreen();
-      UI.updateStats();
-      UI.resetSVE();
-      UI.setActionsEnabled(false);
-      UI.updateHealthRail();
-      UI.applyMode();
       return;
     }
-
-    // Marca de "inicio de captura" — solo la primera vez que las 4
-    // fuentes están completas en esta sesión (ver nota en state.js).
-    if (!State.captureStartedAt) State.captureStartedAt = Date.now();
-
-    runMerge();
-    // NUEVO (ago-2026 — "reabrir para corregir"): en modo revisión no
-    // hay fuentes crudas que mergear (runMerge() es un no-op seguro,
-    // ver su guard clause — State.xlsData es null) — resetear el pico
-    // de Correcciones/baseline de Calidad aquí solo tiene sentido para
-    // un merge NUEVO real, no para el efecto colateral de editar un
-    // catálogo maestro mientras se revisa una sesión ya resuelta
-    // (perdería el progreso visual sin ninguna razón real).
-    if (!State.reviewSessionId) {
-      // Nuevo merge completo = nueva sesión de corrección — el progreso
-      // de Correcciones y el "antes/después" de Calidad arrancan de cero
-      // contra el total fresco de este merge, no contra el de la corrida
-      // anterior.
-      UI.resetFixPeak();
-      UI.resetQualityBaseline();
+    const delBtn = e.target.closest('[data-mc-del]');
+    if (delBtn) {
+      const id = delBtn.dataset.mcDel;
+      if (!id) return;
+      if (!confirm('¿Eliminar este registro del catálogo? Esta acción no se puede deshacer.')) return;
+      Events.deleteCatalogRow(catalogId, id);
     }
-    UI.renderTable();
-    UI.updateStats();
-    UI.setActionsEnabled(true);
-    setTimeout(() => {
-      const screenCount = State.xlsData ? State.xlsData.length : 0;
-      // CAMBIO (jul-2026): se pasa State.excludedCount (calculado en
-      // runMerge(), ver processors/merge.js) para que la regla K de
-      // sve.js pueda descontar las exclusiones confirmadas de ESTA
-      // corrida antes de comparar — ver nota de cabecera de este
-      // archivo y de features/validation/sve.js.
-      const sveResult = runSVE(State.merged, screenCount, State.excludedCount);
-      if (sveResult) {
-        State.sveIssues = sveResult.issues;
-        UI.renderSVE(sveResult.issues, sveResult.quality, sveResult.nCrit, sveResult.nWarn, sveResult.nInfo, sveResult.nPass);
-      } else {
-        State.sveIssues = [];
-        UI.resetSVE();
+  });
+}
+
+/**
+ * Inicializa la aplicación completa.
+ */
+let _activityWired = false;
+let _pendingFirstLoginPassword = null;
+// NUEVO — protección simple del panel Administración → Usuarios.
+// Cortina de acceso, NO seguridad real (ver nota abajo): el panel de
+// gestión de cuentas es sensible pero de bajo tráfico — un prompt()
+// basta para evitar accesos accidentales o de personal no autorizado
+// casual. Se desbloquea una sola vez por sesión de navegador (no
+// persiste en localStorage — recargar vuelve a pedirla).
+let _usersPanelUnlocked = false;
+const USERS_PANEL_PASSWORD = 'rainmeter99';
+
+function wireActivityTracking() {
+  if (_activityWired) return;
+  _activityWired = true;
+  ['click', 'keydown'].forEach(evt => document.addEventListener(evt, () => Auth.touchActivity()));
+}
+
+function handleSessionExpired() {
+  const known = Auth.getKnownUser();
+  UI.showAuthKnown(known ? `${Auth.greeting()}, ${known.displayName}` : '—');
+}
+
+async function afterLoginSuccess(result) {
+  if (result.isFirstLogin) {
+    UI.showAuthProfile({ displayName: result.user.displayName, captureName: result.user.captureName });
+    return;
+  }
+  _pendingFirstLoginPassword = null;
+  UI.setUser(State.currentUser);
+  _revealAppWithTransition();
+  Auth.startExpiryWatch(handleSessionExpired);
+  wireActivityTracking();
+  await continueInit();
+}
+const AUTH_ERROR_MESSAGES = {
+  user_not_found:     { title:'Usuario no encontrado',        body:'Tu usuario no se encuentra dado de alta. Contacta al administrador para solicitar tu alta.' },
+  invalid_password:   { title:'Contraseña incorrecta',         body:'Verifica tu contraseña e intenta nuevamente.' },
+  invalid_credentials:{ title:'Usuario o contraseña incorrectos', body:'Verifica tu usuario y tu contraseña e intenta nuevamente.' },
+  inactive:           { title:'Cuenta inactiva',               body:'Esta cuenta está desactivada. Contacta al administrador para reactivarla.' },
+  network:            { title:'Sin conexión',                  body:'No se pudo conectar con el servidor. Verifica tu conexión e intenta de nuevo.' },
+  generic:            { title:'No se pudo iniciar sesión',     body:'Verifica tus datos e intenta nuevamente.' }
+};
+
+function _setAuthError(elId, code) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (!code) { el.innerHTML = ''; return; }
+  const msg = AUTH_ERROR_MESSAGES[code] || AUTH_ERROR_MESSAGES.generic;
+  el.innerHTML = `<strong>${msg.title}</strong><span>${msg.body}</span>`;
+}
+
+function _setAuthButtonState(form, state) {
+  const btn = form.querySelector('button[type="submit"]');
+  if (!btn) return;
+  if (state === 'loading') {
+    btn.dataset.origText = btn.dataset.origText || btn.textContent;
+    btn.disabled = true;
+    btn.classList.remove('auth-success');
+    btn.innerHTML = '<span class="auth-spinner"></span>Iniciando sesión…';
+  } else if (state === 'success') {
+    btn.disabled = true;
+    btn.classList.add('auth-success');
+    btn.textContent = '✓ ¡Bienvenido!';
+  } else {
+    btn.disabled = false;
+    btn.classList.remove('auth-success');
+    if (btn.dataset.origText) btn.textContent = btn.dataset.origText;
+  }
+}
+
+function _revealAppWithTransition() {
+  const overlay = document.getElementById('authOverlay');
+  overlay.classList.add('authOverlay-leaving');
+  setTimeout(() => {
+    UI.hideAuthOverlay();
+    overlay.classList.remove('authOverlay-leaving');
+    document.body.classList.add('app-authed');
+  }, 280);
+}
+
+let _authSubmitting = false;
+
+function wireAuthForms() {
+  document.getElementById('authFormKnown').addEventListener('submit', async e => {
+    e.preventDefault();
+    if (_authSubmitting) return;
+    const known  = Auth.getKnownUser();
+    const pass   = document.getElementById('authKnownPassword').value;
+    document.getElementById('authKnownError').innerHTML = '';
+    _authSubmitting = true;
+    _setAuthButtonState(e.target, 'loading');
+    const result = await Auth.login(known.username, pass);
+    if (!result.ok) {
+      _authSubmitting = false;
+      _setAuthButtonState(e.target, 'idle');
+      _setAuthError('authKnownError', result.error);
+      return;
+    }
+    _setAuthButtonState(e.target, 'success');
+    _pendingFirstLoginPassword = pass;
+    await afterLoginSuccess(result);
+    _authSubmitting = false;
+  });
+
+  document.getElementById('authChangeUser').addEventListener('click', () => {
+    Auth.changeUser();
+    UI.showAuthFull();
+  });
+
+  document.getElementById('authFormFull').addEventListener('submit', async e => {
+    e.preventDefault();
+    if (_authSubmitting) return;
+    const user  = document.getElementById('authFullUsername').value.trim();
+    const pass  = document.getElementById('authFullPassword').value;
+    const errEl = document.getElementById('authFullError');
+    errEl.innerHTML = '';
+    if (!user || !pass) { errEl.innerHTML = '<strong>Completa usuario y contraseña.</strong>'; return; }
+    _authSubmitting = true;
+    _setAuthButtonState(e.target, 'loading');
+    const result = await Auth.login(user, pass);
+    if (!result.ok) {
+      _authSubmitting = false;
+      _setAuthButtonState(e.target, 'idle');
+      _setAuthError('authFullError', result.error);
+      return;
+    }
+    _setAuthButtonState(e.target, 'success');
+    _pendingFirstLoginPassword = pass;
+    await afterLoginSuccess(result);
+    _authSubmitting = false;
+  });
+
+  document.getElementById('authFormProfile').addEventListener('submit', async e => {
+    e.preventDefault();
+    if (_authSubmitting) return;
+    const displayName = document.getElementById('authProfileDisplay').value.trim();
+    const captureName = document.getElementById('authProfileCapture').value.trim();
+    const newPass      = document.getElementById('authProfileNewPassword').value;
+    const errEl        = document.getElementById('authProfileError');
+    errEl.textContent = '';
+    if (!displayName || !captureName) { errEl.textContent = 'Completa ambos campos.'; return; }
+
+    _authSubmitting = true;
+    _setAuthButtonState(e.target, 'loading');
+
+    const currentPass = _pendingFirstLoginPassword;
+    const profResult  = await Auth.updateProfile(currentPass, displayName, captureName);
+    if (!profResult.ok) {
+      _authSubmitting = false;
+      _setAuthButtonState(e.target, 'idle');
+      errEl.textContent = 'No se pudo guardar tu perfil — intenta de nuevo.';
+      return;
+    }
+    if (newPass) {
+      const pwResult = await Auth.changePassword(currentPass, newPass);
+      if (!pwResult.ok) errEl.textContent = 'Perfil guardado, pero no se pudo cambiar la contraseña.';
+    }
+    _pendingFirstLoginPassword = null;
+    UI.setUser(State.currentUser);
+    _setAuthButtonState(e.target, 'success');
+    _revealAppWithTransition();
+    Auth.startExpiryWatch(handleSessionExpired);
+    wireActivityTracking();
+    await continueInit();
+    _authSubmitting = false;
+  });
+}
+
+/**
+ * Punto de entrada real. wireAuthForms() se engancha SIEMPRE, haya o no
+ * sesión — el resto del bootstrap (continueInit) solo corre tras login
+ * exitoso o sesión restaurada (login bloqueante, ver propuesta §17).
+ */
+export async function init() {
+  _setRoutePicker(RoutePicker);
+  _setEvents(Events);
+  _setWarnModalEvents(Events);
+
+  UI.applyTheme(State.theme);
+  wireAuthForms();
+
+  if (Auth.restoreSession()) {
+    UI.setUser(State.currentUser);
+    // NUEVO (ago-2026 — login como primera vista): sesión ya vigente en
+    // esta terminal — el overlay de login nunca llega a mostrarse, pero
+    // .shell seguía oculto por CSS hasta este punto (ver regla nueva en
+    // index.html). Se revela aquí, antes de continueInit(), para que la
+    // app aparezca de inmediato sin esperar ningún dato de red.
+    document.body.classList.add('app-authed');
+    Auth.startExpiryWatch(handleSessionExpired);
+    wireActivityTracking();
+    await continueInit();
+    return;
+  }
+
+  const known = Auth.getKnownUser();
+  if (known) UI.showAuthKnown(`${Auth.greeting()}, ${known.displayName}`);
+  else       UI.showAuthFull();
+  // continueInit() se dispara desde wireAuthForms() tras login exitoso.
+}
+
+/**
+ * Bootstrap completo de la aplicación — antes vivía como el cuerpo de
+ * init(). Se extrae sin cambios de comportamiento salvo los señalados:
+ * ya no llama UI.applyTheme/UI.setUser(String) (resuelto antes de
+ * llegar aquí) y el nameInput/first-run modal de nombre libre se
+ * retiran (reemplazados por el flujo de auth de arriba).
+ */
+async function continueInit() {
+  renderStepper();
+  document.getElementById('btnAdmin').addEventListener('click', () => goStep('admin'));
+
+  State.factCache    = await FactCache.load();
+  State.factCacheLog = await FactCache.loadLog();
+  const fcStats = FactCache.stats();
+  if (fcStats.total > 0) {
+    console.log('[FactCache] Loaded', fcStats.total, 'invoices from', fcStats.days, 'day(s):', fcStats.dates.join(', '));
+  }
+  UI.renderCacheHistory();
+
+  Events.setupDrop('dropPDF', 'filePDF', Events.handlePDFs.bind(Events));
+  Events.setupDrop('dropXLS', 'fileXLS', Events.handleXLS.bind(Events));
+  Events.setupDrop('dropWTMS', 'fileWTMS', Events.handleWTMS.bind(Events));
+
+  document.getElementById('btnGoTable').addEventListener('click', () => goStep('fix'));
+
+  // ── "Reemplazar fuentes" (sep-2026) — ver nota de cabecera. El id
+  // #btnPrepReset se conserva, pero ya NO reinicia todo: entra al modo
+  // por fuente. Si hay correcciones manuales registradas, se pide
+  // confirmación porque volver a cruzar reconstruye State.merged desde
+  // cero (State.edits no se limpia tras un merge, así que el aviso
+  // puede aparecer aunque esas ediciones ya se hubieran perdido).
+  document.getElementById('btnPrepReset').addEventListener('click', () => {
+    if (State.edits.length &&
+        !confirm(`Ya hiciste ${State.edits.length} corrección(es) manual(es). Al reemplazar una fuente se vuelve a cruzar todo y esas correcciones podrían perderse. ¿Continuar?`)) return;
+    UI.setPrepEditMode(true);
+  });
+  document.getElementById('btnPrepEditDone')?.addEventListener('click', () => UI.setPrepEditMode(false));
+  document.getElementById('btnPrepEditResetAll')?.addEventListener('click', () => {
+    if (!confirm('¿Reiniciar las 4 fuentes? Se borrará todo lo cargado en esta sesión.')) return;
+    UI.resetAll();
+  });
+
+  document.getElementById('btnParse').addEventListener('click',      () => Events.handlePaste());
+  document.getElementById('btnPasteClear').addEventListener('click', () => Events.clearPaste());
+
+  // NUEVO (ago-2026 — validación Excel vs PDF): simple toggle de
+  // visibilidad del detalle de diferencias — la tarjeta en sí ya se
+  // actualiza sola desde Events.triggerMerge(), este listener no llama
+  // a Events en absoluto.
+  document.getElementById('btnScToggle')?.addEventListener('click', () => UI.toggleSourceCheckDetail());
+
+  document.getElementById('btnExport').addEventListener('click', () => Events.handleExport());
+
+  document.getElementById('btnTheme').addEventListener('click', () =>
+    UI.applyTheme(State.theme === 'dark' ? 'light' : 'dark'));
+
+  document.querySelectorAll('.theme-opt[data-theme]').forEach(el => {
+    el.addEventListener('click', () => UI.applyTheme(el.dataset.theme));
+  });
+
+  document.getElementById('tbUser').addEventListener('click', () => UI.openModal());
+
+  // ── Configuración — Mi cuenta (reemplaza el guardado de nombre libre) ──
+  document.getElementById('nameModalBtn').addEventListener('click', async () => {
+    const displayName     = document.getElementById('cfgDisplayName').value.trim();
+    const captureName     = document.getElementById('cfgCaptureName').value.trim();
+    const currentPassword = document.getElementById('cfgCurrentPassword').value;
+    const newPassword     = document.getElementById('cfgNewPassword').value;
+    const statusEl = document.getElementById('cfgStatus');
+
+    if (!displayName || !captureName) {
+      statusEl.textContent = 'Completa nombre y nombre en CAPTURA.'; statusEl.style.color = 'var(--red)'; return;
+    }
+    if (!currentPassword) {
+      statusEl.textContent = 'Ingresa tu contraseña actual para guardar cambios.'; statusEl.style.color = 'var(--red)'; return;
+    }
+    statusEl.textContent = 'Guardando…'; statusEl.style.color = '';
+
+    const profResult = await Auth.updateProfile(currentPassword, displayName, captureName);
+    if (!profResult.ok) {
+      statusEl.textContent = profResult.error === 'invalid_password' ? 'Contraseña actual incorrecta.' : 'No se pudo guardar.';
+      statusEl.style.color = 'var(--red)';
+      return;
+    }
+    if (newPassword) {
+      const pwResult = await Auth.changePassword(currentPassword, newPassword);
+      if (!pwResult.ok) {
+        statusEl.textContent = 'Nombre guardado, pero no se pudo cambiar la contraseña.'; statusEl.style.color = 'var(--amber-deep)'; return;
       }
-      // El status pill por fila, Correcciones, Calidad y Exportación
-      // dependen de State.sveIssues, recién poblado arriba — en ese
-      // orden: la barra de progreso de Correcciones fija su "pico"
-      // primero, y Calidad/Exportación reutilizan ese mismo pico.
-      UI.renderTable();
-      UI.renderFixList();
-      UI.renderQualityScreen();
-      UI.renderExportScreen();
-      UI.updateHealthRail();
-      UI.applyMode();
-    }, 100);
-  },
+    }
+    UI.setUser(State.currentUser);
+    statusEl.textContent = '✓ Cambios guardados'; statusEl.style.color = 'var(--green)';
+    document.getElementById('cfgCurrentPassword').value = '';
+    document.getElementById('cfgNewPassword').value     = '';
+  });
 
-  handleExport() {
-    if (State.sveHasCritical) {
-      document.getElementById('svePanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
-      const gate = document.getElementById('exportGate');
-      gate.style.opacity = '.3';
-      setTimeout(() => gate.style.opacity = '1', 200);
+  // ── NUEVO (ago-2026 — cerrar el modal de configuración de usuario) ──
+  // UI.closeModal() ya existía pero no tenía ningún disparador en el
+  // DOM. Mismo patrón que #historyModalOverlay/#warnModalOverlay/
+  // #routePickerOverlay: botón "×", botón "Cancelar" y click en el
+  // overlay fuera de .modal-box — ninguno guarda cambios.
+  document.getElementById('btnCfgClose')?.addEventListener('click', () => UI.closeModal());
+  document.getElementById('btnCfgCancel')?.addEventListener('click', () => UI.closeModal());
+  document.getElementById('nameModal').addEventListener('click', e => {
+    if (e.target === document.getElementById('nameModal')) UI.closeModal();
+  });
+
+  document.getElementById('tableSearch').addEventListener('input', e => UI.setTableSearch(e.target.value));
+  document.getElementById('filterChips').addEventListener('click', e => {
+    const btn = e.target.closest('.fchip');
+    if (!btn) return;
+    UI.setTableFilter(btn.dataset.filter);
+  });
+
+  document.getElementById('mainTbody').addEventListener('click', e => {
+    const btn = e.target.closest('.row-edit-btn');
+    if (!btn) return;
+    EditSystem.locateAndEdit(btn.dataset.editRuta, '', JSON.stringify([btn.dataset.editRowid]));
+  });
+
+  const btnGoFix = document.getElementById('btnGoFix');
+  if (btnGoFix) btnGoFix.addEventListener('click', () => goStep('fix'));
+
+  const handleFixCardClick = e => {
+    const confirmBtn = e.target.closest('.fix-confirm-btn');
+    if (confirmBtn) {
+      const ruta  = confirmBtn.dataset.confirmRuta;
+      const dette = confirmBtn.dataset.confirmDette;
+      if (!confirm(`¿Confirmas que la entrega ${dette || '—'} de la ruta ${ruta} NO se realizará?\n\nSe eliminará por completo del archivo final y del historial de Supabase — esta acción no se puede deshacer una vez exportado el día.`)) return;
+      Events.confirmExcludedDette(ruta, dette);
       return;
     }
-    if (!State.merged.length) return;
-    if (State.sveHasWarnings) {
-      WarnModal.show();
+    const addMarchBtn = e.target.closest('[data-fix-role="add-marchamo"]');
+    if (addMarchBtn) {
+      const card     = addMarchBtn.closest('.fix-card-marchamo');
+      const rowsWrap = card.querySelector('[data-fix-role="rows"]');
+      const slots    = JSON.parse(card.dataset.fixSlots || '[]');
+      const current  = rowsWrap.querySelectorAll('.fix-marchamo-row').length;
+      if (current >= slots.length) return;
+      const nextSlot = slots[current];
+      const row = document.createElement('div');
+      row.className = 'fix-marchamo-row';
+      row.dataset.slot = nextSlot;
+      row.innerHTML =
+        `<input class="fix-input fix-marchamo-input" data-field="${nextSlot}" placeholder="Número de marchamo…">` +
+        `<button type="button" class="fix-marchamo-remove" data-fix-role="remove-marchamo">✕</button>`;
+      rowsWrap.appendChild(row);
+      row.querySelector('input').focus();
+      if (current + 1 >= slots.length) addMarchBtn.disabled = true;
       return;
     }
-    Events.finalizeAndExport({ exportType: 'despacho', action: 'clean' });
-  },
-
-  handleForceExport() {
-    const ts   = new Date().toLocaleString('es-MX');
-    const user = State.user || 'desconocido';
-    const nc   = parseInt(document.getElementById('sveCrit').textContent || '0', 10);
-
-    document.getElementById('btnExport').disabled  = false;
-    const gate = document.getElementById('exportGate');
-    gate.classList.add('forced');
-    gate.innerHTML = `<div class="gate-msg"><strong style="color:var(--orange)">⚠ Exportación forzada registrada</strong><span>${ts} · ${user} · Calidad: ${State.sveLastQuality}% · ${nc} error${nc>1?'es':''} crítico${nc>1?'s':''}.</span></div>`;
-
-    Events.finalizeAndExport({ exportType: 'despacho', action: 'forced', critErrors: nc });
-  },
-
-  async finalizeAndExport(auditMeta = {}) {
-    if (!State.merged.length) return;
-    const ts   = new Date().toLocaleString('es-MX');
-    const user = State.user || 'desconocido';
-
-    // NUEVO (ago-2026 — "reabrir para corregir"): si esta exportación
-    // proviene de una sesión reabierta desde el Historial, se deja
-    // constancia de cuál — auditoría barata (una clave más en el mismo
-    // objeto meta que ya se guarda tal cual en dispatch_sessions.meta,
-    // ver dispatch-history.js) sin requerir ningún cambio de esquema.
-    if (State.reviewSessionId) auditMeta = { ...auditMeta, reopenedFrom: State.reviewSessionId };
-
-    State.sveAuditLog.push({ ts, user, action: (auditMeta.action || 'export').toUpperCase(), quality: State.sveLastQuality, ...auditMeta });
-    console.info('[SVE AUDIT]', State.sveAuditLog[State.sveAuditLog.length - 1]);
-
-    UI.setExportBusy(true);
-    try {
-      await DispatchHistory.finalizeSession(State.merged, { ...auditMeta, ts, user });
-    } catch (e) {
-      console.warn('[DispatchHistory] No se pudo guardar el historial:', e.message);
+    const removeMarchBtn = e.target.closest('[data-fix-role="remove-marchamo"]');
+    if (removeMarchBtn) {
+      const card = removeMarchBtn.closest('.fix-card-marchamo');
+      removeMarchBtn.closest('.fix-marchamo-row').remove();
+      const addBtn = card.querySelector('[data-fix-role="add-marchamo"]');
+      if (addBtn) addBtn.disabled = false;
+      return;
     }
-    UI.setExportBusy(false);
+    const saveMarchBtn = e.target.closest('[data-fix-role="save-marchamo"]');
+    if (saveMarchBtn) {
+      const card   = saveMarchBtn.closest('.fix-card-marchamo');
+      const inputs = card.querySelectorAll('.fix-marchamo-input');
+      const fields = {};
+      inputs.forEach(inp => { const val = inp.value.trim(); if (val) fields[inp.dataset.field] = val; });
+      if (!Object.keys(fields).length) {
+        const first = card.querySelector('.fix-marchamo-input');
+        if (first) { first.focus(); first.classList.add('fix-input-error'); }
+        return;
+      }
+      const rowIds = JSON.parse(card.dataset.fixRowids || '[]');
+      EditSystem.quickFixMulti(rowIds, fields);
+      return;
+    }
+    const saveBtn = e.target.closest('.fix-save');
+    if (saveBtn) {
+      const card  = saveBtn.closest('.fix-card');
+      const input = card.querySelector('.fix-input');
+      if (!input.value.trim()) { input.focus(); input.classList.add('fix-input-error'); return; }
+      const rowIds = JSON.parse(saveBtn.dataset.fixRowids || '[]');
+      EditSystem.quickFix(rowIds, saveBtn.dataset.fixKey, input.value);
+      return;
+    }
+    const reviewBtn = e.target.closest('.fix-review-btn');
+    if (reviewBtn) {
+      EditSystem.locateAndEdit(reviewBtn.dataset.locateRuta, reviewBtn.dataset.locateField, reviewBtn.dataset.locateIds || '[]');
+    }
+  };
+  document.getElementById('fixList').addEventListener('click', handleFixCardClick);
+  document.getElementById('fixInfoList').addEventListener('click', handleFixCardClick);
 
-    exportXLSX();
-    Events.refreshTodayBanner();
-    UI.showCelebrate();
-  },
+  const btnGoQuality = document.getElementById('btnGoQuality');
+  if (btnGoQuality) btnGoQuality.addEventListener('click', () => goStep('quality'));
+  document.getElementById('btnGoQualityHeader')?.addEventListener('click', () => goStep('quality'));
+  document.getElementById('btnFixContinue')?.addEventListener('click', () => goStep('export'));
 
-  async refreshTodayBanner() {
-    const session = await DispatchHistory.getTodaySession();
-    State.todaySession = session;
-    UI.renderTodayBanner(session);
-    UI.applyMode();
-  },
+  document.getElementById('btnCelebrateClose')?.addEventListener('click', () => {
+    UI.hideCelebrate();
+    goStep('prep');
+  });
 
-  _historySessions: [],
-  _currentHistorySession: null,
-  _currentHistoryRows: null,
+    document.getElementById('adminNav').addEventListener('click', e => {
+    const gotoBtn = e.target.closest('[data-admin-goto]');
+    if (gotoBtn) { goStep(gotoBtn.dataset.adminGoto); return; }
 
-  async openHistory() {
-    document.getElementById('historyModalOverlay').classList.remove('hidden');
+    const btn = e.target.closest('.admin-nav-item');
+    if (!btn) return;
+
+    // NUEVO — gate de contraseña para el panel Usuarios. Ver nota de
+    // cabecera junto a _usersPanelUnlocked/USERS_PANEL_PASSWORD.
+    if (btn.dataset.admin === 'users' && !_usersPanelUnlocked) {
+      const pass = prompt('Este panel está protegido. Ingresa la contraseña para continuar:');
+      if (pass === null) return; // canceló — no hace nada, no cambia de panel
+      if (pass !== USERS_PANEL_PASSWORD) { alert('Contraseña incorrecta.'); return; }
+      _usersPanelUnlocked = true;
+    }
+
+    document.querySelectorAll('.admin-nav-item').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.admin-panel').forEach(p => p.classList.toggle('active', p.dataset.adminPanel === btn.dataset.admin));
+    if (btn.dataset.admin === 'maint') Events.loadMaintenanceCenter();
+    if (btn.dataset.admin === 'users') refreshUsersAdmin();
+  });
+  document.getElementById('mcVentanaFile').addEventListener('change', function() {
+    Events.importMasterCatalog('ventanaRecibo', this.files[0]); this.value = '';
+  });
+  document.getElementById('mcPoolFile').addEventListener('change', function() {
+    Events.importMasterCatalog('poolReal', this.files[0]); this.value = '';
+  });
+
+  wireCatalogAdmin('ventanaRecibo', 'mcVentanaAdmin');
+  wireCatalogAdmin('poolReal', 'mcPoolAdmin');
+
+  document.getElementById('btnCatAdd').addEventListener('click',     () => Events.addCatalogEntry());
+  document.getElementById('catLicInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') Events.addCatalogEntry();
+  });
+  document.getElementById('catImportFile').addEventListener('change', function() {
+    Events.importCatalog(this.files[0]); this.value = '';
+  });
+  document.getElementById('catTbody').addEventListener('click', e => {
+    const btn = e.target.closest('.btn-del');
+    if (!btn) return;
+    Events.delOp(btn.dataset.delOp);
+  });
+
+  // ── Administración — Usuarios (NUEVO) ──
+  document.getElementById('btnUserAdd').addEventListener('click', async () => {
+    const username    = document.getElementById('userUsernameInput').value.trim();
+    const password    = document.getElementById('userPasswordInput').value;
+    const displayName = document.getElementById('userDisplayInput').value.trim();
+    const captureName = document.getElementById('userCaptureInput').value.trim();
+    if (!username || !password || !displayName || !captureName) {
+      UI.setUsersStatus('Completa todos los campos.', 'err'); return;
+    }
+    UI.setUsersStatus('Creando…', 'ok');
+    const result = await Auth.adminCreateUser(username, password, displayName, captureName);
+    if (!result.ok) {
+      UI.setUsersStatus(result.error === 'duplicate_username' ? 'Ese usuario ya existe.' : 'Error al crear usuario', 'err');
+      return;
+    }
+    ['userUsernameInput','userPasswordInput','userDisplayInput','userCaptureInput'].forEach(id => document.getElementById(id).value = '');
+    UI.setUsersStatus('✓ Usuario creado', 'ok');
+    await refreshUsersAdmin();
+  });
+  document.getElementById('usersTbody').addEventListener('click', async e => {
+    const toggleBtn = e.target.closest('[data-user-toggle]');
+    if (toggleBtn) {
+      const active = toggleBtn.dataset.userToggle === 'activate';
+      await Auth.adminSetActive(toggleBtn.dataset.userId, active);
+      await refreshUsersAdmin();
+      return;
+    }
+    const resetBtn = e.target.closest('[data-user-reset]');
+    if (resetBtn) {
+      const newPass = prompt('Nueva contraseña temporal para este usuario:');
+      if (!newPass) return;
+      await Auth.adminResetPassword(resetBtn.dataset.userId, newPass);
+      UI.setUsersStatus('✓ Contraseña restablecida', 'ok');
+    }
+  });
+
+  // ── Centro de Mantenimiento — resolver + captura rápida (sep-2026) ──
+  // Ver nota de cabecera "CAMBIO (sep-2026 — captura rápida...)".
+  const mcTbody = document.getElementById('mcOpenTbody');
+
+  /** Junta { columna: texto } de los inputs de captura de UNA incidencia. */
+  const collectFixValues = id => {
+    const values = {};
+    mcTbody.querySelectorAll(`[data-mc-fix-input="${CSS.escape(id)}"]`).forEach(inp => {
+      values[inp.dataset.mcCol] = inp.value;
+    });
+    return values;
+  };
+  const hasAnyValue = values => Object.values(values).some(v => String(v).trim());
+
+  mcTbody.addEventListener('click', e => {
+    const fixBtn = e.target.closest('[data-mc-fix-save]');
+    if (fixBtn) {
+      const id     = fixBtn.dataset.mcFixSave;
+      const values = collectFixValues(id);
+      if (!hasAnyValue(values)) {
+        mcTbody.querySelector(`[data-mc-fix-input="${CSS.escape(id)}"]`)?.focus();
+        return;
+      }
+      Events.saveMaintenanceFix(id, values);
+      return;
+    }
+    const btn = e.target.closest('[data-mc-resolve]');
+    if (!btn) return;
+    if (!confirm('¿Marcar esta incidencia como resuelta manualmente? Esta acción no se puede deshacer.')) return;
+    Events.resolveIncident(btn.dataset.mcResolve);
+  });
+  mcTbody.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const inp = e.target.closest('[data-mc-fix-input]');
+    if (!inp) return;
+    const id     = inp.dataset.mcFixInput;
+    const values = collectFixValues(id);
+    if (hasAnyValue(values)) Events.saveMaintenanceFix(id, values);
+  });
+  document.getElementById('btnMcSaveAll')?.addEventListener('click', () => {
+    const ids = [...new Set([...mcTbody.querySelectorAll('[data-mc-fix-input]')].map(inp => inp.dataset.mcFixInput))];
+    const entries = ids
+      .map(id => ({ id, values: collectFixValues(id) }))
+      .filter(en => hasAnyValue(en.values));
+    Events.saveAllMaintenanceFixes(entries);
+  });
+  document.getElementById('btnMcToggleResolved').addEventListener('click', () => Events.toggleResolvedIncidents());
+
+  document.getElementById('btnHistoryOpenAdmin')?.addEventListener('click', () => Events.openHistory());
+  document.getElementById('btnOpenSettingsAdmin')?.addEventListener('click', () => UI.openModal());
+
+  document.getElementById('btnCacheHistClear').addEventListener('click', async () => {
+    if (!confirm('¿Eliminar todo el caché histórico de facturas? Esta acción no se puede deshacer.')) return;
+    await FactCache.clear();
+    await FactCache.clearLog();
+    UI.renderCacheHistory();
+  });
+
+  document.getElementById('wmReview').addEventListener('click', () => WarnModal.review());
+  document.getElementById('wmExport').addEventListener('click', () => WarnModal.exportAnyway());
+  document.getElementById('warnModalOverlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('warnModalOverlay')) WarnModal.close();
+  });
+
+  document.getElementById('rpOptions').addEventListener('click', e => {
+    const opt = e.target.closest('.route-picker-opt');
+    if (!opt) return;
+    RoutePicker._pick(opt.dataset.rowid);
+  });
+  document.getElementById('rpCancel').addEventListener('click', () => RoutePicker.close());
+  document.getElementById('routePickerOverlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('routePickerOverlay')) RoutePicker.close();
+  });
+
+  document.getElementById('btnEditSave').addEventListener('click',   () => EditSystem.saveAndRevalidate());
+  document.getElementById('btnEditCancel').addEventListener('click', () => EditSystem.close());
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { EditSystem.close(); WarnModal.close(); RoutePicker.close(); UI.closeModal(); }
+  });
+
+  document.getElementById('btnHistoryOpen').addEventListener('click', () => Events.openHistory());
+  document.getElementById('btnHistoryClose').addEventListener('click', () =>
+    document.getElementById('historyModalOverlay').classList.add('hidden'));
+  document.getElementById('historyModalOverlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('historyModalOverlay')) document.getElementById('historyModalOverlay').classList.add('hidden');
+  });
+  document.getElementById('historyList').addEventListener('click', e => {
+    const item = e.target.closest('[data-session-id]');
+    if (!item) return;
+    Events.selectHistorySession(item.dataset.sessionId);
+  });
+  document.getElementById('btnHistoryBack').addEventListener('click', () => {
     document.getElementById('historyListView').style.display = '';
     document.getElementById('historyPreviewView').style.display = 'none';
-    Events._historySessions = await DispatchHistory.listSessions(50);
-    UI.renderHistoryList(Events._historySessions);
-  },
+  });
+  document.getElementById('btnHistoryRedownload').addEventListener('click', () => Events.redownloadHistorySession());
 
-  async selectHistorySession(sessionId) {
-    const session = Events._historySessions.find(s => s.id === sessionId);
-    if (!session || session.status !== 'completed') return;
-    const rows = await DispatchHistory.getSessionRows(sessionId);
-    Events._currentHistorySession = session;
-    Events._currentHistoryRows    = rows;
-    document.getElementById('historyListView').style.display = 'none';
-    document.getElementById('historyPreviewView').style.display = '';
-    UI.renderHistoryPreview(rows, session);
-  },
+  document.getElementById('btnHistoryReopen')?.addEventListener('click', async () => {
+    if (!Events._currentHistorySession) return;
+    await Events.reopenSession(Events._currentHistorySession.id);
+    document.getElementById('historyModalOverlay').classList.add('hidden');
+    goStep('fix');
+  });
 
-  redownloadHistorySession() {
-    if (!Events._currentHistoryRows || !Events._currentHistorySession) return;
-    exportXLSX(Events._currentHistoryRows, 'despacho', Events._currentHistorySession.session_date);
-  },
+  document.getElementById('btnTodayPreview').addEventListener('click', () => Events.previewTodaySession());
+  document.getElementById('btnTodayRedownload').addEventListener('click', () => Events.redownloadToday());
 
-  /**
-   * Reabre una sesión completada del Historial para seguir corrigiéndola
-   * — NUEVO (ago-2026, "reabrir para corregir"). Ver nota de cabecera de
-   * este archivo para el contexto completo de la decisión.
-   *
-   * Carga las filas ya mergeadas de esa sesión directamente en
-   * State.merged (mismo shape que produce runMerge() —
-   * DispatchHistory.getSessionRows() las devuelve tal cual se
-   * guardaron, _rowId incluido — así que EditSystem/UI las consumen sin
-   * ningún cambio) y marca State.reviewSessionId para que
-   * Events.checkSources() no exija las 4 fuentes crudas (ver nota de
-   * cabecera de ese método).
-   *
-   * NO llama a runMerge() — no hay nada que cruzar, el resultado del
-   * cruce ya es lo que se está cargando. Corre el SVE de inmediato
-   * (sin screenCount — la regla K se salta automáticamente, correcto:
-   * no hay Excel crudo contra qué comparar) para que Correcciones/
-   * Calidad/Exportación reflejen el estado real sin esperar a otra
-   * acción del usuario.
-   *
-   * @param {string} sessionId
-   * @returns {Promise<void>}
-   */
-  async reopenSession(sessionId) {
-    const rows = await DispatchHistory.getSessionRows(sessionId);
-    if (!rows.length) return;
+  UI.setActionsEnabled(false);
+  UI.resetFixPeak();
+  UI.resetQualityBaseline();
+  UI.updatePrepView(['PDFs de cargas','Excel macro (RUTEO NUEVO)',"Status de despacho (RUTA + ID'S MASTER)",'Reporte WTMS']);
+  UI.renderTable();
+  UI.renderFixList();
+  UI.renderQualityScreen();
+  UI.renderExportScreen();
+  UI.updateHealthRail();
+  UI.applyMode();
 
-    State.merged = rows;
-    State.reviewSessionId = sessionId;
+  UI.setCatStatus('Cargando catálogo…', 'ok');
+  const catResult = await initCatalog();
+  UI.renderCatalog();
+  UI.setCatStatus(catResult.msg, catResult.ok ? 'ok' : 'err');
 
-    UI.resetFixPeak();
-    UI.resetQualityBaseline();
-    UI.updatePrepView([]);
-    UI.renderTable();
-    UI.updateStats();
-    UI.setActionsEnabled(true);
+  await CatalogStore.loadAll();
+  UI.renderCatalogMasterStatus('ventanaRecibo');
+  UI.renderCatalogMasterStatus('poolReal');
+  UI.renderCatalogAdmin('ventanaRecibo');
+  UI.renderCatalogAdmin('poolReal');
 
-    const sveResult = runSVE(State.merged);
-    if (sveResult) {
-      State.sveIssues = sveResult.issues;
-      UI.renderSVE(sveResult.issues, sveResult.quality, sveResult.nCrit, sveResult.nWarn, sveResult.nInfo, sveResult.nPass);
-    } else {
-      State.sveIssues = [];
-      UI.resetSVE();
-    }
-    UI.renderTable();
-    UI.renderFixList();
-    UI.renderQualityScreen();
-    UI.renderExportScreen();
-    UI.updateHealthRail();
-    UI.applyMode();
-  },
+  const todaySession = await DispatchHistory.getTodaySession();
+  State.todaySession = todaySession;
+  UI.renderTodayBanner(todaySession);
+  UI.applyMode();
 
-  async previewTodaySession() {
-    const session = await DispatchHistory.getTodaySession();
-    if (!session) return;
-    document.getElementById('historyModalOverlay').classList.remove('hidden');
-    document.getElementById('historyListView').style.display = 'none';
-    document.getElementById('historyPreviewView').style.display = '';
-    const rows = await DispatchHistory.getSessionRows(session.id);
-    Events._currentHistorySession = session;
-    Events._currentHistoryRows    = rows;
-    UI.renderHistoryPreview(rows, session);
-  },
+  // First-run/nameModal de nombre libre — RETIRADO. La identidad ahora
+  // se resuelve por completo en el flujo de auth, antes de llegar aquí.
+}
 
-  async redownloadToday() {
-    const session = await DispatchHistory.getTodaySession();
-    if (!session) return;
-    const rows = await DispatchHistory.getSessionRows(session.id);
-    exportXLSX(rows, 'despacho', session.session_date);
-  },
-
-  async addCatalogEntry() {
-    const op  = document.getElementById('catOpInput').value.trim();
-    const lic = document.getElementById('catLicInput').value.trim();
-    if (!op || !lic) { UI.setCatStatus('Completa ambos campos', 'err'); return; }
-    UI.setCatStatus('Guardando…', 'ok');
-    const result = await addOperator(op, lic);
-    document.getElementById('catOpInput').value  = '';
-    document.getElementById('catLicInput').value = '';
-    document.getElementById('catOpInput').focus();
-    UI.renderCatalog();
-    UI.setCatStatus(result.msg, result.cls);
-    if (result.ok && State.merged.length) Events.triggerMerge();
-  },
-
-  async delOp(op) {
-    UI.setCatStatus('Eliminando…', 'ok');
-    const result = await deleteOperator(op);
-    UI.renderCatalog();
-    UI.setCatStatus(result.msg, result.cls);
-    if (result.ok && State.merged.length) Events.triggerMerge();
-  },
-
-  async importCatalog(file) {
-    if (!file) return;
-    UI.setCatStatus('Importando…', 'ok');
-    try {
-      const buf  = await file.arrayBuffer();
-      const wb   = XLSX.read(buf, { type: 'array' });
-      const ws   = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-      const keys = Object.keys(rows[0] || {});
-      const kOp  = keys.find(k => /OPER|NOMBRE|NAME/i.test(k)) || keys[0];
-      const kLic = keys.find(k => /LIC/i.test(k)) || keys[1];
-      const entries = rows
-        .map(r => ({ op: String(r[kOp] || '').trim(), lic: String(r[kLic] || '').trim() }))
-        .filter(e => e.op && e.lic);
-
-      const result = await importOperators(entries);
-      UI.renderCatalog();
-      UI.setCatStatus(result.msg, result.cls);
-      if (result.ok && State.merged.length) Events.triggerMerge();
-    } catch (e) { UI.setCatStatus('Error: ' + e.message, 'err'); }
-  },
-
-  // ═══════════════════════════════════════════════════════════════
-  // ── CENTRO DE MANTENIMIENTO (Fase 2, jul-2026) ──
-  // ═══════════════════════════════════════════════════════════════
-
-  /**
-   * Última lista de incidencias abiertas cargada por
-   * loadMaintenanceCenter() — NUEVO (sep-2026). Permite resolver
-   * id → incidencia completa (source_id/key_name/key_value) al guardar
-   * una captura rápida, sin volver a consultar Supabase.
-   */
-  _maintIncidents: [],
-
-  /**
-   * Carga las incidencias abiertas (ya ordenadas por prioridad, ver
-   * IncidentStore.listOpen()) y las pinta en el panel de
-   * Administración → Centro de Mantenimiento. Se llama cada vez que el
-   * usuario entra a ese sub-panel (ver app.js → adminNav listener) —
-   * los datos pueden haber cambiado desde la última corrida de merge,
-   * así que se refresca en cada visita en vez de cachear.
-   *
-   * NOTA (Fase 0, ago-2026): esta lista ahora también puede incluir
-   * incidencias de tipo 'cita_unrecognized' (ver
-   * features/incidents/incident-types.js) — IncidentStore.listOpen()
-   * sin filtro de `type` ya las trae junto con 'catalog_miss', sin
-   * ningún cambio necesario aquí.
-   */
-  async loadMaintenanceCenter() {
-    UI.setMaintenanceStatus('Cargando…', 'ok');
-    try {
-      const incidents = await IncidentStore.listOpen();
-      Events._maintIncidents = incidents;
-      UI.renderMaintenanceCenter(incidents);
-      UI.setMaintenanceStatus('', '');
-    } catch (e) {
-      UI.setMaintenanceStatus('Error: ' + e.message, 'err');
-    }
-  },
-
-  /**
-   * Marca una incidencia como resuelta manualmente (el usuario sabe
-   * que ya no va a repetirse aunque el sistema no lo detecte todavía —
-   * ej. corrección pendiente en el próximo Excel) y refresca el panel.
-   * @param {string} id — uuid de la incidencia en admin_incidents
-   */
-  async resolveIncident(id) {
-    UI.setMaintenanceStatus('Resolviendo…', 'ok');
-    try {
-      await IncidentStore.resolveManually(id, State.user);
-      await Events.loadMaintenanceCenter();
-    } catch (e) {
-      UI.setMaintenanceStatus('Error: ' + e.message, 'err');
-    }
-  },
-
-  /**
-   * Captura rápida de UNA incidencia de registro faltante en catálogo
-   * (placas de tractor/remolque en Pool Real, formato/tienda/estado en
-   * Ventana de Recibo) — NUEVO (sep-2026). Ver nota de cabecera de este
-   * archivo y features/incidents/inline-fix.js.
-   * @param {string} id — uuid de la incidencia en admin_incidents
-   * @param {Object<string,string>} values — { columnaCanonica: texto } capturado en la fila
-   */
-  async saveMaintenanceFix(id, values) {
-    const inc = Events._maintIncidents.find(i => i.id === id);
-    if (!inc) return;
-    UI.setMaintenanceStatus('Guardando…', 'ok');
-    try {
-      await saveInlineFix(inc, values, State.user);
-      UI.renderCatalogAdmin(inc.source_id);
-      UI.renderCatalogMasterStatus(inc.source_id);
-      if (State.merged.length) Events.triggerMerge();
-      await Events.loadMaintenanceCenter();
-      UI.setMaintenanceStatus('✓ Registro guardado', 'ok');
-    } catch (e) {
-      UI.setMaintenanceStatus(e.message, 'err');
-    }
-  },
-
-  /**
-   * Guardado por lote de varias capturas rápidas — NUEVO (sep-2026).
-   * Procesa en secuencia (un error en una fila no detiene a las demás)
-   * y dispara el merge UNA sola vez al final, no por incidencia.
-   * @param {Array<{id:string, values:Object<string,string>}>} entries
-   */
-  async saveAllMaintenanceFixes(entries) {
-    if (!entries.length) { UI.setMaintenanceStatus('No hay capturas pendientes de guardar.', 'err'); return; }
-    UI.setMaintenanceStatus(`Guardando ${entries.length} registro${entries.length > 1 ? 's' : ''}…`, 'ok');
-    let okCount = 0;
-    const errors = [];
-    for (const { id, values } of entries) {
-      const inc = Events._maintIncidents.find(i => i.id === id);
-      if (!inc) continue;
-      try { await saveInlineFix(inc, values, State.user); okCount++; }
-      catch (e) { errors.push(`${inc.key_value}: ${e.message}`); }
-    }
-    ['ventanaRecibo', 'poolReal'].forEach(cid => {
-      UI.renderCatalogAdmin(cid);
-      UI.renderCatalogMasterStatus(cid);
-    });
-    if (okCount && State.merged.length) Events.triggerMerge();
-    await Events.loadMaintenanceCenter();
-    if (errors.length) {
-      UI.setMaintenanceStatus(`✓ ${okCount} guardado(s) · ${errors.length} con error — ${errors[0]}`, 'err');
-    } else {
-      UI.setMaintenanceStatus(`✓ ${okCount} registro${okCount > 1 ? 's' : ''} guardado${okCount > 1 ? 's' : ''}`, 'ok');
-    }
-  },
-
-  /**
-   * Muestra/oculta la sección colapsable de incidencias resueltas.
-   * Se recarga desde Supabase cada vez que se abre (no se cachea) —
-   * mismo criterio que openHistory(): panel de baja frecuencia, el
-   * costo de una consulta extra es preferible a mostrar datos
-   * potencialmente obsoletos tras resolver una incidencia nueva.
-   */
-  async toggleResolvedIncidents() {
-    const wrap = document.getElementById('mcResolvedWrap');
-    if (!wrap) return;
-    const willShow = wrap.style.display === 'none';
-    wrap.style.display = willShow ? '' : 'none';
-    if (willShow) {
-      const resolved = await IncidentStore.listResolved();
-      UI.renderResolvedIncidents(resolved);
-    }
-  },
-
-  // ═══════════════════════════════════════════════════════════════
-  // ── ENTREGAS SIN PDF — confirmación de exclusión (jul-2026) ──
-  // ═══════════════════════════════════════════════════════════════
-
-  /**
-   * Confirma que una entrega sin PDF NO se va a realizar (ej. se quedó
-   * por ocupación) — la agrega a State.excludedDettes y dispara un
-   * nuevo merge. La entrega desaparece POR COMPLETO de State.merged
-   * (ver processors/merge.js) y por lo tanto de la tabla, el SVE, el
-   * Excel exportado y el historial de Supabase — los tres leen
-   * State.merged directamente, no requieren ningún filtro adicional.
-   * La confirmación del usuario (diálogo nativo) vive en el listener
-   * del DOM (ver core/app.js), no aquí — mismo patrón que
-   * deleteCatalogRow()/resolveIncident(): Events recibe la decisión ya
-   * tomada y solo ejecuta el efecto.
-   * @param {string} ruta
-   * @param {string} dette
-   */
-  confirmExcludedDette(ruta, dette) {
-    if (!ruta || !dette) return;
-    State.excludedDettes.add(String(ruta).trim() + '||' + String(dette).trim());
-    Events.triggerMerge();
-  }
-};
+async function refreshUsersAdmin() {
+  const users = await Auth.adminListUsers();
+  UI.renderUsersAdmin(users);
+}
