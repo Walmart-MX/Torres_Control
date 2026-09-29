@@ -454,7 +454,7 @@ showAuthFull() {
   appendSourceNote(key, note) {
     const sub = document.getElementById(key + 'Sub');
     if (!sub || !note) return;
-    sub.innerHTML += ` · <span style="color:var(--amber-deep)">${note}</span>`;
+    sub.innerHTML += ` · <span style="color:var(--amber-ink)">${note}</span>`;
   },
 
   /**

@@ -579,7 +579,7 @@ async function continueInit() {
     if (newPassword) {
       const pwResult = await Auth.changePassword(currentPassword, newPassword);
       if (!pwResult.ok) {
-        statusEl.textContent = 'Nombre guardado, pero no se pudo cambiar la contraseña.'; statusEl.style.color = 'var(--amber-deep)'; return;
+        statusEl.textContent = 'Nombre guardado, pero no se pudo cambiar la contraseña.'; statusEl.style.color = 'var(--amber-ink)'; return;
       }
     }
     UI.setUser(State.currentUser);
