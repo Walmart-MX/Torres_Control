@@ -148,6 +148,21 @@
  *   sin ninguna llamada a Events — la tarjeta ya se actualiza sola
  *   desde Events.triggerMerge().
  *
+ * CAMBIO (sep-2026 — captura rápida en el Centro de Mantenimiento):
+ *   El listener delegado de #mcOpenTbody (antes solo resolvía
+ *   incidencias con [data-mc-resolve]) gana dos ramas: el botón ✓ de
+ *   captura rápida ([data-mc-fix-save], junta los inputs
+ *   [data-mc-fix-input] de ESA fila y llama a
+ *   Events.saveMaintenanceFix()) y la tecla Enter dentro de cualquiera
+ *   de esos inputs (mismo efecto). Se agrega además el listener de
+ *   #btnMcSaveAll, que junta TODAS las filas con algo capturado y las
+ *   guarda por lote vía Events.saveAllMaintenanceFixes(). Una fila con
+ *   campos obligatorios incompletos no se descarta en silencio: llega a
+ *   Events y la validación de features/incidents/inline-fix.js reporta
+ *   qué falta. Ver ui.js → renderMaintenanceCenter() para el HTML de
+ *   cada celda de captura y features/incidents/inline-fix.js para la
+ *   tabla de campos (INLINE_FIX).
+ *
  * Dependencias: todos los módulos de la aplicación.
  */
 import { Auth } from '../features/auth.js';
@@ -728,11 +743,51 @@ async function continueInit() {
     }
   });
 
-  document.getElementById('mcOpenTbody').addEventListener('click', e => {
+  // ── Centro de Mantenimiento — resolver + captura rápida (sep-2026) ──
+  // Ver nota de cabecera "CAMBIO (sep-2026 — captura rápida...)".
+  const mcTbody = document.getElementById('mcOpenTbody');
+
+  /** Junta { columna: texto } de los inputs de captura de UNA incidencia. */
+  const collectFixValues = id => {
+    const values = {};
+    mcTbody.querySelectorAll(`[data-mc-fix-input="${CSS.escape(id)}"]`).forEach(inp => {
+      values[inp.dataset.mcCol] = inp.value;
+    });
+    return values;
+  };
+  const hasAnyValue = values => Object.values(values).some(v => String(v).trim());
+
+  mcTbody.addEventListener('click', e => {
+    const fixBtn = e.target.closest('[data-mc-fix-save]');
+    if (fixBtn) {
+      const id     = fixBtn.dataset.mcFixSave;
+      const values = collectFixValues(id);
+      if (!hasAnyValue(values)) {
+        mcTbody.querySelector(`[data-mc-fix-input="${CSS.escape(id)}"]`)?.focus();
+        return;
+      }
+      Events.saveMaintenanceFix(id, values);
+      return;
+    }
     const btn = e.target.closest('[data-mc-resolve]');
     if (!btn) return;
     if (!confirm('¿Marcar esta incidencia como resuelta manualmente? Esta acción no se puede deshacer.')) return;
     Events.resolveIncident(btn.dataset.mcResolve);
+  });
+  mcTbody.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const inp = e.target.closest('[data-mc-fix-input]');
+    if (!inp) return;
+    const id     = inp.dataset.mcFixInput;
+    const values = collectFixValues(id);
+    if (hasAnyValue(values)) Events.saveMaintenanceFix(id, values);
+  });
+  document.getElementById('btnMcSaveAll')?.addEventListener('click', () => {
+    const ids = [...new Set([...mcTbody.querySelectorAll('[data-mc-fix-input]')].map(inp => inp.dataset.mcFixInput))];
+    const entries = ids
+      .map(id => ({ id, values: collectFixValues(id) }))
+      .filter(en => hasAnyValue(en.values));
+    Events.saveAllMaintenanceFixes(entries);
   });
   document.getElementById('btnMcToggleResolved').addEventListener('click', () => Events.toggleResolvedIncidents());
 
