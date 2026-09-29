@@ -66,8 +66,8 @@
  *   descuente del conteo esperado las entregas excluidas confirmadas en
  *   ESTA corrida de runMerge() (ver processors/merge.js), evitando una
  *   alerta crítica falsa cuando la diferencia se explica por completo
- *   por una exclusión legítima (ej. DETTE cancelada y confirmada por el
- *   usuario). No cambia ningún otro comportamiento de triggerMerge().
+ *   por una exclusión legítima (ej. DETTE cancelada y confirmada). No
+ *   cambia ningún otro comportamiento de triggerMerge().
  *
  * FIX DE INTEGRIDAD DE DATOS (jul-2026) — handlePDFs():
  *   Antes se indexaba SIEMPRE `ruta + '|' + r.factura` y
@@ -163,6 +163,21 @@
  *   informativo — no participa en runMerge()/runSVE() ni en el gate de
  *   exportación, ver features/source-check.js para el detalle completo
  *   de diseño.
+ *
+ * CAMBIO (sep-2026 — captura rápida en el Centro de Mantenimiento):
+ *   Se agregan saveMaintenanceFix()/saveAllMaintenanceFixes() y la
+ *   propiedad Events._maintIncidents (última lista cargada por
+ *   loadMaintenanceCenter(), para resolver id → incidencia sin volver a
+ *   consultar Supabase). Permiten resolver una incidencia de registro
+ *   faltante en catálogo escribiendo los datos junto al valor faltante
+ *   (placas de tractor/remolque en Pool Real, formato/tienda/estado en
+ *   Ventana de Recibo) — la validación, el alta en el catálogo y el
+ *   cierre de la incidencia viven en features/incidents/inline-fix.js
+ *   (ver su cabecera y su tabla INLINE_FIX); este módulo solo
+ *   orquesta: llama a saveInlineFix(), refresca la UI de los catálogos
+ *   afectados, re-dispara el merge para que el dato aparezca de
+ *   inmediato en el archivo, y recarga el panel. En el guardado por
+ *   lote el merge se dispara UNA sola vez al final, no por incidencia.
  */
 import { State } from '../core/state.js';
 import { normOp } from '../utils/format.js';
@@ -183,6 +198,7 @@ import { DispatchHistory } from '../features/dispatch-history.js';
 import { CatalogStore } from '../features/catalogs/catalog-store.js';
 import { IncidentStore } from '../features/incidents/incident-store.js';
 import { INCIDENT_TYPES } from '../features/incidents/incident-types.js';
+import { saveInlineFix } from '../features/incidents/inline-fix.js';
 import { compareExcelPdf } from '../features/source-check.js';
 
 export const Events = {
@@ -719,6 +735,14 @@ export const Events = {
   // ═══════════════════════════════════════════════════════════════
 
   /**
+   * Última lista de incidencias abiertas cargada por
+   * loadMaintenanceCenter() — NUEVO (sep-2026). Permite resolver
+   * id → incidencia completa (source_id/key_name/key_value) al guardar
+   * una captura rápida, sin volver a consultar Supabase.
+   */
+  _maintIncidents: [],
+
+  /**
    * Carga las incidencias abiertas (ya ordenadas por prioridad, ver
    * IncidentStore.listOpen()) y las pinta en el panel de
    * Administración → Centro de Mantenimiento. Se llama cada vez que el
@@ -736,6 +760,7 @@ export const Events = {
     UI.setMaintenanceStatus('Cargando…', 'ok');
     try {
       const incidents = await IncidentStore.listOpen();
+      Events._maintIncidents = incidents;
       UI.renderMaintenanceCenter(incidents);
       UI.setMaintenanceStatus('', '');
     } catch (e) {
@@ -756,6 +781,60 @@ export const Events = {
       await Events.loadMaintenanceCenter();
     } catch (e) {
       UI.setMaintenanceStatus('Error: ' + e.message, 'err');
+    }
+  },
+
+  /**
+   * Captura rápida de UNA incidencia de registro faltante en catálogo
+   * (placas de tractor/remolque en Pool Real, formato/tienda/estado en
+   * Ventana de Recibo) — NUEVO (sep-2026). Ver nota de cabecera de este
+   * archivo y features/incidents/inline-fix.js.
+   * @param {string} id — uuid de la incidencia en admin_incidents
+   * @param {Object<string,string>} values — { columnaCanonica: texto } capturado en la fila
+   */
+  async saveMaintenanceFix(id, values) {
+    const inc = Events._maintIncidents.find(i => i.id === id);
+    if (!inc) return;
+    UI.setMaintenanceStatus('Guardando…', 'ok');
+    try {
+      await saveInlineFix(inc, values, State.user);
+      UI.renderCatalogAdmin(inc.source_id);
+      UI.renderCatalogMasterStatus(inc.source_id);
+      if (State.merged.length) Events.triggerMerge();
+      await Events.loadMaintenanceCenter();
+      UI.setMaintenanceStatus('✓ Registro guardado', 'ok');
+    } catch (e) {
+      UI.setMaintenanceStatus(e.message, 'err');
+    }
+  },
+
+  /**
+   * Guardado por lote de varias capturas rápidas — NUEVO (sep-2026).
+   * Procesa en secuencia (un error en una fila no detiene a las demás)
+   * y dispara el merge UNA sola vez al final, no por incidencia.
+   * @param {Array<{id:string, values:Object<string,string>}>} entries
+   */
+  async saveAllMaintenanceFixes(entries) {
+    if (!entries.length) { UI.setMaintenanceStatus('No hay capturas pendientes de guardar.', 'err'); return; }
+    UI.setMaintenanceStatus(`Guardando ${entries.length} registro${entries.length > 1 ? 's' : ''}…`, 'ok');
+    let okCount = 0;
+    const errors = [];
+    for (const { id, values } of entries) {
+      const inc = Events._maintIncidents.find(i => i.id === id);
+      if (!inc) continue;
+      try { await saveInlineFix(inc, values, State.user); okCount++; }
+      catch (e) { errors.push(`${inc.key_value}: ${e.message}`); }
+    }
+    ['ventanaRecibo', 'poolReal'].forEach(cid => {
+      UI.renderCatalogAdmin(cid);
+      UI.renderCatalogMasterStatus(cid);
+    });
+    if (okCount && State.merged.length) Events.triggerMerge();
+    await Events.loadMaintenanceCenter();
+    if (errors.length) {
+      UI.setMaintenanceStatus(`✓ ${okCount} guardado(s) · ${errors.length} con error — ${errors[0]}`, 'err');
+    } else {
+      UI.setMaintenanceStatus(`✓ ${okCount} registro${okCount > 1 ? 's' : ''} guardado${okCount > 1 ? 's' : ''}`, 'ok');
     }
   },
 
