@@ -1,7 +1,17 @@
 /**
  * processors/excel.js
  * Lectura del Excel macro: hoja RUTEO NUEVO (rutas del día) y hoja
- * CONCENTRADO FACTURAS (datos de facturación) si existe.
+ * CONCENTRADO FACTURAS (datos de facturación).
+ *
+ * CAMBIO (sep-2026 — concentrado de facturas OBLIGATORIO):
+ *   Antes, si el Excel no traía la hoja CONCENTRADO FACTURAS (o la hoja
+ *   no tenía una columna de invoice reconocible, o venía vacía),
+ *   processXLS() lo aceptaba igual y solo dejaba una etiqueta de estado
+ *   ("sin hoja CONCENTRADO FACTURAS"). Ahora los tres casos lanzan un
+ *   Error explícito. Los throws ocurren ANTES de que
+ *   events.js → handleXLS() asigne State.xlsData/State.factData, así que
+ *   un intento fallido NUNCA pisa un Excel válido cargado antes (importa
+ *   para el modo "Reemplazar fuentes" de Preparación).
  *
  * AJUSTE (jul-2026 — FECHA del archivo final, CUARTO intento, causa
  * raíz confirmada con diagnóstico en consola):
@@ -46,8 +56,8 @@ import { formatFactDate } from '../utils/format.js';
  *   - rows: array de rows de la hoja RUTEO NUEVO (o la primera hoja si no
  *     se encuentra un nombre coincidente)
  *   - factData: Map invoice# → { gls, horaFact }, leído de la hoja
- *     CONCENTRADO FACTURAS si existe y tiene una columna de invoice
- *     reconocible (INVOICE / FACTURA / FOLIO)
+ *     CONCENTRADO FACTURAS — OBLIGATORIA, con una columna de invoice
+ *     reconocible (INVOICE / FACTURA / FOLIO) y al menos una factura
  *
  * @param {File} file
  * @returns {Promise<{
@@ -56,6 +66,8 @@ import { formatFactDate } from '../utils/format.js';
  *   ruteoName: string,
  *   factSheetLabel: string
  * }>}
+ * @throws {Error} si falta la hoja de facturas, no tiene columna de
+ *   invoice reconocible, o no contiene ninguna factura
  */
 export async function processXLS(file) {
   const buf = await file.arrayBuffer();
@@ -130,35 +142,39 @@ export async function processXLS(file) {
     }
   }
 
+  // ── CONCENTRADO FACTURAS — OBLIGATORIO (sep-2026) ──
+  // Ver nota de cabecera. Cualquier throw de aquí en adelante ocurre
+  // antes de que el caller asigne State.xlsData/State.factData.
   const factName = wb.SheetNames.find(n =>
     SHEET_FACTURAS.some(s => n.toUpperCase().includes(s.toUpperCase()))
   );
-  const newFactData = new Map();
-  let factSheetLabel = '';
-
-  if (factName) {
-    const wsFact  = wb.Sheets[factName];
-    const rawFact = XLSX.utils.sheet_to_json(wsFact, { defval: '' });
-    const keys    = Object.keys(rawFact[0] || {});
-    const colInv  = keys.find(k => /INVOICE|FACTURA|FOLIO/i.test(k));
-    const colLoad = keys.find(k => /LOAD|GLS/i.test(k));
-    const colFin  = keys.find(k => /FINAL|HORA|FACTURACION|TS/i.test(k));
-    if (colInv) {
-      for (const r of rawFact) {
-        const inv = String(r[colInv] || '').trim();
-        if (!inv) continue;
-        newFactData.set(inv, {
-          gls:      colLoad ? String(r[colLoad] || '').trim() : '',
-          horaFact: colFin  ? formatFactDate(r[colFin])        : ''
-        });
-      }
-      factSheetLabel = `${newFactData.size} facturas (${factName})`;
-    } else {
-      factSheetLabel = 'hoja facturas sin columna INVOICE';
-    }
-  } else {
-    factSheetLabel = `sin hoja CONCENTRADO FACTURAS`;
+  if (!factName) {
+    throw new Error('El Excel macro no contiene la hoja CONCENTRADO FACTURAS — es obligatoria. Verifica el archivo.');
   }
+
+  const wsFact  = wb.Sheets[factName];
+  const rawFact = XLSX.utils.sheet_to_json(wsFact, { defval: '' });
+  const keys    = Object.keys(rawFact[0] || {});
+  const colInv  = keys.find(k => /INVOICE|FACTURA|FOLIO/i.test(k));
+  const colLoad = keys.find(k => /LOAD|GLS/i.test(k));
+  const colFin  = keys.find(k => /FINAL|HORA|FACTURACION|TS/i.test(k));
+  if (!colInv) {
+    throw new Error(`La hoja "${factName}" no tiene una columna INVOICE / FACTURA / FOLIO reconocible.`);
+  }
+
+  const newFactData = new Map();
+  for (const r of rawFact) {
+    const inv = String(r[colInv] || '').trim();
+    if (!inv) continue;
+    newFactData.set(inv, {
+      gls:      colLoad ? String(r[colLoad] || '').trim() : '',
+      horaFact: colFin  ? formatFactDate(r[colFin])        : ''
+    });
+  }
+  if (!newFactData.size) {
+    throw new Error(`La hoja "${factName}" no contiene facturas — el concentrado es obligatorio.`);
+  }
+  const factSheetLabel = `${newFactData.size} facturas (${factName})`;
 
   return { rows: raw, factData: newFactData, ruteoName, factSheetLabel };
 }
