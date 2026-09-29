@@ -156,6 +156,22 @@
  *   State.sveHasCritical/sveHasWarnings ni ningún otro estado que
  *   gobierne el gate de exportación.
  *
+ * CAMBIO (sep-2026 — captura rápida en el Centro de Mantenimiento):
+ *   renderMaintenanceCenter() gana una columna "Captura" (entre
+ *   "Detalle" y "Ocurrencias", ver index.html): para las incidencias
+ *   que admiten captura inline (getInlineFix(), features/incidents/
+ *   inline-fix.js — placas de tractor/remolque en Pool Real,
+ *   formato/tienda/estado en Ventana de Recibo) pinta un input por
+ *   cada campo de INLINE_FIX + un botón ✓; el resto de las incidencias
+ *   muestra "—". Los campos obligatorios llevan "*" en el placeholder y
+ *   los opcionales "(opc.)". Además, el detalle muestra las últimas
+ *   rutas afectadas, y antes de reconstruir la tabla se respalda lo que
+ *   el usuario ya escribió en los inputs (clave "id|columna") y se
+ *   restaura después — un refresh (guardar otra fila, recargar el
+ *   panel) ya no borra capturas en curso. UI no valida ni guarda nada
+ *   aquí: los listeners viven en core/app.js y la lógica en
+ *   features/incidents/inline-fix.js vía Events.
+ *
  * Dependencias:
  *   - State (core/state.js)
  *   - escH (utils/dom.js)
@@ -170,6 +186,8 @@
  *     pura de presentación para el Centro de Mantenimiento
  *   - INCIDENT_TYPES (features/incidents/incident-types.js) — describe()
  *     de cada incidencia para el Centro de Mantenimiento
+ *   - getInlineFix (features/incidents/inline-fix.js) — qué campos
+ *     capturar por incidencia (solo lectura de configuración)
  *   - Events (events/events.js) — resuelto en runtime vía _setEvents()
  */
 import { State } from '../core/state.js';
@@ -183,6 +201,7 @@ import { FactCache } from '../features/fact-cache.js';
 import { CATALOGS } from '../features/catalogs/catalog-registry.js';
 import { priorityTier } from '../features/incidents/incident-engine.js';
 import { INCIDENT_TYPES } from '../features/incidents/incident-types.js';
+import { getInlineFix } from '../features/incidents/inline-fix.js';
 
 let Events;
 /** Resuelve la dependencia circular UI ↔ Events — llamado una vez desde core/app.js */
@@ -1469,12 +1488,25 @@ showAuthFull() {
    * (IncidentStore.listOpen() la entrega así). La prioridad se
    * recalcula en cada lectura — nunca se persiste — por lo que siempre
    * refleja la antigüedad real al momento de abrir el panel.
+   *
+   * CAMBIO (sep-2026): columna "Captura" con inputs inline por
+   * incidencia (ver nota de cabecera "CAMBIO (sep-2026 — captura
+   * rápida...)") y respaldo/restauración de lo escrito entre refreshes.
    * @param {Array<object>} incidents — salida de IncidentStore.listOpen()
    */
   renderMaintenanceCenter(incidents) {
     const summaryEl = document.getElementById('mcSummary');
     const tbody     = document.getElementById('mcOpenTbody');
     if (!summaryEl || !tbody) return;
+
+    // Respaldo de lo que el usuario ya escribió en las celdas de
+    // captura — el refresh reconstruye la tabla completa y, sin esto,
+    // guardar UNA fila borraría las capturas en curso de las demás.
+    // Clave: "id|columna".
+    const draft = new Map();
+    tbody.querySelectorAll('[data-mc-fix-input]').forEach(inp => {
+      if (inp.value.trim()) draft.set(inp.dataset.mcFixInput + '|' + inp.dataset.mcCol, inp.value);
+    });
 
     // ── Tarjetas resumen — una por catálogo registrado, más el total ──
     const bySource = new Map();
@@ -1500,7 +1532,7 @@ showAuthFull() {
 
     // ── Tabla de incidencias abiertas ──
     if (!incidents.length) {
-      tbody.innerHTML = '<tr><td colspan="8"><div class="cat-empty">Sin incidencias abiertas — todos los catálogos están al día.</div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9"><div class="cat-empty">Sin incidencias abiertas — todos los catálogos están al día.</div></td></tr>';
       return;
     }
 
@@ -1512,11 +1544,28 @@ showAuthFull() {
       const desc   = type ? type.describe({ sourceId: inc.source_id, keyName: inc.key_name, keyValue: inc.key_value }) : `${inc.key_name}: ${inc.key_value}`;
       const routes = Object.keys(inc.affected_routes || {});
       const routesTitle = routes.slice(-10).join(', ');
+      const routesShort = routes.slice(-3).join(', ') + (routes.length > 3 ? ` +${routes.length - 3}` : '');
+
+      // Celda de captura rápida — solo para incidencias con configuración
+      // en INLINE_FIX (ver features/incidents/inline-fix.js).
+      const fix = getInlineFix(inc);
+      const fixCell = fix
+        ? `<div class="mc-fix">
+             ${fix.fields.map(f => `<input class="cat-input mc-fix-input" style="width:${f.width}px" maxlength="40" autocomplete="off"
+                 data-mc-fix-input="${escH(inc.id)}" data-mc-col="${escH(f.col)}"
+                 placeholder="${escH(f.placeholder)}${f.required ? ' *' : ' (opc.)'}"
+                 title="${escH(f.label)}${f.required ? ' — obligatorio' : ' — opcional'}">`).join('')}
+             <button class="btn btn-success btn-xs" data-mc-fix-save="${escH(inc.id)}" title="Guardar en el catálogo y resolver">✓</button>
+           </div>`
+        : '<span class="dim">—</span>';
+
       return `
         <tr>
           <td><span class="status-pill ${tier.cls}">${tier.label}</span></td>
           <td>${escH(CATALOGS[inc.source_id]?.label || inc.source_id)}</td>
-          <td class="td-op" title="${escH(desc)}">${escH(desc)}</td>
+          <td class="td-op" title="${escH(desc)}">${escH(desc)}
+            ${routes.length ? `<div class="mc-routes" title="${escH(routesTitle)}">Rutas: ${escH(routesShort)}</div>` : ''}</td>
+          <td>${fixCell}</td>
           <td>${inc.occurrence_count}</td>
           <td title="${escH(routesTitle)}">${inc.route_count}</td>
           <td>${fmtDateShort(inc.first_seen_at)}</td>
@@ -1524,6 +1573,12 @@ showAuthFull() {
           <td><button class="btn btn-ghost btn-xs" data-mc-resolve="${escH(inc.id)}">✓ Resolver</button></td>
         </tr>`;
     }).join('');
+
+    // Restaura lo que el usuario tenía escrito antes del refresh.
+    tbody.querySelectorAll('[data-mc-fix-input]').forEach(inp => {
+      const key = inp.dataset.mcFixInput + '|' + inp.dataset.mcCol;
+      if (draft.has(key)) inp.value = draft.get(key);
+    });
   },
 
   /**
