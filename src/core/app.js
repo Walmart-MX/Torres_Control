@@ -163,6 +163,20 @@
  *   cada celda de captura y features/incidents/inline-fix.js para la
  *   tabla de campos (INLINE_FIX).
  *
+ * CAMBIO (sep-2026 — "Reemplazar fuentes" por fuente, sin reiniciar todo):
+ *   #btnPrepReset (id conservado) ya NO llama a UI.resetAll(): ahora
+ *   entra al modo "Reemplazar fuentes" (UI.setPrepEditMode(true)), que
+ *   vuelve a mostrar la grilla de las 4 fuentes para recargar solo la
+ *   que se quiera — las demás se conservan. Si ya hay correcciones
+ *   manuales (State.edits), pide confirmación antes de entrar, porque
+ *   volver a cruzar (runMerge) reconstruye State.merged desde cero y
+ *   esas correcciones podrían perderse. Se agregan los listeners de
+ *   #btnPrepEditDone ("✓ Listo" → sale del modo) y
+ *   #btnPrepEditResetAll ("↺ Reiniciar las 4" → UI.resetAll() con
+ *   confirmación — el comportamiento anterior de #btnPrepReset). Ver
+ *   ui.js → setPrepEditMode()/updatePrepView()/_renderPdfTools() y
+ *   events.js → handlePDFs() para el resto del mecanismo.
+ *
  * Dependencias: todos los módulos de la aplicación.
  */
 import { Auth } from '../features/auth.js';
@@ -502,7 +516,23 @@ async function continueInit() {
   Events.setupDrop('dropWTMS', 'fileWTMS', Events.handleWTMS.bind(Events));
 
   document.getElementById('btnGoTable').addEventListener('click', () => goStep('fix'));
-  document.getElementById('btnPrepReset').addEventListener('click', () => UI.resetAll());
+
+  // ── "Reemplazar fuentes" (sep-2026) — ver nota de cabecera. El id
+  // #btnPrepReset se conserva, pero ya NO reinicia todo: entra al modo
+  // por fuente. Si hay correcciones manuales registradas, se pide
+  // confirmación porque volver a cruzar reconstruye State.merged desde
+  // cero (State.edits no se limpia tras un merge, así que el aviso
+  // puede aparecer aunque esas ediciones ya se hubieran perdido).
+  document.getElementById('btnPrepReset').addEventListener('click', () => {
+    if (State.edits.length &&
+        !confirm(`Ya hiciste ${State.edits.length} corrección(es) manual(es). Al reemplazar una fuente se vuelve a cruzar todo y esas correcciones podrían perderse. ¿Continuar?`)) return;
+    UI.setPrepEditMode(true);
+  });
+  document.getElementById('btnPrepEditDone')?.addEventListener('click', () => UI.setPrepEditMode(false));
+  document.getElementById('btnPrepEditResetAll')?.addEventListener('click', () => {
+    if (!confirm('¿Reiniciar las 4 fuentes? Se borrará todo lo cargado en esta sesión.')) return;
+    UI.resetAll();
+  });
 
   document.getElementById('btnParse').addEventListener('click',      () => Events.handlePaste());
   document.getElementById('btnPasteClear').addEventListener('click', () => Events.clearPaste());
