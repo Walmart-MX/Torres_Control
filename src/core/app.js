@@ -190,6 +190,8 @@ import { FactCache } from '../features/fact-cache.js';
 import { initCatalog } from '../features/catalog.js';
 import { DispatchHistory } from '../features/dispatch-history.js';
 import { CatalogStore } from '../features/catalogs/catalog-store.js';
+import { Autosave } from '../features/autosave.js';
+import { ConfirmDialog } from '../ui/confirm-dialog.js';
 
 // ── Stepper — navegación entre pantallas ──
 // CAMBIO (jul-2026 — simplificación del flujo, Etapa 4): STEPS baja de
@@ -261,7 +263,7 @@ function goStep(id) {
 function wireCatalogAdmin(catalogId, containerId) {
   const container = document.getElementById(containerId);
   if (!container) return;
-  container.addEventListener('click', e => {
+  container.addEventListener('click', async e => {
     const addBtn = e.target.closest('[data-mc-role="add"]');
     if (addBtn) {
       const inputs = container.querySelectorAll('[data-mc-field]');
@@ -282,7 +284,11 @@ function wireCatalogAdmin(catalogId, containerId) {
     if (delBtn) {
       const id = delBtn.dataset.mcDel;
       if (!id) return;
-      if (!confirm('¿Eliminar este registro del catálogo? Esta acción no se puede deshacer.')) return;
+      const ok = await ConfirmDialog.confirm({
+        title: '¿Eliminar este registro del catálogo?', body: 'Esta acción no se puede deshacer.',
+        confirmLabel: 'Eliminar', danger: true
+      });
+      if (!ok) return;
       Events.deleteCatalogRow(catalogId, id);
     }
   });
@@ -295,8 +301,9 @@ let _activityWired = false;
 let _pendingFirstLoginPassword = null;
 // NUEVO — protección simple del panel Administración → Usuarios.
 // Cortina de acceso, NO seguridad real (ver nota abajo): el panel de
-// gestión de cuentas es sensible pero de bajo tráfico — un prompt()
-// basta para evitar accesos accidentales o de personal no autorizado
+// gestión de cuentas es sensible pero de bajo tráfico — un diálogo de
+// contraseña (ConfirmDialog.prompt(), ver ui/confirm-dialog.js) basta
+// para evitar accesos accidentales o de personal no autorizado
 // casual. Se desbloquea una sola vez por sesión de navegador (no
 // persiste en localStorage — recargar vuelve a pedirla).
 let _usersPanelUnlocked = false;
@@ -465,6 +472,7 @@ function wireAuthForms() {
  * exitoso o sesión restaurada (login bloqueante, ver propuesta §17).
  */
 export async function init() {
+  ConfirmDialog._wire();
   _setRoutePicker(RoutePicker);
   _setEvents(Events);
   _setWarnModalEvents(Events);
@@ -523,14 +531,24 @@ async function continueInit() {
   // confirmación porque volver a cruzar reconstruye State.merged desde
   // cero (State.edits no se limpia tras un merge, así que el aviso
   // puede aparecer aunque esas ediciones ya se hubieran perdido).
-  document.getElementById('btnPrepReset').addEventListener('click', () => {
-    if (State.edits.length &&
-        !confirm(`Ya hiciste ${State.edits.length} corrección(es) manual(es). Al reemplazar una fuente se vuelve a cruzar todo y esas correcciones podrían perderse. ¿Continuar?`)) return;
+  document.getElementById('btnPrepReset').addEventListener('click', async () => {
+    if (State.edits.length) {
+      const ok = await ConfirmDialog.confirm({
+        title: `Ya hiciste ${State.edits.length} corrección(es) manual(es)`,
+        body: 'Al reemplazar una fuente se vuelve a cruzar todo y esas correcciones podrían perderse. ¿Continuar?',
+        confirmLabel: 'Continuar', danger: true
+      });
+      if (!ok) return;
+    }
     UI.setPrepEditMode(true);
   });
   document.getElementById('btnPrepEditDone')?.addEventListener('click', () => UI.setPrepEditMode(false));
-  document.getElementById('btnPrepEditResetAll')?.addEventListener('click', () => {
-    if (!confirm('¿Reiniciar las 4 fuentes? Se borrará todo lo cargado en esta sesión.')) return;
+  document.getElementById('btnPrepEditResetAll')?.addEventListener('click', async () => {
+    const ok = await ConfirmDialog.confirm({
+      title: '¿Reiniciar las 4 fuentes?', body: 'Se borrará todo lo cargado en esta sesión.',
+      confirmLabel: 'Reiniciar todo', danger: true
+    });
+    if (!ok) return;
     UI.resetAll();
   });
 
@@ -615,12 +633,17 @@ async function continueInit() {
   const btnGoFix = document.getElementById('btnGoFix');
   if (btnGoFix) btnGoFix.addEventListener('click', () => goStep('fix'));
 
-  const handleFixCardClick = e => {
+  const handleFixCardClick = async e => {
     const confirmBtn = e.target.closest('.fix-confirm-btn');
     if (confirmBtn) {
       const ruta  = confirmBtn.dataset.confirmRuta;
       const dette = confirmBtn.dataset.confirmDette;
-      if (!confirm(`¿Confirmas que la entrega ${dette || '—'} de la ruta ${ruta} NO se realizará?\n\nSe eliminará por completo del archivo final y del historial de Supabase — esta acción no se puede deshacer una vez exportado el día.`)) return;
+      const ok = await ConfirmDialog.confirm({
+        title: `¿Confirmas que la entrega ${dette || '—'} de la ruta ${ruta} NO se realizará?`,
+        body: 'Se eliminará por completo del archivo final y del historial de Supabase — esta acción no se puede deshacer una vez exportado el día.',
+        confirmLabel: 'Confirmar y eliminar', danger: true
+      });
+      if (!ok) return;
       Events.confirmExcludedDette(ruta, dette);
       return;
     }
@@ -693,7 +716,7 @@ async function continueInit() {
     goStep('prep');
   });
 
-    document.getElementById('adminNav').addEventListener('click', e => {
+    document.getElementById('adminNav').addEventListener('click', async e => {
     const gotoBtn = e.target.closest('[data-admin-goto]');
     if (gotoBtn) { goStep(gotoBtn.dataset.adminGoto); return; }
 
@@ -703,9 +726,15 @@ async function continueInit() {
     // NUEVO — gate de contraseña para el panel Usuarios. Ver nota de
     // cabecera junto a _usersPanelUnlocked/USERS_PANEL_PASSWORD.
     if (btn.dataset.admin === 'users' && !_usersPanelUnlocked) {
-      const pass = prompt('Este panel está protegido. Ingresa la contraseña para continuar:');
+      const pass = await ConfirmDialog.prompt({
+        title: 'Panel protegido', body: 'Ingresa la contraseña para continuar:',
+        placeholder: 'Contraseña', confirmLabel: 'Entrar'
+      });
       if (pass === null) return; // canceló — no hace nada, no cambia de panel
-      if (pass !== USERS_PANEL_PASSWORD) { alert('Contraseña incorrecta.'); return; }
+      if (pass !== USERS_PANEL_PASSWORD) {
+        await ConfirmDialog.alertMsg({ title: 'Contraseña incorrecta', body: 'Verifica e intenta de nuevo.' });
+        return;
+      }
       _usersPanelUnlocked = true;
     }
 
@@ -766,7 +795,10 @@ async function continueInit() {
     }
     const resetBtn = e.target.closest('[data-user-reset]');
     if (resetBtn) {
-      const newPass = prompt('Nueva contraseña temporal para este usuario:');
+      const newPass = await ConfirmDialog.prompt({
+        title: 'Restablecer contraseña', body: 'Nueva contraseña temporal para este usuario:',
+        placeholder: 'Nueva contraseña', confirmLabel: 'Guardar'
+      });
       if (!newPass) return;
       await Auth.adminResetPassword(resetBtn.dataset.userId, newPass);
       UI.setUsersStatus('✓ Contraseña restablecida', 'ok');
@@ -787,7 +819,7 @@ async function continueInit() {
   };
   const hasAnyValue = values => Object.values(values).some(v => String(v).trim());
 
-  mcTbody.addEventListener('click', e => {
+  mcTbody.addEventListener('click', async e => {
     const fixBtn = e.target.closest('[data-mc-fix-save]');
     if (fixBtn) {
       const id     = fixBtn.dataset.mcFixSave;
@@ -801,7 +833,11 @@ async function continueInit() {
     }
     const btn = e.target.closest('[data-mc-resolve]');
     if (!btn) return;
-    if (!confirm('¿Marcar esta incidencia como resuelta manualmente? Esta acción no se puede deshacer.')) return;
+    const ok = await ConfirmDialog.confirm({
+      title: '¿Marcar esta incidencia como resuelta?', body: 'Esta acción no se puede deshacer manualmente.',
+      confirmLabel: 'Marcar resuelta', danger: false
+    });
+    if (!ok) return;
     Events.resolveIncident(btn.dataset.mcResolve);
   });
   mcTbody.addEventListener('keydown', e => {
@@ -825,7 +861,11 @@ async function continueInit() {
   document.getElementById('btnOpenSettingsAdmin')?.addEventListener('click', () => UI.openModal());
 
   document.getElementById('btnCacheHistClear').addEventListener('click', async () => {
-    if (!confirm('¿Eliminar todo el caché histórico de facturas? Esta acción no se puede deshacer.')) return;
+    const ok = await ConfirmDialog.confirm({
+      title: '¿Eliminar todo el caché histórico de facturas?', body: 'Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar todo', danger: true
+    });
+    if (!ok) return;
     await FactCache.clear();
     await FactCache.clearLog();
     UI.renderCacheHistory();
@@ -906,6 +946,26 @@ async function continueInit() {
   State.todaySession = todaySession;
   UI.renderTodayBanner(todaySession);
   UI.applyMode();
+
+  // NUEVO — recuperación de Autosave (ver features/autosave.js). Va al
+  // final de continueInit(), con todo ya pintado/cableado, para que
+  // Events.restoreAutosave() encuentre la UI lista para re-renderizar
+  // encima. Si el usuario descarta, se limpia el snapshot de una vez
+  // (evita volver a preguntar en el próximo refresh de esta misma sesión
+  // ya descartada).
+  const snapshot = Autosave.peek();
+  if (snapshot) {
+    const mins = Math.max(1, Math.round((Date.now() - snapshot.savedAt) / 60000));
+    const recover = await ConfirmDialog.confirm({
+      title: 'Se encontró una sesión sin guardar',
+      body: `Hay ${snapshot.rowCount} fila(s) y ${snapshot.editCount} corrección(es) manual(es) ` +
+            `de hace ${mins} minuto(s)${snapshot.savedBy ? ` (usuario: ${snapshot.savedBy})` : ''}, ` +
+            `sin exportar. ¿Deseas recuperarla y continuar donde te quedaste?`,
+      confirmLabel: 'Recuperar', cancelLabel: 'Descartar'
+    });
+    if (recover) Events.restoreAutosave();
+    else Autosave.clear();
+  }
 
   // First-run/nameModal de nombre libre — RETIRADO. La identidad ahora
   // se resuelve por completo en el flujo de auth, antes de llegar aquí.

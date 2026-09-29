@@ -210,6 +210,7 @@ import { EditSystem } from '../editing/edit-system.js';
 import { WarnModal } from '../editing/warn-modal.js';
 import { RoutePicker } from '../editing/route-picker.js';
 import { FactCache } from '../features/fact-cache.js';
+import { Autosave } from '../features/autosave.js';
 import { pdfExtract, parsePDF } from '../processors/pdf.js';
 import { processXLS } from '../processors/excel.js';
 import { processPaste } from '../processors/paste.js';
@@ -588,6 +589,7 @@ export const Events = {
       UI.renderExportScreen();
       UI.updateHealthRail();
       UI.applyMode();
+      Autosave.save(State);
     }, 100);
   },
 
@@ -644,6 +646,11 @@ export const Events = {
     UI.setExportBusy(false);
 
     exportXLSX();
+    // Trabajo ya exportado (el archivo quedó en disco del usuario,
+    // independientemente de si Supabase lo pudo guardar o no arriba) -
+    // el respaldo local de Autosave ya cumplió su propósito, se limpia
+    // para no ofrecer "recuperar" una sesión que ya se entregó.
+    Autosave.clear();
     Events.refreshTodayBanner();
     UI.showCelebrate();
   },
@@ -734,6 +741,42 @@ export const Events = {
     UI.renderExportScreen();
     UI.updateHealthRail();
     UI.applyMode();
+  },
+
+  /**
+   * Recupera un snapshot de Autosave (ver features/autosave.js) tras un
+   * refresh/crash accidental a mitad de captura. Mismo criterio de
+   * render que reopenSession() (arriba): NO corre runMerge() - las
+   * ediciones manuales ya están horneadas dentro de State.merged y
+   * runMerge() las perdería. A diferencia de reopenSession(), esto NO
+   * es una sesión de revisión del Historial (no toca reviewSessionId) -
+   * el usuario sigue en su captura normal, solo que restaurada.
+   * @returns {boolean} false si no había snapshot que restaurar
+   */
+  restoreAutosave() {
+    if (!Autosave.restoreInto(State)) return false;
+
+    UI.updatePrepView([]);
+    UI.renderTable();
+    UI.updateStats();
+    UI.setActionsEnabled(true);
+
+    const screenCount = State.xlsData ? State.xlsData.length : 0;
+    const sveResult = runSVE(State.merged, screenCount, State.excludedCount);
+    if (sveResult) {
+      State.sveIssues = sveResult.issues;
+      UI.renderSVE(sveResult.issues, sveResult.quality, sveResult.nCrit, sveResult.nWarn, sveResult.nInfo, sveResult.nPass);
+    } else {
+      State.sveIssues = [];
+      UI.resetSVE();
+    }
+    UI.renderTable();
+    UI.renderFixList();
+    UI.renderQualityScreen();
+    UI.renderExportScreen();
+    UI.updateHealthRail();
+    UI.applyMode();
+    return true;
   },
 
   async previewTodaySession() {

@@ -223,6 +223,7 @@ import {
 } from '../core/constants.js';
 import { SVE_CRIT, SVE_WARN, SVE_INFO, SVE_ICONS } from '../features/validation/sve.js';
 import { FactCache } from '../features/fact-cache.js';
+import { Autosave } from '../features/autosave.js';
 import { CATALOGS } from '../features/catalogs/catalog-registry.js';
 import { priorityTier } from '../features/incidents/incident-engine.js';
 import { INCIDENT_TYPES } from '../features/incidents/incident-types.js';
@@ -1884,6 +1885,10 @@ showAuthFull() {
 
   // ── Reset everything ──
   resetAll() {
+    // El usuario pidió explícitamente empezar de cero ("Reiniciar las 4")
+    // - el respaldo local de Autosave ya no aplica a la sesión que se
+    // está borrando, se limpia junto con el resto del State.
+    Autosave.clear();
     State.pdfData  = new Map();
     State.xlsData  = null;
     State.factData = new Map();

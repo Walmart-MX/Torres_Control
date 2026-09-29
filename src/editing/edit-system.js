@@ -294,6 +294,7 @@ document.getElementById('editDrawerRuta').textContent =
     UI.renderExportScreen();
     UI.updateHealthRail();
     UI.applyMode();
+    Autosave.save(State);
   },
 
   /**

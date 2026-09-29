@@ -1489,6 +1489,22 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
   </div>
 </div>
 
+<!-- ── CONFIRM DIALOG (reemplazo Promise-based de confirm()/prompt() nativos,
+     ver ui/confirm-dialog.js) — reutiliza el mismo estilo .warn-modal-*
+     que el modal de arriba, cero CSS nuevo. -->
+<div class="warn-modal-overlay hidden" id="confirmDialogOverlay">
+  <div class="warn-modal-box">
+    <div class="warn-modal-icon" id="cdIcon"></div>
+    <div class="warn-modal-title" id="cdTitle"></div>
+    <div class="warn-modal-body" id="cdBody"></div>
+    <input type="text" class="modal-input" id="cdInput" style="display:none;margin-bottom:16px">
+    <div class="warn-modal-actions">
+      <button class="btn btn-ghost" id="cdCancel">Cancelar</button>
+      <button class="btn btn-primary" id="cdConfirm">Confirmar</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── ROUTE PICKER ── -->
 <div class="route-picker-overlay hidden" id="routePickerOverlay">
   <div class="route-picker-box">

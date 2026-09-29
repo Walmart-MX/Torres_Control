@@ -1,8 +1,16 @@
 /**
  * features/auth.js
- * AUTH — identidad de usuario (Fase 1: "¿quién está usando SmartDispatch?",
- * sin roles/permisos — ver propuesta aprobada). No toca el DOM; app.js
- * decide qué pintar con cada resultado.
+ * AUTH — identidad de usuario. No toca el DOM; app.js decide qué
+ * pintar con cada resultado.
+ *
+ * CAMBIO (sep-2026 — roles de admin): las funciones sd_admin_* ya NO
+ * son de acceso libre — ver docs/fix_admin_roles.sql para el hallazgo
+ * completo (PUBLIC tenía EXECUTE, cero verificación de quien llamaba)
+ * y el parche. Ahora exigen p_actor_id (el id de State.currentUser) y
+ * Postgres verifica server-side que ese usuario tenga role='admin' —
+ * el prompt() de contraseña del panel de Usuarios en app.js sigue
+ * existiendo, pero ya es solo una cortina cosmética; la protección
+ * real vive aquí abajo, en las llamadas a los 4 adminXxx().
  *
  * Persistencia en esta terminal (localStorage), dos claves separadas
  * a propósito:
@@ -142,24 +150,39 @@ export const Auth = {
     return data;
   },
 
-  // ── Administración (sin restricción de rol en esta fase — ver propuesta §11) ──
+  // ── Administración (protegida por rol server-side desde sep-2026 —
+  //    ver docs/fix_admin_roles.sql. Antes de eso, las 4 funciones
+  //    sd_admin_* no verificaban quién las llamaba: cualquiera con la
+  //    anon key —pública, va en el bundle del cliente— podía listar/
+  //    crear/resetear/desactivar usuarios sin pasar por el login. El
+  //    guard real ahora vive en Postgres (_sd_assert_admin); esto solo
+  //    evita una llamada de red inútil si por lo que sea no hay sesión.
   async adminListUsers() {
-    const { data, error } = await sb.rpc('sd_admin_list_users');
+    if (!State.currentUser) return [];
+    const { data, error } = await sb.rpc('sd_admin_list_users', { p_actor_id: State.currentUser.id });
     if (error) { console.warn('[Auth] Error listando usuarios:', error.message); return []; }
     return data || [];
   },
   async adminCreateUser(username, password, displayName, captureName) {
+    if (!State.currentUser) return { ok: false, error: 'no_session' };
     const { data, error } = await sb.rpc('sd_admin_create_user', {
+      p_actor_id: State.currentUser.id,
       p_username: username, p_password: password, p_display_name: displayName, p_capture_name: captureName
     });
     return error ? { ok: false, error: error.message } : data;
   },
   async adminSetActive(userId, active) {
-    const { data, error } = await sb.rpc('sd_admin_set_active', { p_user_id: userId, p_active: active });
+    if (!State.currentUser) return { ok: false, error: 'no_session' };
+    const { data, error } = await sb.rpc('sd_admin_set_active', {
+      p_actor_id: State.currentUser.id, p_user_id: userId, p_active: active
+    });
     return error ? { ok: false, error: error.message } : data;
   },
   async adminResetPassword(userId, newPassword) {
-    const { data, error } = await sb.rpc('sd_admin_reset_password', { p_user_id: userId, p_new_password: newPassword });
+    if (!State.currentUser) return { ok: false, error: 'no_session' };
+    const { data, error } = await sb.rpc('sd_admin_reset_password', {
+      p_actor_id: State.currentUser.id, p_user_id: userId, p_new_password: newPassword
+    });
     return error ? { ok: false, error: error.message } : data;
   }
 };
