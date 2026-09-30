@@ -228,6 +228,7 @@ import { CATALOGS } from '../features/catalogs/catalog-registry.js';
 import { priorityTier } from '../features/incidents/incident-engine.js';
 import { INCIDENT_TYPES } from '../features/incidents/incident-types.js';
 import { getInlineFix } from '../features/incidents/inline-fix.js';
+import { Motion } from '../theme-engine/motion.js';
 
 let Events;
 /** Resuelve la dependencia circular UI ↔ Events — llamado una vez desde core/app.js */
@@ -410,6 +411,7 @@ showAuthFull() {
     if (!el) return;
     el.className   = 'cat-status' + (cls ? ' ' + cls : '');
     el.textContent = msg;
+    if (cls === 'err') Motion.shake(el);
   },
   // ═══════════════════════════════════════════════════════════════
   // ── PREPARACIÓN — tarjetas de fuente (NUEVO, reemplaza pipeline) ──
@@ -448,7 +450,13 @@ showAuthFull() {
     const suffix = SOURCE_ID[key];
     if (!suffix) return;
     const card = document.getElementById('drop' + suffix);
-    if (card) card.classList.toggle('processing', !!on);
+    if (!card) return;
+    const wasProcessing = card.classList.contains('processing');
+    card.classList.toggle('processing', !!on);
+    // Pop del ícono SOLO en la transición processing→listo (nunca al
+    // arrancar, y nunca si ya estaba quieta) — sección 6: "tarjeta de
+    // fuente que termina de procesar: pop del ícono (400ms)".
+    if (wasProcessing && !on) Motion.popIcon(card.querySelector('.up-ico'));
   },
 
   /** Agrega una nota adicional (ej. aviso de caché histórico) al sub-texto de una fuente, sin pisar el texto principal. */
@@ -871,7 +879,7 @@ showAuthFull() {
     if (_qualityBaseline === null) _qualityBaseline = quality;
 
     ringArc.style.strokeDashoffset = String(CIRC * (1 - quality / 100));
-    if (ringNum) ringNum.textContent = quality + '%';
+    if (ringNum) Motion.animateNumber(ringNum, quality, { suffix: '%' });
 
     const { quick, review, confirm, multi } = UI._buildFixBuckets();
     const currentTotal = quick.length + review.length + confirm.length + multi.length;
@@ -888,8 +896,8 @@ showAuthFull() {
         ? `Se corrigieron ${resolved} incidencia${resolved!==1?'s':''} sobre ${total} ruta${total!==1?'s':''} procesada${total!==1?'s':''}. La calidad mejoró desde el primer cruce automático.`
         : `${total} ruta${total!==1?'s':''} procesada${total!==1?'s':''} — calidad ${quality}% desde el primer cruce automático.`;
     }
-    if (baInit)  baInit.textContent  = _qualityBaseline + '%';
-    if (baFinal) baFinal.textContent = quality + '%';
+    if (baInit)  Motion.animateNumber(baInit,  _qualityBaseline, { suffix: '%' });
+    if (baFinal) Motion.animateNumber(baFinal, quality,           { suffix: '%' });
 
     const facOk  = State.merged.filter(r => String(getMapped(r,'FAC.')||'').trim()).length;
     const opOk   = State.merged.filter(r => String(getMapped(r,'OPERADOR')||'').trim()).length;
@@ -915,6 +923,12 @@ showAuthFull() {
         <div class="q-metric-val">${escH(String(m.val))}</div>
         <div class="q-metric-label">${m.label}</div>
       </div>`).join('');
+    // Entrada escalonada (sección 6: 45ms entre elementos, máximo 8) —
+    // METRIC_DEFS ya trae exactamente 8 tarjetas, encaja justo con el tope.
+    metrics.querySelectorAll('.q-metric').forEach((elm, i) => {
+      elm.style.animationDelay = `${i * 45}ms`;
+      elm.classList.add('mi-stagger-in');
+    });
 
     if (ctaWrap) {
       if (State.sveHasCritical) {
@@ -1414,9 +1428,9 @@ showAuthFull() {
     const rutasEl = document.getElementById('celebrateRutas');
     const corrEl  = document.getElementById('celebrateCorrecciones');
     const calEl   = document.getElementById('celebrateCalidad');
-    if (rutasEl) rutasEl.textContent = total;
-    if (corrEl)  corrEl.textContent  = resolved;
-    if (calEl)   calEl.textContent   = State.sveLastQuality + '%';
+    if (rutasEl) Motion.animateNumber(rutasEl, total,    { force: true });
+    if (corrEl)  Motion.animateNumber(corrEl,  resolved, { force: true });
+    if (calEl)   Motion.animateNumber(calEl,   State.sveLastQuality, { force: true, suffix: '%' });
 
     overlay.classList.add('show');
   },
@@ -1446,6 +1460,7 @@ showAuthFull() {
     const el = document.getElementById('catSt');
     el.className   = 'cat-status' + (cls ? ' ' + cls : '');
     el.textContent = msg;
+    if (cls === 'err') Motion.shake(el);
   },
 
   // ── Catálogos Maestros (Camino C) ──
@@ -1702,6 +1717,7 @@ showAuthFull() {
     if (!el) return;
     el.className   = 'cat-status' + (cls ? ' ' + cls : '');
     el.textContent = msg;
+    if (cls === 'err') Motion.shake(el);
   },
 
   // ── Cache History ──

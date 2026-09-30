@@ -192,6 +192,8 @@ import { DispatchHistory } from '../features/dispatch-history.js';
 import { CatalogStore } from '../features/catalogs/catalog-store.js';
 import { Autosave } from '../features/autosave.js';
 import { ConfirmDialog } from '../ui/confirm-dialog.js';
+import { ThemeEngine } from '../theme-engine/theme-engine.js';
+import { Motion } from '../theme-engine/motion.js';
 
 // ── Stepper — navegación entre pantallas ──
 // CAMBIO (jul-2026 — simplificación del flujo, Etapa 4): STEPS baja de
@@ -299,15 +301,6 @@ function wireCatalogAdmin(catalogId, containerId) {
  */
 let _activityWired = false;
 let _pendingFirstLoginPassword = null;
-// NUEVO — protección simple del panel Administración → Usuarios.
-// Cortina de acceso, NO seguridad real (ver nota abajo): el panel de
-// gestión de cuentas es sensible pero de bajo tráfico — un diálogo de
-// contraseña (ConfirmDialog.prompt(), ver ui/confirm-dialog.js) basta
-// para evitar accesos accidentales o de personal no autorizado
-// casual. Se desbloquea una sola vez por sesión de navegador (no
-// persiste en localStorage — recargar vuelve a pedirla).
-let _usersPanelUnlocked = false;
-const USERS_PANEL_PASSWORD = 'rainmeter99';
 
 function wireActivityTracking() {
   if (_activityWired) return;
@@ -508,6 +501,15 @@ export async function init() {
  * retiran (reemplazados por el flujo de auth de arriba).
  */
 async function continueInit() {
+  // Dynamic Experience — arranca el Theme Engine. Se llama aquí (y no
+  // en init()) porque continueInit() es el único punto común a los TRES
+  // caminos que revelan la app (sesión restaurada, login normal, primer
+  // login) — mismos tres puntos que agregan 'app-authed' (ver cabecera
+  // de este archivo). En Fase 1 solo existe el tema 'default' en el
+  // registro, así que esto no cambia nada visible todavía.
+  ThemeEngine.init();
+  Motion.wireButtonRipple(); // idempotente — ver nota en motion.js
+
   renderStepper();
   document.getElementById('btnAdmin').addEventListener('click', () => goStep('admin'));
 
@@ -564,13 +566,25 @@ async function continueInit() {
   document.getElementById('btnExport').addEventListener('click', () => Events.handleExport());
 
   document.getElementById('btnTheme').addEventListener('click', () =>
-    UI.applyTheme(State.theme === 'dark' ? 'light' : 'dark'));
+    ThemeEngine.setMode(State.theme === 'dark' ? 'light' : 'dark'));
 
-  document.querySelectorAll('.theme-opt[data-theme]').forEach(el => {
-    el.addEventListener('click', () => UI.applyTheme(el.dataset.theme));
+  // Modo (Automático/Claro/Oscuro) — fija sd_theme_mode, nunca toca
+  // data-theme directamente (eso lo resuelve ThemeEngine → UI.applyTheme).
+  document.querySelectorAll('#cfgModeOpts .theme-opt[data-mode]').forEach(el => {
+    el.addEventListener('click', () => ThemeEngine.setMode(el.dataset.mode));
+  });
+  // Intensidad (Sutil/Intenso) — el grupo "Tema" (#cfgThemeOpts) se
+  // genera Y se cablea solo, dentro de ThemeEngine.init() (ver
+  // theme-engine.js — renderThemeOptionsGrid()), porque su contenido es
+  // dinámico (uno por entrada de theme-registry.js).
+  document.querySelectorAll('#cfgIntensityOpts .theme-opt[data-intensity]').forEach(el => {
+    el.addEventListener('click', () => ThemeEngine.setIntensity(el.dataset.intensity));
   });
 
-  document.getElementById('tbUser').addEventListener('click', () => UI.openModal());
+  document.getElementById('tbUser').addEventListener('click', () => {
+    UI.openModal();
+    ThemeEngine.syncControls(); // refleja Tema/Modo/Intensidad por si nada los recalculó desde el último cambio
+  });
 
   // ── Configuración — Mi cuenta (reemplaza el guardado de nombre libre) ──
   document.getElementById('nameModalBtn').addEventListener('click', async () => {
@@ -682,20 +696,22 @@ async function continueInit() {
       inputs.forEach(inp => { const val = inp.value.trim(); if (val) fields[inp.dataset.field] = val; });
       if (!Object.keys(fields).length) {
         const first = card.querySelector('.fix-marchamo-input');
-        if (first) { first.focus(); first.classList.add('fix-input-error'); }
+        if (first) { first.focus(); first.classList.add('fix-input-error'); Motion.shake(card); }
         return;
       }
       const rowIds = JSON.parse(card.dataset.fixRowids || '[]');
-      EditSystem.quickFixMulti(rowIds, fields);
+      Motion.runSaveSequence(card, saveMarchBtn, () => EditSystem.quickFixMulti(rowIds, fields));
       return;
     }
     const saveBtn = e.target.closest('.fix-save');
     if (saveBtn) {
       const card  = saveBtn.closest('.fix-card');
       const input = card.querySelector('.fix-input');
-      if (!input.value.trim()) { input.focus(); input.classList.add('fix-input-error'); return; }
+      if (!input.value.trim()) { input.focus(); input.classList.add('fix-input-error'); Motion.shake(card); return; }
       const rowIds = JSON.parse(saveBtn.dataset.fixRowids || '[]');
-      EditSystem.quickFix(rowIds, saveBtn.dataset.fixKey, input.value);
+      const fixKey = saveBtn.dataset.fixKey;
+      const fixVal = input.value;
+      Motion.runSaveSequence(card, saveBtn, () => EditSystem.quickFix(rowIds, fixKey, fixVal));
       return;
     }
     const reviewBtn = e.target.closest('.fix-review-btn');
@@ -716,27 +732,12 @@ async function continueInit() {
     goStep('prep');
   });
 
-    document.getElementById('adminNav').addEventListener('click', async e => {
+    document.getElementById('adminNav').addEventListener('click', e => {
     const gotoBtn = e.target.closest('[data-admin-goto]');
     if (gotoBtn) { goStep(gotoBtn.dataset.adminGoto); return; }
 
     const btn = e.target.closest('.admin-nav-item');
     if (!btn) return;
-
-    // NUEVO — gate de contraseña para el panel Usuarios. Ver nota de
-    // cabecera junto a _usersPanelUnlocked/USERS_PANEL_PASSWORD.
-    if (btn.dataset.admin === 'users' && !_usersPanelUnlocked) {
-      const pass = await ConfirmDialog.prompt({
-        title: 'Panel protegido', body: 'Ingresa la contraseña para continuar:',
-        placeholder: 'Contraseña', confirmLabel: 'Entrar'
-      });
-      if (pass === null) return; // canceló — no hace nada, no cambia de panel
-      if (pass !== USERS_PANEL_PASSWORD) {
-        await ConfirmDialog.alertMsg({ title: 'Contraseña incorrecta', body: 'Verifica e intenta de nuevo.' });
-        return;
-      }
-      _usersPanelUnlocked = true;
-    }
 
     document.querySelectorAll('.admin-nav-item').forEach(b => b.classList.toggle('active', b === btn));
     document.querySelectorAll('.admin-panel').forEach(p => p.classList.toggle('active', p.dataset.adminPanel === btn.dataset.admin));

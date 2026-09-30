@@ -9,6 +9,11 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- Dynamic Experience — Theme Engine (ver src/theme-engine/). Fase 1:
+     motor sin efectos visibles, solo el puente --brand-accent y el
+     host ambiental (vacio). -->
+<link rel="stylesheet" href="src/theme-engine/theme-engine.css">
+<link rel="stylesheet" href="src/theme-engine/motion.css">
 <style>
 /* ═══════════════════════════════════════════════════════════════
    DESIGN TOKENS — rediseño Mesa de Trabajo/Preparación (mockup jul-2026)
@@ -64,6 +69,8 @@
   --orange: var(--amber-ink); --orange-bg: var(--amber-soft); --orange-bd: var(--amber);
   --purple: var(--violet); --purple-bg: var(--violet-soft); --purple-bd: var(--violet);
   --shadow-xs: var(--shadow-sm);
+
+  --brand-accent: var(--t-accent, #F5A623);
 }
 
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -89,14 +96,18 @@ button{cursor:pointer;border:none;background:none}
    mostrar/ocultar. Puramente visual — no toca features/auth.js. */
 body:not(.app-authed) .shell{display:none!important}
 
-/* ── SHELL ── */
-.shell{display:flex;flex-direction:column;min-height:100vh}
+/* ── SHELL ── (position:relative;z-index:1 NUEVO — Dynamic Experience: mantiene el contenido siempre encima de #ambientHost) */
+.shell{display:flex;flex-direction:column;min-height:100vh;position:relative;z-index:1}
 
 /* ── TOP BAR ── */
 .topbar{
   display:flex;align-items:center;gap:20px;padding:0 22px;height:60px;flex-shrink:0;
-  background:var(--navy);position:sticky;top:0;z-index:50;
-  box-shadow:0 2px 20px rgba(0,0,0,.2);
+  /* Dynamic Experience: --t-tint es la columna "tint (topbar)" de la
+     tabla de temas — el fallback var(--navy) hace que, sin motor o con
+     solo 'default' activo, esto pinte IDÉNTICO a hoy (--navy y el tint
+     de 'default' son el mismo valor: #0B1D33). */
+  background:var(--t-tint, var(--navy));position:sticky;top:0;z-index:50;
+  box-shadow:0 2px 20px rgba(0,0,0,.2);transition:background .4s ease;
 }
 .brand{display:flex;align-items:center;gap:9px}
 .brand-mark{
@@ -130,7 +141,7 @@ body:not(.app-authed) .shell{display:none!important}
 .step-label{font-size:11.5px;font-weight:600;color:rgba(255,255,255,.4);white-space:nowrap;transition:color .2s}
 .step.done .step-dot{background:var(--green);border-color:var(--green);color:#fff}
 .step.done .step-label{color:rgba(255,255,255,.65)}
-.step.active .step-dot{background:var(--amber);border-color:var(--amber);color:#1A0F00;box-shadow:0 0 0 4px rgba(245,166,35,.2)}
+.step.active .step-dot{background:var(--brand-accent);border-color:var(--brand-accent);color:#1A0F00;box-shadow:0 0 0 4px rgba(245,166,35,.2)}
 .step.active .step-label{color:#fff}
 .step-connector{width:20px;height:1.5px;background:rgba(255,255,255,.12);flex-shrink:0}
 
@@ -150,9 +161,9 @@ body:not(.app-authed) .shell{display:none!important}
 
 /* ── SCREEN WRAP ── */
 .screens{flex:1;position:relative}
-.screen{display:none;padding:26px 32px 60px;max-width:1500px;margin:0 auto;animation:fadeUp .35s ease}
+.screen{display:none;padding:26px 32px 60px;max-width:1500px;margin:0 auto;animation:fadeUp var(--dur) var(--ease)}
 .screen.active{display:block}
-@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 @keyframes overlayFade{from{opacity:0}to{opacity:1}}
 @keyframes stepPing{0%{transform:scale(.85);opacity:.55}100%{transform:scale(1.5);opacity:0}}
 
@@ -173,7 +184,7 @@ body:not(.app-authed) .shell{display:none!important}
   font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
   color:var(--amber-ink);margin-bottom:6px;display:flex;align-items:center;gap:8px;
 }
-[data-theme="dark"] .eyebrow{color:var(--amber)}
+[data-theme="dark"] .eyebrow{color:var(--brand-accent)}
 
 /* ── CARD ── */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow-sm)}
@@ -185,7 +196,7 @@ body:not(.app-authed) .shell{display:none!important}
   border:1.5px dashed var(--border-2);border-radius:var(--r-lg);padding:22px 18px;text-align:center;
   background:var(--surface);transition:all .2s;position:relative;overflow:hidden;
 }
-.up-card:hover{border-color:var(--amber);box-shadow:var(--shadow-md);transform:translateY(-2px)}
+.up-card:hover{border-color:var(--brand-accent);box-shadow:var(--shadow-md);transform:translateY(-2px)}
 .up-card.done{border-style:solid;border-color:var(--green);background:var(--green-soft)}
 .up-ico{width:44px;height:44px;border-radius:12px;background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-size:20px;margin:0 auto 12px;transition:transform .2s}
 .up-card.done .up-ico{background:var(--green);color:#fff}
@@ -204,7 +215,7 @@ body:not(.app-authed) .shell{display:none!important}
    Se estiliza aquí: la tarjeta se levanta, se resalta en ámbar y el
    ícono reacciona — sensación de que el drop-zone está "vivo". */
 .up-card.drag{
-  border-color:var(--amber);border-style:solid;
+  border-color:var(--brand-accent);border-style:solid;
   background:var(--amber-soft);
   box-shadow:var(--shadow-glow),var(--shadow-md);
   transform:translateY(-3px) scale(1.015);
@@ -222,7 +233,7 @@ body:not(.app-authed) .shell{display:none!important}
    respirando) ni con .drag (arrastrar y procesar no ocurren a la vez). */
 @keyframes cardBreathe{
   0%,100%{box-shadow:var(--shadow-sm);border-color:var(--border-2)}
-  50%{box-shadow:var(--shadow-glow),var(--shadow-md);border-color:var(--amber)}
+  50%{box-shadow:var(--shadow-glow),var(--shadow-md);border-color:var(--brand-accent)}
 }
 @keyframes iconPulse{
   0%,100%{transform:scale(1)}
@@ -253,7 +264,7 @@ body:not(.app-authed) .shell{display:none!important}
   color:var(--text);font-family:var(--mono);font-size:11px;padding:9px 12px;resize:vertical;
   min-height:64px;outline:none;transition:all .15s;line-height:1.6;display:block;
 }
-.paste-ta:focus{border-color:var(--amber);box-shadow:0 0 0 3px var(--amber-soft)}
+.paste-ta:focus{border-color:var(--brand-accent);box-shadow:0 0 0 3px var(--amber-soft)}
 .paste-ta::placeholder{color:var(--text-4)}
 .paste-actions{display:flex;gap:7px;margin-top:8px}
 .paste-status{font-family:var(--mono);font-size:10px;margin-top:6px;min-height:14px}
@@ -299,14 +310,14 @@ body:not(.app-authed) .shell{display:none!important}
 
 .btn{
   display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;border-radius:10px;
-  padding:9px 18px;transition:all .15s;white-space:nowrap;
+  padding:9px 18px;transition:all var(--dur-fast) var(--ease);white-space:nowrap;
 }
 .btn:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.06)}
 .btn:active:not(:disabled){transform:translateY(0) scale(.96);filter:brightness(.98)}
 .btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important}
 .btn-primary{background:var(--navy);color:#fff}
 [data-theme="dark"] .btn-primary{background:var(--amber);color:#1A0F00}
-.btn-amber{background:var(--amber);color:#1A0F00;box-shadow:0 4px 14px rgba(245,166,35,.3)}
+.btn-amber{background:var(--brand-accent);color:#1A0F00;box-shadow:0 4px 14px rgba(245,166,35,.3)}
 .btn-ghost{background:var(--surface-3);color:var(--text-2);border:1px solid var(--border)}
 .btn-danger{background:var(--red);color:#fff}
 .btn-danger-outline{background:transparent;color:var(--red);border:1px solid var(--red)}
@@ -319,9 +330,9 @@ body:not(.app-authed) .shell{display:none!important}
 .prog-bar.on{display:block}
 .prog-bar-top{display:flex;justify-content:space-between;margin-bottom:6px}
 .prog-bar-label{font-family:var(--mono);font-size:10px;color:rgba(255,255,255,.6)}
-.prog-bar-pct{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--amber)}
+.prog-bar-pct{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--brand-accent)}
 .prog-track{height:4px;background:rgba(255,255,255,.15);border-radius:4px;overflow:hidden}
-.prog-fill{height:100%;width:0;background:var(--amber);border-radius:4px;transition:width .2s}
+.prog-fill{height:100%;width:0;background:var(--brand-accent);border-radius:4px;transition:width .2s}
 .err-log{display:none;margin-bottom:14px}
 .err-log.on{display:block}
 .err-log-inner{
@@ -348,7 +359,7 @@ body:not(.app-authed) .shell{display:none!important}
   width:100%;padding:9px 13px 9px 34px;border-radius:10px;border:1.5px solid var(--border);
   background:var(--surface);font-size:12.5px;outline:none;transition:all .15s;color:var(--text);
 }
-.search:focus{border-color:var(--amber);box-shadow:0 0 0 3px var(--amber-soft)}
+.search:focus{border-color:var(--brand-accent);box-shadow:0 0 0 3px var(--amber-soft)}
 .filter-chips{display:flex;gap:6px;flex-wrap:wrap}
 .fchip{
   font-size:11.5px;font-weight:600;padding:7px 14px;border-radius:100px;background:var(--surface);
@@ -357,7 +368,7 @@ body:not(.app-authed) .shell{display:none!important}
 .fchip:hover{border-color:var(--border-2);transform:translateY(-1px)}
 .fchip:active{transform:translateY(0) scale(.95)}
 .fchip.active{background:var(--navy);border-color:var(--navy);color:#fff}
-[data-theme="dark"] .fchip.active{background:var(--amber);border-color:var(--amber);color:#1A0F00}
+[data-theme="dark"] .fchip.active{background:var(--brand-accent);border-color:var(--brand-accent);color:#1A0F00}
 .fchip .cnt{font-family:var(--mono);font-size:9.5px;opacity:.65}
 .toolbar-spacer{flex:1}
 
@@ -376,7 +387,7 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 .dtbl tbody tr:not(:last-child) td{border-bottom:1px solid var(--border)}
 .dtbl td{padding:9px 14px;white-space:nowrap;vertical-align:middle}
 .rt{font-family:var(--mono);font-weight:700;color:var(--navy)}
-[data-theme="dark"] .rt{color:var(--amber)}
+[data-theme="dark"] .rt{color:var(--brand-accent)}
 .status-pill{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;padding:3px 9px;border-radius:100px}
 .status-pill.ok{background:var(--green-soft);color:var(--green)}
 .status-pill.warn{background:var(--amber-soft);color:var(--amber-ink)}
@@ -437,7 +448,7 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 .fix-counter.done{color:var(--green)}
 .fix-counter-label{font-size:11px;color:var(--text-3);font-weight:600}
 .fix-progress-track{flex:1;min-width:160px;height:6px;border-radius:100px;background:var(--surface-3);overflow:hidden}
-.fix-progress-fill{height:100%;border-radius:100px;background:linear-gradient(90deg,var(--red),var(--amber),var(--green));transition:width .5s ease}
+.fix-progress-fill{height:100%;border-radius:100px;background:linear-gradient(90deg,var(--red),var(--brand-accent),var(--green));transition:width .5s ease}
 
 /* ── Botón "Continuar a Exportación" tricolor — NUEVO (jul-2026) ──
    Vive en la cabecera de Correcciones (#fix-hd), a la derecha del
@@ -705,7 +716,7 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 /* ══════════════════ MODAL DE CELEBRACIÓN ══════════════════ */
 .celebrate-overlay{position:fixed;inset:0;background:rgba(11,29,51,.72);backdrop-filter:blur(8px);z-index:400;display:none;align-items:center;justify-content:center;padding:20px}
 .celebrate-overlay.show{display:flex;animation:overlayFade .18s ease}
-.celebrate-box{background:var(--surface);border-radius:var(--r-xl);padding:38px 36px;width:400px;max-width:100%;text-align:center;box-shadow:var(--shadow-lg);animation:celebratePop .4s cubic-bezier(.2,.9,.3,1.2)}
+.celebrate-box{background:var(--surface);border-radius:var(--r-xl);padding:38px 36px;width:400px;max-width:100%;text-align:center;box-shadow:var(--shadow-lg);animation:celebratePop var(--dur-slow) cubic-bezier(.2,.9,.3,1.2)}
 @keyframes celebratePop{from{opacity:0;transform:scale(.9) translateY(10px)}to{opacity:1;transform:scale(1) translateY(0)}}
 .celebrate-ico{font-size:52px;margin-bottom:14px}
 .celebrate-title{font-family:var(--disp);font-weight:800;font-size:20px;margin-bottom:8px}
@@ -718,7 +729,7 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 /* Modal (nombre + tema) */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,10,30,.7);backdrop-filter:blur(6px);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;animation:overlayFade .18s ease}
 .modal-overlay.hidden{display:none}
-.modal-box{background:var(--surface);border-radius:var(--r-xl);padding:32px 36px;width:400px;max-width:100%;box-shadow:var(--shadow-lg);border:1px solid var(--border);animation:celebratePop .3s cubic-bezier(.2,.9,.3,1.2)}
+.modal-box{background:var(--surface);border-radius:var(--r-xl);padding:32px 36px;width:400px;max-width:100%;box-shadow:var(--shadow-lg);border:1px solid var(--border);animation:celebratePop var(--dur-slow) cubic-bezier(.2,.9,.3,1.2)}
 .modal-logo{display:flex;align-items:center;gap:9px;margin-bottom:22px}
 .modal-logo-mark{width:36px;height:36px;background:var(--amber);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px}
 .modal-logo-text{font-size:14px;font-weight:700;color:var(--text)}
@@ -757,6 +768,10 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 .theme-opt.selected{border-color:var(--blue);background:var(--blue-bg)}
 .theme-opt-ico{font-size:20px;margin-bottom:4px}
 .theme-opt-label{font-size:11px;font-weight:600;color:var(--text2)}
+.theme-opts-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:18px;max-height:190px;overflow-y:auto;padding-right:2px}
+.theme-opts-grid .theme-opt{padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:4px}
+.theme-opts-grid .theme-opt-label{font-size:9.5px;line-height:1.15;text-align:center;color:var(--text2)}
+.theme-opt-dot{width:15px;height:15px;border-radius:50%;display:block;box-shadow:0 0 0 1px rgba(0,0,0,.12) inset}
 .modal-btn{width:100%;background:var(--navy);color:#fff;border:none;border-radius:var(--r);font-size:14px;font-weight:600;padding:12px;cursor:pointer;transition:background .15s}
 .modal-btn:hover{background:var(--navy-md)}
 
@@ -780,7 +795,7 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 /* Warn Confirm Modal */
 .warn-modal-overlay{position:fixed;inset:0;background:rgba(0,10,30,.55);backdrop-filter:blur(4px);z-index:300;display:flex;align-items:center;justify-content:center;padding:20px;animation:overlayFade .18s ease}
 .warn-modal-overlay.hidden{display:none}
-.warn-modal-box{background:var(--surface);border:1px solid var(--amber-bd);border-top:3px solid var(--amber);border-radius:var(--r-xl);box-shadow:var(--shadow-lg);padding:28px 32px;width:420px;max-width:100%;animation:celebratePop .3s cubic-bezier(.2,.9,.3,1.2)}
+.warn-modal-box{background:var(--surface);border:1px solid var(--amber-bd);border-top:3px solid var(--amber);border-radius:var(--r-xl);box-shadow:var(--shadow-lg);padding:28px 32px;width:420px;max-width:100%;animation:celebratePop var(--dur-slow) cubic-bezier(.2,.9,.3,1.2)}
 .warn-modal-icon{font-size:28px;margin-bottom:10px}
 .warn-modal-title{font-family:var(--disp);font-size:15px;font-weight:800;color:var(--text);margin-bottom:6px}
 .warn-modal-body{font-size:12px;color:var(--text2);line-height:1.65;margin-bottom:20px}
@@ -791,7 +806,7 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 /* Route Picker */
 .route-picker-overlay{position:fixed;inset:0;background:rgba(0,10,30,.55);backdrop-filter:blur(4px);z-index:300;display:flex;align-items:center;justify-content:center;padding:20px;animation:overlayFade .18s ease}
 .route-picker-overlay.hidden{display:none}
-.route-picker-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-xl);box-shadow:var(--shadow-lg);padding:24px 28px;min-width:300px;max-width:420px;width:100%;animation:celebratePop .3s cubic-bezier(.2,.9,.3,1.2)}
+.route-picker-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-xl);box-shadow:var(--shadow-lg);padding:24px 28px;min-width:300px;max-width:420px;width:100%;animation:celebratePop var(--dur-slow) cubic-bezier(.2,.9,.3,1.2)}
 .route-picker-title{font-family:var(--disp);font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px}
 .route-picker-sub{font-size:11px;color:var(--text3);margin-bottom:16px;line-height:1.5}
 .route-picker-sep{height:1px;background:var(--border);margin-bottom:12px}
@@ -854,6 +869,16 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 </head>
 <body>
 
+<!-- Dynamic Experience — host ambiental (vacío en Fase 1). Fixed,
+     z-index:0, pointer-events:none — nunca intercepta clics ni tapa
+     nada del .shell (que corre con z-index:1, ver index.html arriba).
+     Fase 3 monta aquí particles.js/strips.js por tema. -->
+<div id="ambientHost" aria-hidden="true"></div>
+<!-- Tira decorativa (banderines/papel picado/luces) — fija justo
+     debajo del topbar. Vacía salvo en los meses que declaran
+     ambient.strip (ver ambient/strips.js). -->
+<div id="ambientStrip" aria-hidden="true"></div>
+
 <!-- ── MODAL: Nombre + Tema ── -->
 <div class="modal-overlay hidden" id="nameModal">
   <div class="modal-box">
@@ -889,10 +914,20 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
     <input class="modal-input" id="cfgNewPassword" type="password" autocomplete="new-password" placeholder="Dejar en blanco para no cambiarla">
     <div class="modal-hint" id="cfgStatus">&nbsp;</div>
 
-    <div class="modal-field-label">Interfaz preferida</div>
-    <div class="theme-opts">
-      <div class="theme-opt selected" id="themeOptLight" data-theme="light"><div class="theme-opt-ico">☀️</div><div class="theme-opt-label">Claro</div></div>
-      <div class="theme-opt" id="themeOptDark" data-theme="dark"><div class="theme-opt-ico">🌙</div><div class="theme-opt-label">Oscuro</div></div>
+    <div class="modal-field-label">Modo de interfaz</div>
+    <div class="theme-opts" id="cfgModeOpts">
+      <div class="theme-opt" id="themeOptAuto" data-mode="auto"><div class="theme-opt-ico">&#128260;</div><div class="theme-opt-label">Automático</div></div>
+      <div class="theme-opt selected" id="themeOptLight" data-mode="light"><div class="theme-opt-ico">&#9728;&#65039;</div><div class="theme-opt-label">Claro</div></div>
+      <div class="theme-opt" id="themeOptDark" data-mode="dark"><div class="theme-opt-ico">&#127769;</div><div class="theme-opt-label">Oscuro</div></div>
+    </div>
+
+    <div class="modal-field-label">Ambiente estacional (Dynamic Experience)</div>
+    <div class="theme-opts-grid" id="cfgThemeOpts"><!-- generado por ThemeEngine.init() desde theme-registry.js --></div>
+
+    <div class="modal-field-label">Intensidad del ambiente</div>
+    <div class="theme-opts" id="cfgIntensityOpts">
+      <div class="theme-opt" data-intensity="1"><div class="theme-opt-ico">&#127780;</div><div class="theme-opt-label">Sutil</div></div>
+      <div class="theme-opt selected" data-intensity="2"><div class="theme-opt-ico">&#10024;</div><div class="theme-opt-label">Intenso</div></div>
     </div>
     <!-- NUEVO (ago-2026): fila de pie con Cancelar + Guardar — antes
          solo existía el botón de Guardar, sin salida sin guardar. -->
@@ -966,7 +1001,8 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
     <div class="tb-spacer"></div>
     <button class="tb-btn" id="btnHistoryOpen" title="Historial de procesamientos">🗂️</button>
     <button class="tb-btn" id="btnAdmin" title="Administración">⚙️</button>
-    <button class="tb-btn" id="btnTheme" title="Cambiar tema">🌙</button>
+    <button class="tb-btn" id="btnTheme" title="Cambiar tema">&#127769;</button>
+    <div class="tb-ornament" id="tbOrnament" aria-hidden="true"></div>
     <div class="tb-user" id="tbUser"><div class="tb-avatar" id="tbAvatar">—</div><span class="tb-user-name" id="tbUserName">—</span></div>
   </div>
 
@@ -1208,7 +1244,7 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
             <circle cx="84" cy="84" r="72" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="14"/>
             <circle cx="84" cy="84" r="72" fill="none" stroke="url(#qgrad)" stroke-width="14"
               stroke-dasharray="452.4" stroke-dashoffset="452.4" stroke-linecap="round" transform="rotate(-90 84 84)"
-              id="qArc" style="transition:stroke-dashoffset 1.2s cubic-bezier(.2,.8,.2,1)"/>
+              id="qArc" style="transition:stroke-dashoffset 1.1s var(--ease)"/>
             <defs><linearGradient id="qgrad" x1="0" y1="0" x2="1" y2="1">
               <stop offset="0%" stop-color="#F5A623"/><stop offset="100%" stop-color="#1E9E6B"/>
             </linearGradient></defs>

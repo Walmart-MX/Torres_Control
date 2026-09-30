@@ -51,10 +51,8 @@ function _settle(result) {
   if (_resolve) { const r = _resolve; _resolve = null; r(result); }
 }
 
-function _open(opts, isPrompt, cancelValue) {
-  // Si ya hay un dialogo pendiente, se cancela antes de abrir el nuevo -
-  // nunca deja una promesa anterior sin resolver.
-  if (_resolve) _settle(cancelValue);
+function _open(opts, isPrompt) {
+  const els = _els();
 
   const {
     title, body, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar',
@@ -62,7 +60,6 @@ function _open(opts, isPrompt, cancelValue) {
     placeholder = '', defaultValue = '', hideCancel = false
   } = opts;
 
-  const els = _els();
   els.icon.textContent  = icon;
   els.title.textContent = title;
   els.body.innerHTML    = body || '';
@@ -78,15 +75,37 @@ function _open(opts, isPrompt, cancelValue) {
   if (isPrompt) setTimeout(() => els.input.focus(), 80);
 }
 
+/**
+ * Si ya hay un dialogo pendiente sin resolver (llamada nueva encima de
+ * una vieja), se cancela ANTES de pisar _resolve con el nuevo - aqui
+ * es donde vivia el bug: antes se chequeaba esto DESPUES de que los
+ * metodos de abajo ya hubieran asignado _resolve = resolve (el nuevo),
+ * asi que _settle() terminaba auto-resolviendo la promesa recién creada
+ * con el valor de "cancelado" al instante - el modal se veía en
+ * pantalla pero ya había regresado null/false desde el primer frame,
+ * antes de que el usuario alcanzara a escribir nada.
+ */
+function _cancelPending(cancelValue) {
+  if (_resolve) {
+    const old = _resolve;
+    _resolve = null;
+    _els().overlay.classList.add('hidden');
+    old(cancelValue);
+  }
+}
+
 export const ConfirmDialog = {
   confirm(opts) {
-    return new Promise(resolve => { _resolve = resolve; _open(opts, false, false); });
+    _cancelPending(false);
+    return new Promise(resolve => { _resolve = resolve; _open(opts, false); });
   },
   prompt(opts) {
-    return new Promise(resolve => { _resolve = resolve; _open(opts, true, null); });
+    _cancelPending(null);
+    return new Promise(resolve => { _resolve = resolve; _open(opts, true); });
   },
   alertMsg(opts) {
-    return new Promise(resolve => { _resolve = resolve; _open({ ...opts, hideCancel: true }, false, undefined); });
+    _cancelPending(undefined);
+    return new Promise(resolve => { _resolve = resolve; _open({ ...opts, hideCancel: true }, false); });
   },
 
   /** Wiring de eventos - llamar UNA sola vez desde core/app.js (bootstrap). */

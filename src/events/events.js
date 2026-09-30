@@ -225,6 +225,7 @@ import { IncidentStore } from '../features/incidents/incident-store.js';
 import { INCIDENT_TYPES } from '../features/incidents/incident-types.js';
 import { saveInlineFix } from '../features/incidents/inline-fix.js';
 import { compareExcelPdf } from '../features/source-check.js';
+import { Motion } from '../theme-engine/motion.js';
 
 export const Events = {
 
@@ -642,17 +643,23 @@ export const Events = {
       await DispatchHistory.finalizeSession(State.merged, { ...auditMeta, ts, user });
     } catch (e) {
       console.warn('[DispatchHistory] No se pudo guardar el historial:', e.message);
+      Motion.toast('No se pudo guardar en el historial (el archivo sí se exportó).', 'warn');
     }
     UI.setExportBusy(false);
 
     exportXLSX();
-    // Trabajo ya exportado (el archivo quedó en disco del usuario,
-    // independientemente de si Supabase lo pudo guardar o no arriba) -
-    // el respaldo local de Autosave ya cumplió su propósito, se limpia
-    // para no ofrecer "recuperar" una sesión que ya se entregó.
-    Autosave.clear();
-    Events.refreshTodayBanner();
-    UI.showCelebrate();
+    // Secuencia de éxito (sección 6): botón con checkmark + ráfaga de
+    // partículas con los colores del tema activo, y RECIÉN después el
+    // modal de celebración — se difiere 700ms (duración de la ráfaga)
+    // para que se vea la secuencia completa en vez de que el modal tape
+    // el botón de inmediato. Autosave.clear()/refreshTodayBanner() no
+    // tienen urgencia de milisegundos, se difieren junto con el modal.
+    Motion.exportSuccess(document.getElementById('btnExport'));
+    setTimeout(() => {
+      Autosave.clear();
+      Events.refreshTodayBanner();
+      UI.showCelebrate();
+    }, 700);
   },
 
   async refreshTodayBanner() {

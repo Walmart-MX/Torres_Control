@@ -1,0 +1,195 @@
+/*
+ * theme-engine/theme-engine.css
+ * Dynamic Experience — hoja de estilos del Theme Engine.
+ *
+ * REGLA DURA: este archivo SOLO consume variables --t-*/--on-accent que
+ * escribe theme-engine.js (o el puente --brand-accent en index.html).
+ * Nunca declara un color de marca fijo aquí — eso vive en cada tema
+ * (src/theme-engine/themes/*.js) — y JAMÁS toca los colores semánticos
+ * (--green/--amber/--red/--blue de index.html seguirán significando
+ * correcto/advertencia/crítico/informativo pase lo que pase aquí).
+ *
+ * Fase 3: se suman partículas (.t-particle*), la luna de Halloween
+ * (.t-moon), la tira decorativa (#ambientStrip) y los ajustes de
+ * Intensidad 2 (todo bajo `html[data-int="2"]`, puramente aditivo —
+ * Intensidad 1 se queda exactamente como quedó la Fase 2). También se
+ * agrega el bloque de prefers-reduced-motion.
+ */
+
+#ambientHost {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  /* Velo muy sutil — solo visible en los huecos entre tarjetas (el
+     .shell no tiene fondo propio, ver index.html); las tarjetas y el
+     texto viven en superficies opacas (--surface) y nunca lo tocan.
+     35% es un punto de partida conservador — fácil de ajustar aquí
+     mismo si en pantalla se ve muy tenue o muy marcado. */
+  background: color-mix(in srgb, var(--t-wash, transparent) 35%, transparent);
+  transition: background .6s ease;
+}
+
+/* Glow radial por tema — un div por tema activo (theme-engine.js lo
+   crea/retira), posición y color son literales del propio tema (NO se
+   mezclan entre sí, a diferencia de accent/tint/wash) para que el
+   crossfade se vea como "un glow se apaga mientras otro se prende", no
+   como un punto borroso a mitad de camino. */
+.t-glow {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(640px circle at var(--glow-pos, 90% -20%), var(--glow-color, transparent), transparent 70%);
+  transition: opacity .6s ease;
+}
+
+/* Iconos del encabezado (junto a .tb-user, ver index.html) */
+.tb-ornament {
+  position: relative;
+  height: 20px;
+  min-width: 20px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--brand-accent);
+}
+.tb-orn-layer {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity .6s ease;
+  pointer-events: none;
+}
+.tb-orn-layer svg { display: block; flex-shrink: 0; }
+
+/* ══ Fase 3 — Partículas (ambient/particles.js) ══
+   Un <span> por partícula, posición/tamaño/color fijados inline por
+   JS; aquí solo viven las formas y las trayectorias (keyframes). */
+.t-particles { position: absolute; inset: 0; transition: opacity .6s ease; }
+.t-particle { position: absolute; pointer-events: none; will-change: transform, opacity; }
+
+.t-particle-petal { border-radius: 50% 0 50% 50%; animation: tpFall linear infinite; }
+.t-particle-flake { border-radius: 50%; animation: tpSnow linear infinite; }
+.t-particle-spark { border-radius: 50%; box-shadow: 0 0 4px currentColor; animation: tpFlicker ease-in-out infinite; }
+.t-particle-mote  { border-radius: 50%; animation: tpDrift ease-in-out infinite; }
+
+@keyframes tpFall {
+  0%   { transform: translate3d(0,-10vh,0) rotate(0deg); }
+  100% { transform: translate3d(0,110vh,0) rotate(180deg); }
+}
+@keyframes tpSnow {
+  0%   { transform: translate3d(0,-10vh,0) translateX(0); }
+  50%  { transform: translateX(12px); }
+  100% { transform: translate3d(0,110vh,0) translateX(-6px); }
+}
+@keyframes tpFlicker {
+  0%, 100% { transform: scale(.6); opacity: .15; }
+  50%      { transform: scale(1); opacity: 1; }
+}
+@keyframes tpDrift {
+  0%, 100% { transform: translate3d(0,0,0); }
+  50%      { transform: translate3d(8px,-14px,0); }
+}
+
+/* ══ Fase 3 — Luna de Halloween (ambient/particles.js → renderMoon) ══ */
+.t-moon {
+  position: absolute;
+  top: 8%;
+  right: 10%;
+  color: #F5EFE0;
+  opacity: 0;
+  transition: opacity .6s ease, width .4s ease, height .4s ease;
+}
+.t-moon svg { width: 100%; height: 100%; display: block; }
+
+/* ══ Fase 3 — Tira decorativa (ambient/strips.js) ══ */
+#ambientStrip {
+  position: fixed;
+  left: 0; right: 0; top: 60px;
+  z-index: 49;
+  pointer-events: none;
+  overflow: hidden;
+  height: 0;
+  transition: height .4s ease;
+}
+#ambientStrip svg { position: absolute; inset: 0; opacity: 0; transition: opacity .6s ease; }
+
+/* ══ Fase 3 — Intensidad 2 ("Intenso", default) ══
+   Todo aditivo bajo html[data-int="2"] — Intensidad 1 ("Sutil") es
+   exactamente la Fase 2 tal cual, sin ninguna de estas reglas. */
+html[data-int="2"] .t-glow { animation: tGlowBreathe 7s ease-in-out infinite; }
+@keyframes tGlowBreathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.08); }
+}
+
+html[data-int="2"] #ambientHost::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(600px circle at 0% 120%, var(--t-accent2, transparent), transparent 70%);
+  opacity: .22;
+}
+
+html[data-int="2"] .topbar {
+  background: linear-gradient(180deg, var(--t-tint, var(--navy)) 0%, color-mix(in srgb, var(--t-tint, var(--navy)) 70%, var(--brand-accent) 30%) 100%);
+  box-shadow: 0 2px 20px rgba(0,0,0,.2), 0 1px 0 var(--brand-accent);
+}
+
+html[data-int="2"] .up-card {
+  border-color: color-mix(in srgb, var(--brand-accent) 22%, var(--border));
+}
+html[data-int="2"] .up-card:hover {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-accent) 28%, transparent), var(--shadow-md);
+}
+
+html[data-int="2"] .screen-title { position: relative; padding-left: 14px; }
+html[data-int="2"] .screen-title::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 2px; bottom: 2px;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--brand-accent);
+}
+html[data-int="2"][data-theme="dark"] .screen-title {
+  text-shadow: 0 0 14px color-mix(in srgb, var(--brand-accent) 35%, transparent);
+}
+
+html[data-int="2"] #ambientStrip { filter: drop-shadow(0 3px 6px rgba(0,0,0,.25)); }
+
+html[data-int="2"] .tb-ornament { height: 22px; min-width: 22px; }
+html[data-int="2"] .tb-orn-layer svg {
+  width: 22px; height: 22px;
+  filter: drop-shadow(0 0 4px var(--brand-accent));
+}
+
+html[data-int="2"] .t-moon { animation: tMoonPulse 4s ease-in-out infinite; }
+@keyframes tMoonPulse {
+  0%, 100% { filter: drop-shadow(0 0 6px var(--t-accent, transparent)); }
+  50%      { filter: drop-shadow(0 0 14px var(--t-accent, transparent)); }
+}
+
+html[data-int="2"] .btn-amber,
+html[data-int="2"][data-theme="dark"] .btn-primary {
+  box-shadow: 0 6px 22px color-mix(in srgb, var(--brand-accent) 55%, transparent);
+}
+
+/* ══ prefers-reduced-motion: apaga partículas y vuelve todo instantáneo ══
+   (sección 6 de la propuesta extiende esto a botones/toasts en la
+   Fase 4; aquí cubrimos todo lo que esta fase introduce). */
+@media (prefers-reduced-motion: reduce) {
+  #ambientHost, #ambientHost::after, .t-glow, .t-particles, .t-moon,
+  .tb-orn-layer, #ambientStrip, #ambientStrip svg, .topbar {
+    transition: none !important;
+    animation: none !important;
+  }
+  .t-particles { display: none !important; }
+}
+

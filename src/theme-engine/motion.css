@@ -1,0 +1,176 @@
+/**
+ * theme-engine/motion.css
+ * Dynamic Experience — Fase 4: tokens de movimiento (sección 6) +
+ * utilidades de microinteracción. Estas clases NO son propiedad de un
+ * tema (no consumen --t-*), son infraestructura de movimiento general
+ * — por eso viven separadas de theme-engine.css, aunque ambos archivos
+ * se enlazan juntos desde index.html bajo el mismo paraguas de Dynamic
+ * Experience.
+ *
+ * Reutiliza y unifica en vez de duplicar (regla 0): los `.btn:hover`/
+ * `:active` ya existentes en index.html YA hacían casi exactamente lo
+ * que pide la sección 6 (translateY(-1px) / scale) — aquí solo se les
+ * pone el token de duración, no se reescriben. `celebratePop` (ya
+ * existente) se sigue usando para modales grandes; aquí se define UN
+ * único `miPop` adicional para elementos chicos (íconos, checkmarks) —
+ * no uno por cada feature.
+ */
+
+:root {
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --dur-slow: 320ms;
+  --ease: cubic-bezier(.2, .8, .2, 1);
+}
+
+/* ══ Ripple de botones (450ms al clic) — Motion.wireButtonRipple() ══ */
+.btn, .fix-save, .fix-save-marchamo { position: relative; overflow: hidden; }
+.mi-ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255,255,255,.45);
+  transform: scale(0);
+  opacity: 1;
+  animation: miRipple .45s ease-out;
+  pointer-events: none;
+}
+@keyframes miRipple { to { transform: scale(1.6); opacity: 0; } }
+
+/* ══ Shake (campo vacío / error) — Motion.shake() ══ */
+.mi-shake { animation: miShake .4s var(--ease); }
+@keyframes miShake {
+  20%, 60% { transform: translateX(-4px); }
+  40%, 80% { transform: translateX(4px); }
+}
+
+/* ══ Destello de fondo (número que cambió) — Motion.flashBg() ══
+   Usa --brand-accent (identidad, NO semántico) — es un "esto se
+   actualizó", no un estado de éxito/advertencia/error. */
+.mi-flash { animation: miFlashBg .8s var(--ease); border-radius: 6px; }
+@keyframes miFlashBg {
+  from { background: color-mix(in srgb, var(--brand-accent) 35%, transparent); }
+  to   { background: transparent; }
+}
+
+/* ══ Pop chico (ícono/checkmark) — Motion.popIcon(), 400ms ══ */
+.mi-pop { animation: miPop .4s var(--ease); }
+@keyframes miPop {
+  0%   { transform: scale(.6); }
+  60%  { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+/* ══ Entrada escalonada de contenido (45ms entre ítems, máx. 8) ══
+   Se activa asignando animation-delay inline por índice (ver
+   renderQualityScreen() en ui.js) — la clase solo define la forma. */
+.mi-stagger-in { animation: miStaggerIn var(--dur) var(--ease) both; }
+@keyframes miStaggerIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ══ Secuencia de guardado de tarjetas — Motion.runSaveSequence() ══ */
+.mi-btn-spin { color: transparent !important; }
+.mi-btn-spin::after {
+  content: '';
+  position: absolute;
+  inset: 0; margin: auto;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  border: 2px solid #1A0F00;
+  border-top-color: transparent;
+  animation: miSpin .6s linear infinite;
+}
+[data-theme="dark"] .mi-btn-spin::after { border-color: #fff; border-top-color: transparent; }
+@keyframes miSpin { to { transform: rotate(360deg); } }
+
+/* Colapso de altura (260ms) — reutiliza `transition:all .3s ease` que
+   .fix-card/.fix-card-marchamo YA traen en index.html. NO se fija un
+   max-height fijo en el estado de reposo (una tarjeta de marchamos
+   puede crecer a varias filas — un techo arbitrario la recortaría);
+   Motion.runSaveSequence() mide `scrollHeight` real y lo fija inline
+   ANTES de agregar .mi-collapse, así la transición a 0 parte de un
+   valor real, no de un techo adivinado. */
+.fix-card, .fix-card-marchamo { overflow: hidden; }
+.fix-card.mi-collapse, .fix-card-marchamo.mi-collapse {
+  max-height: 0 !important; opacity: 0; border-width: 0;
+  padding-top: 0; padding-bottom: 0;
+  margin-block: -10px; /* compensa el gap:10px de .fix-list para no dejar un hueco visible */
+  pointer-events: none;
+}
+
+/* ══ Ráfaga de exportación (700ms, se autodestruye) — Motion.burst() ══ */
+.mi-burst-host { position: fixed; width: 0; height: 0; z-index: 500; pointer-events: none; }
+.mi-burst-particle {
+  position: absolute; left: 0; top: 0;
+  width: 7px; height: 7px; border-radius: 50%;
+  animation-name: miBurst;
+  animation-timing-function: cubic-bezier(.2,.8,.2,1);
+  animation-fill-mode: forwards;
+}
+@keyframes miBurst { to { transform: translate(var(--dx), var(--dy)) scale(.3); opacity: 0; } }
+
+/* ══ Toasts (entrada 220ms, vida 3.8s, salida 160ms, máx. 3 visibles) ══
+   --tc usa los colores SEMÁNTICOS existentes (--green/--amber/--red/
+   --blue) — la severidad de un aviso nunca se tematiza (regla 0). */
+.mi-toasts {
+  position: fixed; right: 16px; bottom: 16px; z-index: 480;
+  display: flex; flex-direction: column; gap: 8px;
+  width: min(320px, calc(100% - 32px));
+  pointer-events: none;
+}
+.mi-toast {
+  --tc: var(--blue);
+  pointer-events: auto;
+  position: relative; overflow: hidden;
+  display: flex; align-items: flex-start; gap: 10px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--tc); border-radius: 12px;
+  padding: 10px 12px; box-shadow: var(--shadow-lg);
+  font-size: 12.5px; color: var(--text);
+  animation: miToastIn .22s var(--ease) both;
+}
+.mi-toast-ok   { --tc: var(--green); }
+.mi-toast-warn { --tc: var(--amber); }
+.mi-toast-err  { --tc: var(--red); }
+.mi-toast-info { --tc: var(--blue); }
+.mi-toast-out { animation: miToastOut .16s ease-in both; }
+.mi-toast::after {
+  content: ''; position: absolute; left: 0; bottom: 0;
+  height: 2px; width: 100%; background: var(--tc);
+  transform-origin: left; animation: miToastLife 3.8s linear forwards;
+}
+.mi-toast-x {
+  margin-left: auto; background: none; border: 0;
+  color: var(--text-3); cursor: pointer; font-size: 12px; flex-shrink: 0;
+}
+@keyframes miToastIn  { from { opacity: 0; transform: translateX(24px); } }
+@keyframes miToastOut { to   { opacity: 0; transform: translateX(24px); } }
+@keyframes miToastLife { to  { transform: scaleX(0); } }
+
+/* ══ Estados genéricos — skeleton shimmer (1.2s), listos para adoptar ══
+   No forzados en ningún lado todavía (ver reporte de Fase 4): se dejan
+   como utilidad disponible para reemplazar textos "Cargando…" por
+   placeholders, cuando/donde tenga sentido sin tocar estructura. */
+.mi-skeleton {
+  height: 11px; border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-3) 25%, var(--surface-2) 50%, var(--surface-3) 75%);
+  background-size: 200% 100%;
+  animation: miShimmer 1.2s linear infinite;
+}
+@keyframes miShimmer { to { background-position: -200% 0; } }
+
+/* ══ prefers-reduced-motion: instantáneo, sin excepciones ══
+   Red de seguridad adicional a los checks en JS (motion.js ya evita
+   crear animaciones cuando esto aplica); esto cubre además las
+   animaciones puramente-CSS (fadeUp de .screen, celebratePop de
+   modales, hover de .btn) que no pasan por motion.js. */
+@media (prefers-reduced-motion: reduce) {
+  .screen, .mi-stagger-in, .mi-shake, .mi-flash, .mi-pop, .mi-ripple,
+  .mi-toast, .mi-toast::after, .fix-card, .fix-card-marchamo,
+  .btn, .fix-save, .fix-save-marchamo, .mi-btn-spin::after,
+  .celebrate-box, .modal-box, .warn-modal-box, .route-picker-box {
+    animation: none !important;
+    transition: none !important;
+  }
+}
