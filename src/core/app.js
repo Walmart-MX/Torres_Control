@@ -471,6 +471,21 @@ export async function init() {
   _setWarnModalEvents(Events);
 
   UI.applyTheme(State.theme);
+
+  // Dynamic Experience — arranca el Theme Engine AQUÍ, antes de mostrar
+  // cualquier vista de auth. Hasta ahora vivía en continueInit() (ver
+  // comentario histórico más abajo) porque solo le pintaba cosas a
+  // .shell, que de cualquier forma está oculto hasta el login — pero
+  // desde que el login tiene su propia escena ambiental (#authAmbient/
+  // #authOrnament/#authStrip, ver ambient/login-stage.js), ThemeEngine
+  // tiene que haber corrido ANTES de que showAuthKnown()/showAuthFull()
+  // revelen el overlay, o el login se ve pelón (sin --t-* en :root, sin
+  // partículas, sin ornamento) aunque la sesión nunca se haya
+  // restaurado. ThemeEngine.init() es idempotente (ver sus propios
+  // guards internos), así que ya no hace falta llamarlo de nuevo en
+  // continueInit() — un solo arranque cubre login y app autenticada.
+  ThemeEngine.init();
+
   wireAuthForms();
 
   if (Auth.restoreSession()) {
@@ -501,13 +516,6 @@ export async function init() {
  * retiran (reemplazados por el flujo de auth de arriba).
  */
 async function continueInit() {
-  // Dynamic Experience — arranca el Theme Engine. Se llama aquí (y no
-  // en init()) porque continueInit() es el único punto común a los TRES
-  // caminos que revelan la app (sesión restaurada, login normal, primer
-  // login) — mismos tres puntos que agregan 'app-authed' (ver cabecera
-  // de este archivo). En Fase 1 solo existe el tema 'default' en el
-  // registro, así que esto no cambia nada visible todavía.
-  ThemeEngine.init();
   Motion.wireButtonRipple(); // idempotente — ver nota en motion.js
 
   renderStepper();
