@@ -193,3 +193,89 @@ html[data-int="2"][data-theme="dark"] .btn-primary {
   .t-particles { display: none !important; }
 }
 
+/* ══ Escena del login (ambient/login-stage.js) ══
+   Única pantalla donde el tema tiene protagonismo total — ver el
+   docstring de login-stage.js para el porqué. El fondo del overlay
+   deja de ser el rgba(0,10,30,.7) genérico que comparte con el resto
+   de los modales (.modal-overlay en index.html) y se vuelve un degradé
+   inmerso en los tokens del tema activo; #authBox (la tarjeta real del
+   formulario) sigue siendo 100% opaca (--surface) así que el contraste
+   del formulario NUNCA depende de qué tan dramático se vea el fondo. */
+#authOverlay {
+  background:
+    radial-gradient(1100px circle at 12% -10%, color-mix(in srgb, var(--t-accent, #F5A623) 32%, transparent), transparent 60%),
+    radial-gradient(900px circle at 105% 110%, color-mix(in srgb, var(--t-accent2, #1E9E6B) 28%, transparent), transparent 55%),
+    linear-gradient(160deg, var(--t-tint, #0B1D33) 0%, #060B14 100%);
+  overflow: hidden;
+}
+#authAmbient, #authStrip, .auth-ornament {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+#authBox { position: relative; z-index: 1; }
+
+/* Aura que respira detrás de la tarjeta — a diferencia de .t-glow (que
+   vive en una esquina), esta cubre el centro de toda la pantalla; por
+   eso no reutiliza esa clase, el efecto buscado es distinto. */
+#authOverlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(520px circle at 50% 40%, color-mix(in srgb, var(--t-accent, #F5A623) 16%, transparent), transparent 70%);
+  animation: authAuraBreathe 6s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes authAuraBreathe { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+/* Ornamento gigante — MISMO renderOrnaments() del topbar, reescalado
+   por CSS a un tamaño de vitrina y corrido del centro exacto (donde
+   quedaría tapado por #authBox) hacia la esquina superior derecha. */
+.auth-ornament { color: var(--t-accent, #F5A623); }
+.auth-ornament .tb-orn-layer {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%) translate(16vw, -14vh);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0;
+  transition: opacity .8s ease;
+}
+.auth-ornament .tb-orn-layer svg {
+  width: 46vmin; height: 46vmin; max-width: 360px; max-height: 360px;
+  filter: drop-shadow(0 0 48px currentColor);
+}
+
+/* La tira decorativa recorre el borde inferior en vez del filo del
+   topbar — aquí sobra espacio vertical, así que renderStrips() recibe
+   un baseHeight mucho más grande (ver login-stage.js). */
+#authStrip { inset: auto 0 0 0; overflow: hidden; }
+#authStrip svg { position: absolute; inset: 0; opacity: 0; transition: opacity .6s ease; }
+
+/* La tarjeta del login flota con un resplandor del acento del tema
+   activo, y el logo pulsa suavemente con --brand-accent (igual acento
+   de marca que ya usa el resto de la app — sección 7). */
+#authBox {
+  box-shadow: var(--shadow-lg), 0 0 70px color-mix(in srgb, var(--t-accent, #F5A623) 32%, transparent);
+  border-color: color-mix(in srgb, var(--t-accent, #F5A623) 30%, var(--border));
+}
+/* #authBox .modal-logo-mark (no .modal-logo-mark a secas): el modal de
+   Configuración reutiliza la MISMA clase para su logo y NO debe
+   heredar este efecto — el protagonismo épico es exclusivo del login.
+   El selector con ID de paso resuelve un problema de cascada:
+   theme-engine.css se carga ANTES que el <style> inline de index.html
+   (que define .modal-logo-mark con background var(--amber)), así que
+   una regla de igual especificidad ahí perdería — #authBox la hace
+   ganar sin pelear por orden de carga. */
+#authBox .modal-logo-mark { background: var(--brand-accent); animation: authLogoPulse 3s ease-in-out infinite; }
+@keyframes authLogoPulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand-accent) 45%, transparent); }
+  50%      { box-shadow: 0 0 0 9px color-mix(in srgb, var(--brand-accent) 0%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #authOverlay::before, #authBox .modal-logo-mark, .auth-ornament .tb-orn-layer {
+    animation: none !important;
+    transition: none !important;
+  }
+}

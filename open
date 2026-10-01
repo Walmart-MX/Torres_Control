@@ -1,0 +1,5 @@
+src\theme-engine\theme-engine.js -=65 close=65
+src\theme-engine\ambient\login-stage.js -=5 close=5
+src\theme-engine\ambient\strips.js -=62 close=62
+src\core\app.js -=163 close=163
+index.html -=512 close=512

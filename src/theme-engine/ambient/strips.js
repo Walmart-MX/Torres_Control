@@ -63,10 +63,13 @@ function stripPatternMarkup(themeId, type, colors, tileH) {
  * Sincroniza la(s) tira(s) dentro de `host` (#ambientStrip). Altura
  * base 14px, ×1.4 en Intenso (sección 5 — "banderines/luces al 140% de
  * altura"); el drop-shadow de Intenso vive en CSS ([data-int="2"]).
+ * `opts.baseHeight` permite a un host distinto (p.ej. la escena del
+ * login, ver ambient/login-stage.js) pedir una tira más alta sin
+ * duplicar esta función — por defecto 14px, igual que siempre.
  */
-export function renderStrips(host, entries, byId, intensity) {
+export function renderStrips(host, entries, byId, intensity, opts = {}) {
   if (!host) return;
-  const baseH = 14;
+  const baseH = opts.baseHeight ?? 14;
   const h = intensity === '2' ? Math.round(baseH * 1.4) : baseH;
 
   const active = entries.filter(([id]) => byId.get(id)?.ambient?.strip);

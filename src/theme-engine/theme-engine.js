@@ -38,6 +38,7 @@ import { UI } from '../ui/ui.js';
 import { renderOrnaments } from './ambient/ornaments.js';
 import { renderParticleLayers, renderMoon } from './ambient/particles.js';
 import { renderStrips } from './ambient/strips.js';
+import { renderLoginStage } from './ambient/login-stage.js';
 
 const LS_PREF = 'sd_theme_pref';      // 'auto' | 'default' | '<id>'
 const LS_MODE = 'sd_theme_mode';      // 'auto' | 'light' | 'dark'
@@ -182,6 +183,11 @@ export function applyTheme(root, weights, opts = {}) {
  * cambió desde el último render (ver dataset.int en particles.js/
  * strips.js) — "cambiar la intensidad reconstruye las capas
  * ambientales", tal cual pide la sección 5 de la propuesta.
+ *
+ * Última línea: renderLoginStage() — la escena épica del overlay de
+ * autenticación (ambient/login-stage.js). Es la Única excepción al
+ * 80/20: el login no es superficie de trabajo, así que ahí el tema
+ * puede ir a tope sin pedirle permiso a nadie.
  */
 function mountAmbientLayers(entries, byId, intensity) {
   const ambientHost = document.getElementById('ambientHost');
@@ -190,6 +196,7 @@ function mountAmbientLayers(entries, byId, intensity) {
   renderParticleLayers(ambientHost, entries, byId, intensity);
   renderMoon(ambientHost, entries, byId, intensity);
   renderStrips(document.getElementById('ambientStrip'), entries, byId, intensity);
+  renderLoginStage(entries, byId); // escena del login — siempre a tope, ver ambient/login-stage.js
 }
 
 const MIN_ANIMATED_WEIGHT = 0.02; // sección 4: por debajo de esto, la capa se pausa (no anima, aunque siga montada)
