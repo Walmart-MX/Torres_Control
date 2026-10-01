@@ -943,9 +943,9 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
        por ThemeEngine (ver theme-engine.js → mountAmbientLayers →
        ambient/login-stage.js). Única excepción al 80/20: aquí no hay
        superficie de trabajo que proteger, así que el tema manda. -->
-  <div id="authAmbient" aria-hidden="true"></div>
-  <div class="auth-ornament" id="authOrnament" aria-hidden="true"></div>
-  <div id="authStrip" aria-hidden="true"></div>
+  <div id="authAmbient" aria-hidden="true" style="position:absolute;inset:0;z-index:0;pointer-events:none"></div>
+  <div class="auth-ornament" id="authOrnament" aria-hidden="true" style="position:absolute;inset:0;z-index:0;pointer-events:none"></div>
+  <div id="authStrip" aria-hidden="true" style="position:absolute;inset:auto 0 0 0;z-index:0;pointer-events:none"></div>
   <div class="modal-box" id="authBox">
     <div class="modal-logo">
       <div class="modal-logo-mark">🚛</div>

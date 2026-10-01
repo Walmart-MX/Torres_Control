@@ -24,7 +24,7 @@
  * internamente, no hay nada que repetir aquí).
  */
 import { renderOrnaments } from './ornaments.js';
-import { renderParticleLayers, renderMoon } from './particles.js';
+import { renderParticleLayers, renderMoon, renderBaselineSparkle } from './particles.js';
 import { renderStrips } from './strips.js';
 
 const LOGIN_INTENSITY = '2';
@@ -42,4 +42,17 @@ export function renderLoginStage(entries, byId) {
   renderMoon(particleHost, entries, byId, LOGIN_INTENSITY);
   renderOrnaments(ornamentHost, entries, byId);
   renderStrips(stripHost, entries, byId, LOGIN_INTENSITY, { baseHeight: LOGIN_STRIP_HEIGHT });
+
+  // Si ninguno de los temas activos trae partículas propias (p.ej. sep,
+  // "Mes Patrio": solo banderines + glow por diseño), el login igual
+  // debe sentirse vivo — chispeo de respaldo con los acentos YA
+  // mezclados (ver particles.js → renderBaselineSparkle). Si SÍ hay al
+  // menos un tema con partículas propias en la mezcla (crossfade de
+  // mes), se retira para no amontonar dos capas de partículas a la vez.
+  const hasOwnParticles = entries.some(([id]) => byId.get(id)?.ambient?.particles);
+  if (hasOwnParticles) {
+    particleHost?.querySelector('.t-particles[data-theme-id="_baseline"]')?.remove();
+  } else {
+    renderBaselineSparkle(particleHost);
+  }
 }

@@ -202,10 +202,33 @@ html[data-int="2"][data-theme="dark"] .btn-primary {
    formulario) sigue siendo 100% opaca (--surface) así que el contraste
    del formulario NUNCA depende de qué tan dramático se vea el fondo. */
 #authOverlay {
+  /* Petición explícita: "todos los temas se ven mejor en oscuro" — el
+     login SIEMPRE se pinta oscuro/negro, sin importar sd_theme_mode ni
+     el data-theme real de <html> (eso sigue intacto para el resto de
+     la app, que respeta la preferencia real del usuario). No tocamos
+     data-theme aquí — solo redeclaramos las variables de superficie/
+     texto/borde a sus valores oscuros DENTRO de este contenedor; como
+     TODOS los .modal-* ya consumen --surface2/--text2/--border2/etc.
+     (el puente de compatibilidad, ver :root más arriba), heredan el
+     oscuro solos — cero cambios en los componentes. Más negro que el
+     modo oscuro normal de la app (--surface:#0E1626) a propósito: es
+     una vitrina, no una pantalla de trabajo, y entre más negro el
+     fondo, más resalta el acento de cada tema (sección de abajo). */
+  --surface: #0A0D12;
+  --surface-2: #12161D;
+  --surface-3: #171C24;
+  --text: #F3F6FA;
+  --text-2: #A6B2C2;
+  --text-3: #7C8898;
+  --text-4: #57627A;
+  --border: rgba(255,255,255,.10);
+  --border-2: rgba(255,255,255,.18);
+  --navy: #05070A;
+  --navy-2: #0B0F14;
   background:
     radial-gradient(1100px circle at 12% -10%, color-mix(in srgb, var(--t-accent, #F5A623) 32%, transparent), transparent 60%),
     radial-gradient(900px circle at 105% 110%, color-mix(in srgb, var(--t-accent2, #1E9E6B) 28%, transparent), transparent 55%),
-    linear-gradient(160deg, var(--t-tint, #0B1D33) 0%, #060B14 100%);
+    linear-gradient(160deg, var(--t-tint, #0B1D33) 0%, #020305 100%);
   overflow: hidden;
 }
 #authAmbient, #authStrip, .auth-ornament {

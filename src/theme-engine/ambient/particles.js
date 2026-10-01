@@ -102,6 +102,41 @@ export function renderParticleLayers(host, entries, byId, intensity) {
   });
 }
 
+/**
+ * Chispeo de respaldo — SOLO para ambient/login-stage.js. Algunos temas
+ * (p.ej. sep, "Mes Patrio": solo banderines + glow por diseño de la
+ * tabla aprobada) no definen ambient.particles a propósito — en la app
+ * de trabajo eso está bien (el 80/20 pide moderación). Pero el login
+ * SÍ debe sentirse siempre vivo, así que si NINGUNO de los temas
+ * activos trae partículas propias, login-stage.js llama esto como red
+ * de seguridad: un puñado de chispas con los acentos YA mezclados
+ * (--t-accent/--t-accent2, leídos del DOM en vez de recibidos como
+ * parámetro para no acoplar este archivo a la resolución de pesos).
+ * Se monta una sola vez (no se reconstruye en cada recompute) para no
+ * cortar la animación de las chispas ya en vuelo; login-stage.js la
+ * retira si en algún momento SÍ hay un tema con partículas propias en
+ * la mezcla (crossfade de mes), para no amontonar dos capas a la vez.
+ */
+export function renderBaselineSparkle(host) {
+  if (!host) return;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    host.querySelector('.t-particles[data-theme-id="_baseline"]')?.remove();
+    return;
+  }
+  if (host.querySelector('.t-particles[data-theme-id="_baseline"]')) return; // ya montado, se queda vivo
+  const styles = getComputedStyle(document.documentElement);
+  const colors = [
+    styles.getPropertyValue('--t-accent').trim() || '#F5A623',
+    styles.getPropertyValue('--t-accent2').trim() || '#1E9E6B',
+  ];
+  const layer = document.createElement('div');
+  layer.className = 't-particles';
+  layer.dataset.themeId = '_baseline';
+  layer.style.opacity = '1';
+  for (let i = 0; i < 10; i++) layer.appendChild(buildParticle('spark', colors, [2, 4], 0.8));
+  host.appendChild(layer);
+}
+
 // Luna grande de Halloween (ambient.moon:true) — pálida, con glow del
 // acento mezclado; 28px en Sutil, 38px + pulso en Intenso (ver CSS).
 const MOON_SVG = '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/></svg>';
