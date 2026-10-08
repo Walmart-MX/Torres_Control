@@ -682,6 +682,16 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 .mc-metric-val{font-family:var(--disp);font-weight:800;font-size:22px}
 .mc-metric-label{font-size:10.5px;color:var(--text-3);margin-top:2px}
 
+/* -- Variantes de Cita (Fase 1, oct-2026) -- */
+.cita-pattern-section{margin-top:24px;border-top:1px solid var(--border);padding-top:16px}
+.cita-pattern-form{display:flex;flex-direction:column;gap:10px;margin-bottom:10px}
+.cita-pattern-row{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end}
+.cita-pattern-row label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-3);font-weight:600}
+.cita-pattern-row select,.cita-pattern-row input[type=text]{font-size:12px;padding:7px 9px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text-1)}
+.cita-pattern-checkbox{flex-direction:row !important;align-items:center;gap:6px !important}
+.cita-pattern-submit-row{justify-content:space-between;align-items:center}
+.cita-pattern-submit-row code{font-family:var(--mono);background:var(--surface-2);padding:2px 6px;border-radius:5px}
+
 /* ══════════════════ EXPORTACIÓN ══════════════════ */
 .exp-stage{text-align:center;padding:20px 10px}
 .exp-icon{
@@ -1454,11 +1464,86 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
             <div class="cat-status" id="mcMaintStatus"></div>
 
             <div style="margin-top:16px">
-              <button class="btn btn-ghost btn-sm" id="btnMcToggleResolved">🗂️ Ver incidencias resueltas</button>
+              <button class="btn btn-ghost btn-sm" id="btnMcToggleResolved">Ver incidencias resueltas</button>
               <div class="cat-table-wrap" id="mcResolvedWrap" style="display:none;margin-top:10px">
                 <table class="cat-table">
                   <thead><tr><th>Origen</th><th>Detalle</th><th>Ocurrencias totales</th><th>Resuelto</th><th>Por</th></tr></thead>
                   <tbody id="mcResolvedTbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Variantes de Cita (Fase 1, oct-2026) — catalogo
+                 self-service de formatos de cita no estandar. Ver
+                 features/citas/ + ui/cita-pattern-ui.js. El formulario
+                 solo usa selects/checkboxes (nunca una regex escrita a
+                 mano) — sampleCitaText() genera la vista previa en vivo
+                 en #citaPatternPreview (ver app.js). -->
+            <div class="cita-pattern-section">
+              <div class="admin-hd">
+                <h3>Variantes de Cita</h3>
+                <p>¿La app no reconocio una cita por venir en un formato distinto (ej. "CITA:04/10/2026" pegado, sin espacio)? Agrega el formato aqui — sin tocar codigo, aplica desde el siguiente PDF que subas. El formato estandar (DD/MM/AAAA o DD-MM-AAAA, hora opcional) siempre se prueba primero y no se puede quitar.</p>
+              </div>
+
+              <form id="citaPatternForm" class="cita-pattern-form">
+                <div class="cita-pattern-row">
+                  <label>Orden de fecha
+                    <select name="date_order">
+                      <option value="DMY">Dia / Mes / Ano</option>
+                      <option value="MDY">Mes / Dia / Ano</option>
+                      <option value="YMD">Ano / Mes / Dia</option>
+                    </select>
+                  </label>
+                  <label>Separador
+                    <select name="date_sep">
+                      <option value="/">/ (04/10/2026)</option>
+                      <option value="-">- (04-10-2026)</option>
+                      <option value=".">. (04.10.2026)</option>
+                    </select>
+                  </label>
+                  <label>Digitos de ano
+                    <select name="year_digits">
+                      <option value="4">4 (2026)</option>
+                      <option value="2">2 (26)</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="cita-pattern-row">
+                  <label class="cita-pattern-checkbox">
+                    <input type="checkbox" name="allow_single_digit">
+                    Dia/mes sin cero a la izquierda (ej. "4" en vez de "04")
+                  </label>
+                  <label class="cita-pattern-checkbox">
+                    <input type="checkbox" name="has_time" id="citaPatternHasTime">
+                    Incluye hora
+                  </label>
+                  <label id="citaPatternTimeSepWrap" style="display:none">Separador de hora
+                    <select name="time_sep">
+                      <option value=":">: (10:30)</option>
+                      <option value=".">. (10.30)</option>
+                      <option value="h">h (10h30)</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="cita-pattern-row">
+                  <label style="flex:1">Texto de ejemplo que encontraste (opcional, solo referencia)
+                    <input type="text" name="example_text" maxlength="120" placeholder='ej. CITA:04/10/2026'>
+                  </label>
+                  <label style="flex:1">Etiqueta (opcional)
+                    <input type="text" name="label" maxlength="60" placeholder="ej. Variante del CeDis Toluca">
+                  </label>
+                </div>
+                <div class="cita-pattern-row cita-pattern-submit-row">
+                  <span>Vista previa: <code id="citaPatternPreview">04/10/2026</code></span>
+                  <button type="submit" class="btn btn-primary btn-sm">Agregar variante</button>
+                </div>
+              </form>
+              <div class="cat-status" id="citaPatternStatus"></div>
+
+              <div class="cat-table-wrap" style="margin-top:12px">
+                <table class="cat-table">
+                  <thead><tr><th>Variante</th><th>Ejemplo generado</th><th>Texto real que la origino</th><th></th></tr></thead>
+                  <tbody id="citaPatternTbody"></tbody>
                 </table>
               </div>
             </div>

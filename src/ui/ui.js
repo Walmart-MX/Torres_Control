@@ -228,6 +228,7 @@ import { CATALOGS } from '../features/catalogs/catalog-registry.js';
 import { priorityTier } from '../features/incidents/incident-engine.js';
 import { INCIDENT_TYPES } from '../features/incidents/incident-types.js';
 import { getInlineFix } from '../features/incidents/inline-fix.js';
+import { renderCitaPatterns as _renderCitaPatterns, setCitaPatternStatus as _setCitaPatternStatus } from './cita-pattern-ui.js';
 import { Motion } from '../theme-engine/motion.js';
 
 let Events;
@@ -1719,6 +1720,11 @@ showAuthFull() {
     el.textContent = msg;
     if (cls === 'err') Motion.shake(el);
   },
+
+  /** Delega a ui/cita-pattern-ui.js — ver ese archivo para el detalle de render. */
+  renderCitaPatterns(patterns) { _renderCitaPatterns(patterns); },
+  /** Delega a ui/cita-pattern-ui.js. */
+  setCitaPatternStatus(msg, cls) { _setCitaPatternStatus(msg, cls); },
 
   // ── Cache History ──
   renderCacheHistory() {

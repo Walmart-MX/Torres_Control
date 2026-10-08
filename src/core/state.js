@@ -61,6 +61,12 @@ export const State = {
   catalogIndices: new Map(),
   catalogDuplicates: [],
 
+  // ── Variantes de cita (features/citas/ — Fase 1, oct-2026) ──
+  // Array de filas activas de cita_patterns (ver cita-pattern-store.js) —
+  // pasado tal cual a pdf.js→pdfExtract() como fallback de reconocimiento
+  // de citas, después del regex estándar.
+  citaPatterns: [],
+
   // ── Fuentes crudas del día operativo (4 obligatorias) ──
   // pdfData: Map<'ruta|factura' | 'ruta|D|destino', rawRow> — ver pdf.js/events.js.
   pdfData: new Map(),
