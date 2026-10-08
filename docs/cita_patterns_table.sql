@@ -39,9 +39,16 @@ alter table public.cita_patterns enable row level security;
 -- conecta siempre (ver auth.js). Sin estas policies, loadAll()/addPattern()
 -- fallarían en silencio con 0 filas (ver nota en catalog-store.js sobre
 -- diagnóstico de RLS).
-create policy if not exists "cita_patterns_select_anon" on public.cita_patterns
+-- CREATE POLICY nunca soporto IF NOT EXISTS en Postgres (no es un tema
+-- de version) -- se usa el patron estandar drop-si-existe + create.
+drop policy if exists "cita_patterns_select_anon" on public.cita_patterns;
+create policy "cita_patterns_select_anon" on public.cita_patterns
   for select to anon using (true);
-create policy if not exists "cita_patterns_insert_anon" on public.cita_patterns
+
+drop policy if exists "cita_patterns_insert_anon" on public.cita_patterns;
+create policy "cita_patterns_insert_anon" on public.cita_patterns
   for insert to anon with check (true);
-create policy if not exists "cita_patterns_update_anon" on public.cita_patterns
+
+drop policy if exists "cita_patterns_update_anon" on public.cita_patterns;
+create policy "cita_patterns_update_anon" on public.cita_patterns
   for update to anon using (true) with check (true);
