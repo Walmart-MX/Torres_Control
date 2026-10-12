@@ -592,7 +592,54 @@ function _nearestDestino(item, destPositions) {
  *   marchamoAnnots: Array<{pageNum:number,y_td:number,marchamos:string[]}>
  * }>}
  */
-export async function pdfExtract(file) {
+/**
+ * Construye un matcher {dateRe,timeRe,order,yearDigits} a partir de UNA
+ * variante de cita configurada (tabla cita_patterns). DUPLICADO a
+ * propósito desde features/citas/cita-pattern-registry.js — pdf.js no
+ * importa ningún módulo propio (ver nota de cabecera, mismo criterio
+ * que MAX_MARCH_SLOTS). Si cambias esta función, cambia también su
+ * gemela en cita-pattern-registry.js (esa es la que consume la UI de
+ * administración para la vista previa en vivo).
+ * @private
+ */
+function _buildCitaVariantMatcher(p) {
+  const digit = p.allow_single_digit ? '\\d{1,2}' : '\\d{2}';
+  const year  = p.year_digits === 2 ? '\\d{2}' : '\\d{4}';
+  const sepMap = { '/': '/', '-': '-', '.': '\\.' };
+  const sep = sepMap[p.date_sep] || '/';
+  const order = { DMY: ['D','M','Y'], MDY: ['M','D','Y'], YMD: ['Y','M','D'] }[p.date_order] || ['D','M','Y'];
+  const parts = order.map(k => k === 'Y' ? year : digit);
+  const dateRe = new RegExp(`(${parts[0]})${sep}(${parts[1]})${sep}(${parts[2]})`);
+  const timeSepMap = { ':': '[:.;]', '.': '\\.', h: '[hH]' };
+  const timeRe = p.has_time ? new RegExp(`(\\d{1,2})${timeSepMap[p.time_sep] || '[:.;]'}\\s*(\\d{2})(?![\\/\\-\\d])`) : null;
+  return { dateRe, timeRe, order, yearDigits: p.year_digits === 2 ? 2 : 4 };
+}
+
+/** Prueba `text` contra un matcher ya compilado por _buildCitaVariantMatcher(). @private */
+function _matchCitaVariant(text, matcher) {
+  const m = text.match(matcher.dateRe);
+  if (!m) return null;
+  const parts = {};
+  matcher.order.forEach((k, i) => { parts[k] = parseInt(m[i + 1], 10); });
+  const year = matcher.yearDigits === 2 ? parts.Y + 2000 : parts.Y;
+  let hour = null, minute = null;
+  if (matcher.timeRe) {
+    const tm = text.match(matcher.timeRe);
+    if (tm) { hour = parseInt(tm[1], 10); minute = parseInt(tm[2], 10); }
+  }
+  return { day: parts.D, month: parts.M, year, hour, minute };
+}
+
+/**
+ * @param {File} file
+ * @param {Array<object>} [citaPatterns] — variantes activas de
+ *   State.citaPatterns (ver features/citas/cita-pattern-store.js),
+ *   pasadas por el caller (Events.handlePDFs) — NUEVO (Fase 1,
+ *   oct-2026). pdf.js sigue sin importar Supabase/State: solo recibe
+ *   datos planos. Se prueban EN ORDEN, únicamente como fallback cuando
+ *   el regex estándar (más abajo) no matcheó — nunca lo reemplazan.
+ */
+export async function pdfExtract(file, citaPatterns = []) {
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
   const lines = [], annots = [], citaMisses = [], marchamoAnnots = [];
@@ -651,6 +698,34 @@ export async function pdfExtract(file) {
         const marchList = _extractMarchamoAnnotation(allText);
         if (marchList) {
           marchamoAnnots.push({ pageNum: p, y_td, marchamos: marchList });
+          continue;
+        }
+
+        // NUEVO (Fase 1 — catálogo de variantes de cita, oct-2026): si
+        // el regex estándar no matcheó, se prueban las variantes
+        // activas configuradas desde el Centro de Mantenimiento, en
+        // orden, primera que matchee gana. Formato de salida idéntico
+        // al del regex estándar (mismo ajuste de +1 minuto) — se
+        // duplica esa lógica aquí en vez de refactorizar el bloque de
+        // abajo, a propósito: el camino ya probado en producción queda
+        // intacto, cero riesgo de romperlo con este cambio.
+        let variantHit = null;
+        for (const cfgPattern of citaPatterns) {
+          variantHit = _matchCitaVariant(allText, _buildCitaVariantMatcher(cfgPattern));
+          if (variantHit) break;
+        }
+        if (variantHit) {
+          let { day, month, year, hour, minute } = variantHit;
+          if (hour !== null && minute !== null) {
+            minute += 1;
+            if (minute >= 60) { minute = 0; hour += 1; }
+            if (hour >= 24) hour = 0;
+          }
+          const fecha = String(day).padStart(2, '0') + '/' + String(month).padStart(2, '0') + '/' + year;
+          const citaTxt = hour !== null
+            ? `${fecha} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+            : fecha;
+          annots.push({ pageNum: p, y_td, cita: citaTxt.trim() });
           continue;
         }
 

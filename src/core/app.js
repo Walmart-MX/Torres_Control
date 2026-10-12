@@ -190,6 +190,8 @@ import { FactCache } from '../features/fact-cache.js';
 import { initCatalog } from '../features/catalog.js';
 import { DispatchHistory } from '../features/dispatch-history.js';
 import { CatalogStore } from '../features/catalogs/catalog-store.js';
+import { CitaPatternStore } from '../features/citas/cita-pattern-store.js';
+import { sampleCitaText } from '../features/citas/cita-pattern-registry.js';
 import { Autosave } from '../features/autosave.js';
 import { ConfirmDialog } from '../ui/confirm-dialog.js';
 import { ThemeEngine } from '../theme-engine/theme-engine.js';
@@ -749,7 +751,7 @@ async function continueInit() {
 
     document.querySelectorAll('.admin-nav-item').forEach(b => b.classList.toggle('active', b === btn));
     document.querySelectorAll('.admin-panel').forEach(p => p.classList.toggle('active', p.dataset.adminPanel === btn.dataset.admin));
-    if (btn.dataset.admin === 'maint') Events.loadMaintenanceCenter();
+    if (btn.dataset.admin === 'maint') { Events.loadMaintenanceCenter(); Events.loadCitaPatterns(); }
     if (btn.dataset.admin === 'users') refreshUsersAdmin();
   });
   document.getElementById('mcVentanaFile').addEventListener('change', function() {
@@ -866,6 +868,63 @@ async function continueInit() {
   });
   document.getElementById('btnMcToggleResolved').addEventListener('click', () => Events.toggleResolvedIncidents());
 
+  // ── Variantes de Cita (Fase 1, oct-2026) ──
+  // Vista previa en vivo — se recalcula con cualquier cambio del
+  // formulario, usando sampleCitaText() (features/citas/cita-pattern-
+  // registry.js) para que el operador vea el formato resultante SIN
+  // leer ni escribir una regex.
+  const citaForm    = document.getElementById('citaPatternForm');
+  const citaPreview = document.getElementById('citaPatternPreview');
+  const citaHasTime = document.getElementById('citaPatternHasTime');
+  const citaTimeWrap = document.getElementById('citaPatternTimeSepWrap');
+
+  const updateCitaPreview = () => {
+    if (!citaForm || !citaPreview) return;
+    const fd = new FormData(citaForm);
+    citaPreview.textContent = sampleCitaText({
+      date_order: fd.get('date_order'),
+      date_sep: fd.get('date_sep'),
+      year_digits: fd.get('year_digits'),
+      allow_single_digit: fd.get('allow_single_digit') === 'on',
+      has_time: fd.get('has_time') === 'on',
+      time_sep: fd.get('time_sep'),
+    });
+  };
+  if (citaForm) {
+    citaForm.addEventListener('input', updateCitaPreview);
+    citaForm.addEventListener('change', updateCitaPreview);
+    updateCitaPreview();
+  }
+  if (citaHasTime && citaTimeWrap) {
+    citaHasTime.addEventListener('change', () => {
+      citaTimeWrap.style.display = citaHasTime.checked ? '' : 'none';
+    });
+  }
+  if (citaForm) {
+    citaForm.addEventListener('submit', e => {
+      e.preventDefault();
+      const fd = new FormData(citaForm);
+      Events.addCitaPattern({
+        label: fd.get('label'),
+        date_order: fd.get('date_order'),
+        date_sep: fd.get('date_sep'),
+        year_digits: fd.get('year_digits'),
+        allow_single_digit: fd.get('allow_single_digit') === 'on',
+        has_time: fd.get('has_time') === 'on',
+        time_sep: fd.get('time_sep'),
+        example_text: fd.get('example_text'),
+      });
+      citaForm.reset();
+      if (citaTimeWrap) citaTimeWrap.style.display = 'none';
+      updateCitaPreview();
+    });
+  }
+  document.getElementById('citaPatternTbody')?.addEventListener('click', e => {
+    const btn = e.target.closest('[data-cita-pattern-delete]');
+    if (!btn) return;
+    Events.deleteCitaPattern(btn.dataset.citaPatternDelete);
+  });
+
   document.getElementById('btnHistoryOpenAdmin')?.addEventListener('click', () => Events.openHistory());
   document.getElementById('btnOpenSettingsAdmin')?.addEventListener('click', () => UI.openModal());
 
@@ -946,6 +1005,7 @@ async function continueInit() {
   UI.setCatStatus(catResult.msg, catResult.ok ? 'ok' : 'err');
 
   await CatalogStore.loadAll();
+  await CitaPatternStore.loadAll();
   UI.renderCatalogMasterStatus('ventanaRecibo');
   UI.renderCatalogMasterStatus('poolReal');
   UI.renderCatalogAdmin('ventanaRecibo');

@@ -224,6 +224,7 @@ import { CatalogStore } from '../features/catalogs/catalog-store.js';
 import { IncidentStore } from '../features/incidents/incident-store.js';
 import { INCIDENT_TYPES } from '../features/incidents/incident-types.js';
 import { saveInlineFix } from '../features/incidents/inline-fix.js';
+import { CitaPatternStore } from '../features/citas/cita-pattern-store.js';
 import { compareExcelPdf } from '../features/source-check.js';
 import { Motion } from '../theme-engine/motion.js';
 
@@ -324,7 +325,7 @@ export const Events = {
     try {
       for (let i = 0; i < files.length; i++) {
         try {
-          const extracted = await pdfExtract(files[i]);
+          const extracted = await pdfExtract(files[i], State.citaPatterns);
           // CAMBIO (Fase 0): parsePDF() ahora devuelve
           // { rows, unrecognizedCitas } en vez de un array plano — ver
           // processors/pdf.js. `parsed` conserva exactamente el mismo
@@ -884,6 +885,55 @@ export const Events = {
       UI.setMaintenanceStatus('', '');
     } catch (e) {
       UI.setMaintenanceStatus('Error: ' + e.message, 'err');
+    }
+  },
+
+  /**
+   * Variantes de cita (Fase 1 — catálogo self-service, ver features/
+   * citas/cita-pattern-registry.js). Se recarga desde Supabase cada vez
+   * que se entra al Centro de Mantenimiento — mismo criterio que
+   * loadMaintenanceCenter() — por si otra sesión agregó una variante.
+   */
+  async loadCitaPatterns() {
+    UI.setCitaPatternStatus('Cargando…', 'ok');
+    try {
+      await CitaPatternStore.loadAll();
+      UI.renderCitaPatterns(State.citaPatterns);
+      UI.setCitaPatternStatus('', '');
+    } catch (e) {
+      UI.setCitaPatternStatus('Error: ' + e.message, 'err');
+    }
+  },
+
+  /**
+   * Agrega una variante de cita nueva desde el formulario de
+   * Administración → Centro de Mantenimiento. No reprocesa PDFs ya
+   * cargados — aplica a partir del siguiente lote que se suba.
+   * @param {object} values — ver CitaPatternStore.addPattern()
+   */
+  async addCitaPattern(values) {
+    UI.setCitaPatternStatus('Guardando…', 'ok');
+    try {
+      await CitaPatternStore.addPattern(values, State.user);
+      UI.renderCitaPatterns(State.citaPatterns);
+      UI.setCitaPatternStatus('Variante guardada — se aplicará en el próximo PDF que subas.', 'ok');
+    } catch (e) {
+      UI.setCitaPatternStatus(e.message, 'err');
+    }
+  },
+
+  /**
+   * Quita (desactiva) una variante de cita.
+   * @param {string} id
+   */
+  async deleteCitaPattern(id) {
+    UI.setCitaPatternStatus('Quitando…', 'ok');
+    try {
+      await CitaPatternStore.deletePattern(id);
+      UI.renderCitaPatterns(State.citaPatterns);
+      UI.setCitaPatternStatus('Variante quitada.', 'ok');
+    } catch (e) {
+      UI.setCitaPatternStatus(e.message, 'err');
     }
   },
 
