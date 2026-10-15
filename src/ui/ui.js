@@ -755,7 +755,7 @@ showAuthFull() {
         ? 'Faltan fuentes por cargar — vuelve a Preparación'
         : 'Sin datos aún';
       tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state">
-        <div class="empty-ico"></div><div class="empty-title">${escH(msg)}</div>
+        <div class="empty-ico"><svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div><div class="empty-title">${escH(msg)}</div>
       </div></td></tr>`;
       return;
     }
@@ -763,7 +763,7 @@ showAuthFull() {
     const rows = UI._filteredRows(statusMap);
     if (!rows.length) {
       tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state">
-        <div class="empty-ico"></div><div class="empty-title">Sin resultados para este filtro</div>
+        <div class="empty-ico"><svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div><div class="empty-title">Sin resultados para este filtro</div>
       </div></td></tr>`;
       return;
     }
@@ -1888,7 +1888,7 @@ showAuthFull() {
     const tbody = document.getElementById(tbodyId);
     const slice = rows.slice(0, 50);
     if (!slice.length) {
-      tbody.innerHTML = '<tr><td colspan="23"><div class="empty-state"><div class="empty-ico"></div><div class="empty-title">Sin datos</div></div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="23"><div class="empty-state"><div class="empty-ico"><svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div><div class="empty-title">Sin datos</div></div></td></tr>';
       return;
     }
     tbody.innerHTML = slice.map(row => {
