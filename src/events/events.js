@@ -215,6 +215,7 @@ import { pdfExtract, parsePDF } from '../processors/pdf.js';
 import { processXLS } from '../processors/excel.js';
 import { processPaste } from '../processors/paste.js';
 import { processWTMS } from '../processors/wtms.js';
+import { processInvoiceReport } from '../processors/invoice-report.js';
 import { runMerge } from '../processors/merge.js';
 import { runSVE } from '../features/validation/sve.js';
 import { exportXLSX } from '../features/export.js';
@@ -470,6 +471,37 @@ export const Events = {
     }
   },
 
+  // —— Reporte de Facturación handler (5ª fuente OBLIGATORIA) ——
+  // El archivo real nunca trae una extensión confiable (se descarga tal
+  // cual de un correo, ver processors/invoice-report.js) — a diferencia
+  // de PDF/XLS/WTMS, aquí NO se filtra por nombre/extensión: se toma el
+  // primer archivo soltado y se detecta el formato por su CONTENIDO
+  // (processInvoiceReport() lanza si no reconoce el encabezado). Al ser
+  // obligatoria, Events.checkSources() bloquea TODO el merge (igual que
+  // PDF/XLS/WTMS/despacho) si no se ha cargado.
+  async handleInvoiceReport(files) {
+    const file = files[0];
+    if (!file) return;
+    State.reviewSessionId = null;
+    UI.showProgress('Leyendo Reporte de Facturación…');
+    UI.setSourceProcessing('montos', true);
+    try {
+      const raw = await file.text();
+      const { invoiceData, dc } = processInvoiceReport(raw);
+      State.invoiceData = invoiceData;
+
+      UI.setSourceStatus('montos', true, 'Completo', `${invoiceData.size} facturas · DC ${dc}`);
+
+      UI.hideProgress();
+      Events.triggerMerge();
+    } catch (e) {
+      UI.hideProgress();
+      UI.showErrors([e.message]);
+    } finally {
+      UI.setSourceProcessing('montos', false);
+    }
+  },
+
   handlePaste() {
     const raw = document.getElementById('pasteArea').value.trim();
     if (!raw) { UI.setPasteSt('Pega datos primero', 'err'); return; }
@@ -504,6 +536,7 @@ export const Events = {
     if (!State.xlsData || !State.xlsData.length) missing.push('Excel macro (RUTEO NUEVO)');
     if (State.despData.size === 0) missing.push("Status de despacho (RUTA + ID'S MASTER)");
     if (State.wtmsData.size === 0) missing.push('Reporte WTMS');
+    if (State.invoiceData.size === 0) missing.push('Reporte de Facturación (montos)');
     // NUEVO (ago-2026 — "reabrir para corregir"): una sesión reabierta
     // desde Historial (ver Events.reopenSession()) trae State.merged
     // ya resuelto por un merge anterior — no hay fuentes crudas que

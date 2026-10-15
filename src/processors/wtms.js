@@ -5,7 +5,10 @@
  * CONTEXTO: a partir de esta integración, ninguna de las cuatro fuentes
  * (PDFs, Excel macro, Status de despacho, Reporte WTMS) es opcional —
  * ver Events.checkSources() en events/events.js, que bloquea el merge
- * completo si falta cualquiera.
+ * completo si falta cualquiera. ACTUALIZACIóN: se sumó una 5ª fuente
+ * obligatoria, el Reporte de Facturación mainframe (monto por factura,
+ * ver processors/invoice-report.js) — mismo gate, mismo tratamiento de
+ * catálogo temporal sin persistencia.
  *
  * El WTMS se trata como CATÁLOGO TEMPORAL de la corrida actual — se
  * recarga en cada procesamiento, NO se persiste en Supabase (a

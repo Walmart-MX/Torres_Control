@@ -77,6 +77,7 @@ export const EDITABLE_FIELDS = [
   { key:'_WTMS',       label:'Usuario WTMS',     crit:false },
   { key:'_GLS',        label:'GLS de Embarque',  crit:false },
   { key:'_HORA_FACT',  label:'Hora Facturación', crit:false },
+  { key:'_MONTO_FACTURA', label:'Monto Factura', crit:false },
 ];
 
 export const EditSystem = {

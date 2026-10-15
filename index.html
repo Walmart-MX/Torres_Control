@@ -4,9 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SmartDispatch · CeDis VHSA</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- PWA: manifest + iconos + color de tema (Edge usa esto para la
+     ventana instalada, la entrada en Inicio/Taskbar y el splash). -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0B1D33">
+<link rel="icon" href="icons/favicon.ico" sizes="any">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<!-- Librerías vendorizadas localmente (antes CDN). Vendorizarlas evita
+     3 round-trips a dominios externos en cada carga en frío y permite
+     que el service worker las sirva offline — ver sw.js. -->
+<script src="vendor/pdf.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="vendor/supabase-js.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!-- Dynamic Experience — Theme Engine (ver src/theme-engine/). Fase 1:
@@ -14,6 +24,7 @@
      host ambiental (vacio). -->
 <link rel="stylesheet" href="src/theme-engine/theme-engine.css">
 <link rel="stylesheet" href="src/theme-engine/motion.css">
+<link rel="stylesheet" href="src/core/pwa-install.css">
 <style>
 /* ═══════════════════════════════════════════════════════════════
    DESIGN TOKENS — rediseño Mesa de Trabajo/Preparación (mockup jul-2026)
@@ -1074,10 +1085,17 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
         </div>
         <div class="up-card" id="dropWTMS">
           <input type="file" id="fileWTMS" accept=".csv" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%">
-          <div class="up-ico">🛰️</div>
+          <div class="up-ico"></div>
           <div class="up-title">Reporte WTMS</div>
           <div class="up-sub" id="wtmsSub">Archivo .csv</div>
           <div class="up-status" id="wtmsStatus">Arrastra o haz clic</div>
+        </div>
+        <div class="up-card" id="dropMONTOS">
+          <input type="file" id="fileMONTOS" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%">
+          <div class="up-ico"></div>
+          <div class="up-title">Reporte de Facturación</div>
+          <div class="up-sub" id="montosSub">Reporte de mainframe (monto por factura)</div>
+          <div class="up-status" id="montosStatus">Arrastra o haz clic</div>
         </div>
 
         <div class="up-card up-card-paste" id="dropDESP">
@@ -1176,7 +1194,7 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
           <table class="dtbl">
             <thead><tr>
               <th class="key">Ruta</th><th>Operador</th><th>Lic.</th><th>Tarimas</th><th>Marchamo</th>
-              <th>Factura</th><th>Tienda</th><th>Tractor</th><th>Remolque</th><th>Estado</th><th></th>
+              <th>Factura</th><th>Monto</th><th>Tienda</th><th>Tractor</th><th>Remolque</th><th>Estado</th><th></th>
             </tr></thead>
             <tbody id="mainTbody"></tbody>
           </table>
@@ -1698,14 +1716,16 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 
 <script type="module">
 import { init } from './src/core/app.js';
+import { initPwaInstall } from './src/core/pwa-install.js';
 
 // pdfjsLib worker — debe configurarse antes de que cualquier módulo
 // llame a pdfjsLib.getDocument(). El import de app.js resuelve todos
 // los módulos antes de ejecutar este código, así que la configuración
-// llega a tiempo.
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+// llega a tiempo. Worker vendorizado localmente (ver vendor/), ya no
+// depende de cdnjs.
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
 
+initPwaInstall();
 init();
 </script>
 </body>

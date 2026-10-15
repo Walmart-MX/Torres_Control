@@ -78,6 +78,13 @@ export const State = {
   despData: new Map(),
   // wtmsData: Map<idCarga, {carteporte, siguienteCarga}> — Reporte WTMS (processors/wtms.js). No se persiste.
   wtmsData: new Map(),
+  // invoiceData: Map<factKey, {monto, store, load}> — 5ª fuente OBLIGATORIA: Reporte de
+  // Facturación mainframe (processors/invoice-report.js). factKey = DC + folio de 6
+  // dígitos, misma convención que FAC_PDF/CONCENTRADO FACTURAS (ver merge.js).
+  // Events.checkSources() la exige igual que PDF/XLS/WTMS/despacho — y, como wtmsData,
+  // no se persiste entre días: se recarga en cada procesamiento y se reinicia en
+  // UI.resetAll().
+  invoiceData: new Map(),
 
   // ── Exclusiones confirmadas ("se quedó por ocupación", ver events.js → confirmExcludedDette()) ──
   // Set<'ruta||dette'> — persiste durante la sesión del navegador (no en Supabase);

@@ -26,6 +26,15 @@
  *   2) ID IDA / ID RETORNO / CARTA PORTE — parte de INT_COLS, número real.
  *   3) Columnas de tiempo con datos faltantes — resaltado ámbar.
  *
+ * CAMBIO (oct-2026 — banner de secciones): se agrega una fila 0 fusionada
+ * arriba del encabezado real (que pasa de fila 0 a fila 1 — TODO el resto
+ * del archivo se recorre +1 fila) con el nombre de cada sección visual
+ * (ver SECTION_BANNERS). Hoy solo existe la sección "FACTURACIÓN"
+ * (FAC./MONTO FACTURA/GLS DE EMB., ver BASE_ORDER en core/constants.js) —
+ * agregar otra sección es agregar una entrada a SECTION_BANNERS, siempre
+ * que sus columnas sean CONTIGUAS en BASE_ORDER (_sectionRanges() ignora
+ * silenciosamente cualquier sección que no lo sea, nunca rompe el export).
+ *
  * Dependencias:
  *   - State (core/state.js) — lee State.merged únicamente
  *   - BASE_ORDER, INT_COLS, DATE_COLS, DATETIME_COLS, getMapped (core/constants.js)
@@ -67,12 +76,52 @@ const MARCHAMO_COLS = new Set(['MARCHAMO 1','MARCHAMO 2','MARCHAMO 3 ','MARCHAMO
 const DATA_COLS = new Set(['OPERADOR','LIC.','TARIMAS', ...MARCHAMO_COLS]);
 
 // Alineación: cantidades a la derecha; fechas/horas/tiempos y códigos cortos centrados; resto izquierda.
-const RIGHT_COLS  = new Set(['TARIMAS','CAJAS','CORTINA']);
+const RIGHT_COLS  = new Set(['TARIMAS','CAJAS','CORTINA','MONTO FACTURA']);
 const CENTER_COLS = new Set([...DATE_COLS, ...DATETIME_COLS, ...TIME_OUTPUT_COLS, 'DIA','SW','DET']);
 
 // Anchos: autoajuste por contenido, con límites. Override manual por columna si hace falta.
 const WIDTH_MIN = 6, WIDTH_MAX = 45, HEADER_PAD = 4, CELL_PAD = 2;
 const WIDTH_OVERRIDES = { /* 'OPERADOR': 34 */ };
+
+// ── Banner de secciones (fila fusionada arriba del encabezado real) ──
+// Cada entrada pinta un renglón con el label dado, fusionado de punta a
+// punta sobre `cols`. `cols` DEBE ser un subconjunto contiguo de
+// BASE_ORDER — ver _sectionRanges(), que valida esto y descarta en
+// silencio cualquier sección mal formada en vez de romper el export.
+const SECTION_BANNERS = [
+  { label: 'FACTURACIÓN', cols: ['FAC.', 'MONTO FACTURA', 'GLS DE EMB.'] }
+];
+
+/**
+ * Resuelve SECTION_BANNERS a rangos de columna [start, end] (índices en
+ * BASE_ORDER), validando contigüidad. @private
+ * @returns {Array<{label:string, start:number, end:number}>}
+ */
+function _sectionRanges() {
+  const ranges = [];
+  for (const section of SECTION_BANNERS) {
+    const idxs = section.cols.map(c => BASE_ORDER.indexOf(c));
+    if (idxs.some(i => i === -1)) continue; // columna renombrada/eliminada — se omite la sección
+    const sorted = [...idxs].sort((a, b) => a - b);
+    const isContiguous = sorted.every((v, i) => i === 0 || v === sorted[i - 1] + 1);
+    if (!isContiguous) continue;
+    ranges.push({ label: section.label, start: sorted[0], end: sorted[sorted.length - 1] });
+  }
+  return ranges;
+}
+
+/**
+ * Arma el array de la fila 0 (banner) — vacío salvo la celda inicial de
+ * cada sección, que lleva el label (las demás celdas del rango se
+ * fusionan sobre esa, ver '!merges' en exportXLSX()). @private
+ * @param {Array<{label:string, start:number, end:number}>} sectionRanges
+ * @returns {Array<string>}
+ */
+function _buildBannerRow(sectionRanges) {
+  const row = BASE_ORDER.map(() => '');
+  for (const s of sectionRanges) row[s.start] = s.label;
+  return row;
+}
 
 /** Rellena con cero a la izquierda — "6" → "06". @private */
 function _pad2(n) {
@@ -134,18 +183,36 @@ export function exportXLSX(rows, exportType, sessionDate) {
     return val;
   }));
 
-  const wsData = [BASE_ORDER, ...dataRows];
+  const sectionRanges = _sectionRanges();
+  const wsData = [_buildBannerRow(sectionRanges), BASE_ORDER, ...dataRows];
   const ws     = XLSX.utils.aoa_to_sheet(wsData, { cellDates: true });
   const range  = XLSX.utils.decode_range(ws['!ref']);
 
   const border = { style: 'thin', color: { rgb: THEME.border } };
   const baseFont = { name: THEME.font, sz: THEME.size };
 
+  // ── Banner de secciones (fila 0) ──
+  ws['!merges'] = sectionRanges
+    .filter(s => s.end > s.start)
+    .map(s => ({ s: { r: 0, c: s.start }, e: { r: 0, c: s.end } }));
+  for (const s of sectionRanges) {
+    for (let c = s.start; c <= s.end; c++) {
+      const addr = XLSX.utils.encode_cell({ r: 0, c });
+      if (!ws[addr]) ws[addr] = { t: 's', v: '' };
+      ws[addr].s = {
+        font:      { ...baseFont, bold: true, sz: THEME.size + 1, color: { rgb: THEME.headerBg } },
+        fill:      { patternType: 'solid', fgColor: { rgb: THEME.headerKey } },
+        alignment: { horizontal: 'center', vertical: 'center' },
+        border:    { top: border, bottom: border, left: border, right: border }
+      };
+    }
+  }
+
   for (let C = 0; C < BASE_ORDER.length; C++) {
     const col = BASE_ORDER[C];
 
-    // ── Encabezado ──
-    const ha = XLSX.utils.encode_cell({ r: 0, c: C });
+    // ── Encabezado (fila 1 — la fila 0 es el banner de secciones) ──
+    const ha = XLSX.utils.encode_cell({ r: 1, c: C });
     if (ws[ha]) {
       const headerColor = KEY_COLS.has(col)  ? THEME.headerKey
                         : DATA_COLS.has(col) ? THEME.headerData
@@ -158,12 +225,12 @@ export function exportXLSX(rows, exportType, sessionDate) {
       };
     }
 
-    // ── Datos ──
+    // ── Datos (desde fila 2) ──
     const hAlign = RIGHT_COLS.has(col) ? 'right' : CENTER_COLS.has(col) ? 'center' : 'left';
     const isKey  = KEY_COLS.has(col);
     const isData = DATA_COLS.has(col);
 
-    for (let R = 1; R <= range.e.r; R++) {
+    for (let R = 2; R <= range.e.r; R++) {
       const addr = XLSX.utils.encode_cell({ r: R, c: C });
       // Celda vacía: se crea para que el zebra y los bordes no tengan huecos.
       if (!ws[addr]) ws[addr] = { t: 's', v: '' };
@@ -172,7 +239,8 @@ export function exportXLSX(rows, exportType, sessionDate) {
       else if (INT_COLS.has(col))      ws[addr].z = ws[addr].t === 'n' ? '0' : '@';
       else if (col === 'LIC.')         ws[addr].z = '@';   // licencia = texto, Excel no debe reinterpretarla
 
-      const even = R % 2 === 0;
+      const dataIdx = R - 2; // fila 0 = banner, fila 1 = encabezado, fila 2 = primer dato
+      const even = dataIdx % 2 === 1;
       ws[addr].s = {
         font: {
           ...baseFont,
@@ -187,7 +255,7 @@ export function exportXLSX(rows, exportType, sessionDate) {
       if (TIME_OUTPUT_COLS.has(col)) {
         // dataSource (no State.merged): al redescargar desde Historial
         // puede ser otro array.
-        const mergedRow     = dataSource[R - 1];
+        const mergedRow     = dataSource[dataIdx];
         const missingReason = mergedRow && mergedRow._timeMissing && mergedRow._timeMissing[col];
         if (missingReason) {
           ws[addr].s.fill = { patternType: 'solid', fgColor: { rgb: THEME.missingBg } };
@@ -205,9 +273,9 @@ export function exportXLSX(rows, exportType, sessionDate) {
     return { wch: Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, max)) };
   });
 
-  ws['!freeze']     = { xSplit: 0, ySplit: 1, topLeftCell: 'A2', activePane: 'bottomLeft', state: 'frozen' };
-  ws['!autofilter'] = { ref: ws['!ref'] };
-  ws['!rows']       = [{ hpt: 20 }, ...Array(range.e.r).fill({ hpt: 15 })];
+  ws['!freeze']     = { xSplit: 0, ySplit: 2, topLeftCell: 'A3', activePane: 'bottomLeft', state: 'frozen' };
+  ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 1, c: 0 }, e: { r: range.e.r, c: range.e.c } }) };
+  ws['!rows']       = [{ hpt: 22 }, { hpt: 20 }, ...Array(Math.max(0, range.e.r - 1)).fill({ hpt: 15 })];
 
   XLSX.utils.book_append_sheet(wb, ws, 'RUTEO UNIFICADO');
   // sessionDate si se pasó (redescarga de un día pasado); si no, hoy.

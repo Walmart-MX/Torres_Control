@@ -300,7 +300,7 @@ let _fixPeakTotal = null;
 
 // Mapea la clave de fuente ('pdf'|'xls'|'wtms'|'desp') al sufijo de
 // IDs usado en el HTML de Preparación (#dropPDF/#pdfSub/#pdfStatus, etc).
-const SOURCE_ID = { pdf: 'PDF', xls: 'XLS', wtms: 'WTMS', desp: 'DESP' };
+const SOURCE_ID = { pdf: 'PDF', xls: 'XLS', wtms: 'WTMS', desp: 'DESP', montos: 'MONTOS' };
 
 // Texto por defecto del subtítulo de Correcciones — NUEVO (ago-2026,
 // ver nota de cabecera "reabrir para corregir"). Se guarda aquí como
@@ -420,9 +420,9 @@ showAuthFull() {
 
   /**
    * Actualiza una tarjeta de fuente en la pantalla Preparación.
-   * @param {string} key — 'pdf'|'xls'|'wtms'|'desp'
+   * @param {string} key — 'pdf'|'xls'|'wtms'|'desp'|'montos'
    * @param {boolean} done — true = fuente cargada (tarjeta en verde)
-   * @param {string} statusText — texto corto (ej. '✓ Completo')
+   * @param {string} statusText — texto corto (ej. 'Completo')
    * @param {string} subText — detalle (ej. '42 archivos · 238 entregas')
    */
   setSourceStatus(key, done, statusText, subText) {
@@ -444,7 +444,7 @@ showAuthFull() {
    * (.up-card.processing, ver index.html). Llamar con on=true al
    * iniciar la lectura del archivo y on=false en un finally (éxito o
    * error), para que nunca quede "respirando" indefinidamente.
-   * @param {string} key — 'pdf'|'xls'|'wtms'|'desp'
+   * @param {string} key — 'pdf'|'xls'|'wtms'|'desp'|'montos'
    * @param {boolean} on
    */
   setSourceProcessing(key, on) {
@@ -501,11 +501,13 @@ showAuthFull() {
     const xlsCount  = State.xlsData ? State.xlsData.length : 0;
     const wtmsCount = State.wtmsData.size;
     const despCount = State.despData.size;
+    const montosCount = State.invoiceData.size;
     chipsEl.innerHTML = `
-      <span class="chip ok">📄 ${pdfCount} PDFs</span>
-      <span class="chip ok">📊 ${xlsCount} rutas</span>
-      <span class="chip ok">🛰️ ${wtmsCount} WTMS</span>
-      <span class="chip ok">📋 ${despCount} despacho</span>`;
+      <span class="chip ok">${pdfCount} PDFs</span>
+      <span class="chip ok">${xlsCount} rutas</span>
+      <span class="chip ok">${wtmsCount} WTMS</span>
+      <span class="chip ok">${despCount} despacho</span>
+      <span class="chip ok">${montosCount} montos</span>`;
     const timeEl = document.getElementById('prepCollapsedTime');
     if (timeEl) timeEl.textContent = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
   },
@@ -752,16 +754,16 @@ showAuthFull() {
       const msg = !ok
         ? 'Faltan fuentes por cargar — vuelve a Preparación'
         : 'Sin datos aún';
-      tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state">
-        <div class="empty-ico">📂</div><div class="empty-title">${escH(msg)}</div>
+      tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state">
+        <div class="empty-ico"></div><div class="empty-title">${escH(msg)}</div>
       </div></td></tr>`;
       return;
     }
 
     const rows = UI._filteredRows(statusMap);
     if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state">
-        <div class="empty-ico">🔍</div><div class="empty-title">Sin resultados para este filtro</div>
+      tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state">
+        <div class="empty-ico"></div><div class="empty-title">Sin resultados para este filtro</div>
       </div></td></tr>`;
       return;
     }
@@ -782,6 +784,13 @@ showAuthFull() {
         const s = String(v ?? '').trim();
         return s ? escH(s) : '<span class="dim">—</span>';
       };
+      // Monto Factura: viene como number (o '') de merge.js — formato con
+      // separador de miles/decimales solo para despliegue, getMapped() /
+      // el Excel exportado siguen usando el number crudo (export.js).
+      const montoRaw = getMapped(row, 'MONTO FACTURA');
+      const montoCell = Number.isFinite(montoRaw)
+        ? escH(montoRaw.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+        : '<span class="dim">—</span>';
       const ruta = String(row['RUTA'] || '').trim();
       return `<tr>
         <td class="rt">${escH(ruta)}</td>
@@ -790,11 +799,12 @@ showAuthFull() {
         <td>${cell('TARIMAS')}</td>
         <td>${cell('MARCHAMO 1')}</td>
         <td>${cell('FAC.')}</td>
+        <td>${montoCell}</td>
         <td>${cell('TIENDA')}</td>
         <td>${cell('TRACTOR ')}</td>
         <td>${cell('REMOLQUE')}</td>
         <td><span class="${cls}">${label}</span></td>
-        <td><button class="row-edit-btn" data-edit-ruta="${escH(ruta)}" data-edit-rowid="${escH(row._rowId)}">✎</button></td>
+        <td><button class="row-edit-btn" data-edit-ruta="${escH(ruta)}" data-edit-rowid="${escH(row._rowId)}">Editar</button></td>
       </tr>`;
     }).join('');
   },
@@ -1878,7 +1888,7 @@ showAuthFull() {
     const tbody = document.getElementById(tbodyId);
     const slice = rows.slice(0, 50);
     if (!slice.length) {
-      tbody.innerHTML = '<tr><td colspan="22"><div class="empty-state"><div class="empty-ico">📂</div><div class="empty-title">Sin datos</div></div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="23"><div class="empty-state"><div class="empty-ico"></div><div class="empty-title">Sin datos</div></div></td></tr>';
       return;
     }
     tbody.innerHTML = slice.map(row => {
@@ -1916,6 +1926,7 @@ showAuthFull() {
     State.factData = new Map();
     State.despData = new Map();
     State.wtmsData = new Map();   // FIX: faltaba en el reset original — bug latente desde que se agregó WTMS
+    State.invoiceData = new Map(); // 5ª fuente (OBLIGATORIA) — mismo tratamiento que wtmsData, no se persiste
     State.excludedDettes = new Set();
     State.excludedCount  = 0;
     // NUEVO (ago-2026 — "reabrir para corregir"): salir del modo
@@ -1933,9 +1944,11 @@ showAuthFull() {
     UI.setSourceStatus('xls',  false, 'Arrastra o haz clic', 'Lee ambas pestañas automáticamente');
     UI.setSourceStatus('wtms', false, 'Arrastra o haz clic', 'Archivo .csv');
     UI.setSourceStatus('desp', false, 'Pega desde Excel',    'Copia RUTA · CASETA · WTMS · ID\'S MASTER');
+    UI.setSourceStatus('montos', false, 'Arrastra o haz clic', 'Reporte de mainframe (monto por factura)');
     UI.setSourceProcessing('pdf',  false);
     UI.setSourceProcessing('xls',  false);
     UI.setSourceProcessing('wtms', false);
+    UI.setSourceProcessing('montos', false);
 
     document.getElementById('pasteArea').value = '';
     document.getElementById('pasteSt').textContent = '';

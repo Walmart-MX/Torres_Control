@@ -2,6 +2,22 @@
  * core/constants.js
  * Constantes globales de la aplicación.
  *
+ * CAMBIO (Reporte de Facturación — 5ª fuente obligatoria + reorden en
+ * secciones, oct-2026):
+ *   - BASE_ORDER se reagrupa en secciones lógicas (Identificación /
+ *     Transporte-WTMS / Facturación / Operación / Carga física /
+ *     Tiempos) — antes FAC./GLS DE EMB./HORA DE FACTURACION vivían
+ *     repartidas en tres zonas distintas del archivo sin razón técnica.
+ *     Ningún nombre de columna cambia, solo el ORDEN — confirmado con
+ *     el usuario que nada depende de la posición física de columna.
+ *   - COL_MAP gana 'MONTO FACTURA' (resuelta desde nr['_MONTO_FACTURA'],
+ *     armada en merge.js a partir del cruce con la 5ª fuente).
+ *   - La sección Facturación (FAC./MONTO FACTURA/GLS DE EMB.) se pinta
+ *     con un banner fusionado en el Excel final — ver export.js →
+ *     SECTION_BANNERS. COSTOS IDA/COSTO RETORNO se quedan en el archivo
+ *     aunque hoy siempre salgan vacías (decisión del usuario: se
+ *     llenan a mano después del export).
+ *
  * CAMBIO (integración Reporte WTMS — 4ª fuente obligatoria, jul-2026):
  *   - Se agrega WTMS_ALIASES.
  *   - COL_MAP gana 'ID RETORNO' y 'CARTA PORTE', resueltas siempre
@@ -54,12 +70,24 @@ export const SHEET_RUTEO    = ['RUTEO NUEVO', 'RUTEO', 'HOJA1', 'SHEET1'];
 export const SHEET_FACTURAS = ['CONCENTRADO FACTURAS', 'FACTURAS', 'CONCENTRADO', 'FACT'];
 
 export const BASE_ORDER = [
+  // ── Identificación ──
   'FECHA','DIA','SW','LINEA','ENTREGA','ENT1','RUTA',
-  'ID IDA','COSTOS IDA','STATUS IDA','ID RETORNO','COSTO RETORNO','STATUS RETORNO',
-  'CARTA PORTE','CAPTURA','USUARIO WTMS','LIC.','OPERADOR','DET','FORMATO','NOMBRE','ESTADO',
+  // ── Sección Transporte / WTMS (costos y status del viaje ida/retorno) ──
+  'ID IDA','COSTOS IDA','STATUS IDA','ID RETORNO','COSTO RETORNO','STATUS RETORNO','CARTA PORTE',
+  // ── Sección Facturación (banner fusionado, ver export.js → SECTION_BANNERS) ──
+  // Las 3 vienen de las mismas dos fuentes (CONCENTRADO FACTURAS +
+  // Reporte de Facturación mainframe) — antes estaban repartidas en dos
+  // zonas distintas del archivo sin razón técnica. HORA DE FACTURACION
+  // se queda deliberadamente en la sección Tiempos (es un timestamp del
+  // motor de tiempos, no se mueve aquí).
+  'FAC.','MONTO FACTURA','GLS DE EMB.',
+  // ── Operación / captura ──
+  'CAPTURA','USUARIO WTMS','LIC.','OPERADOR','DET','FORMATO','NOMBRE','ESTADO',
+  // ── Carga física ──
   'TARIMAS','MARCHAMO 1','MARCHAMO 2','MARCHAMO 3 ','MARCHAMO 4','MARCHAMO 5',
   'CAJAS','CAP.','CORTINA','TRACTOR ','PLACA TRACTOR',
-  'REMOLQUE','PLACA REMOLQUE','GLS DE EMB.','FAC.','ESQUEMA',
+  'REMOLQUE','PLACA REMOLQUE','ESQUEMA',
+  // ── Tiempos ──
   'TEMP. ENRAMPE','TEMP. DESENRAMPE','SOLICITUD DE ENRAMPE','ENRAMPE','TIEMPO ENRAMPE',
   'RETIRO','TIEMP APROX DE CARGA','RETIRO VS DESPACHO','HORA DE FACTURACION',
   'HR. DESPACHO','SALIDA DE CASETA ','TIEMPO DE DESP','TIEMPO EN PATIO','CITA'
@@ -75,7 +103,7 @@ export const COLS_DESP = new Set(['GLS DE EMB.','HORA DE FACTURACION',
 
 export const PREVIEW_COLS = [
   'FECHA','ENTREGA','ENT1','RUTA','DET','OPERADOR','LIC.',
-  'TARIMAS','MARCHAMO 1','FAC.',
+  'TARIMAS','MARCHAMO 1','FAC.','MONTO FACTURA',
   'GLS DE EMB.','HORA DE FACTURACION',
   'ID IDA','ID RETORNO','CARTA PORTE','HR. DESPACHO','SALIDA DE CASETA ','USUARIO WTMS',
   'CAJAS','CORTINA','TRACTOR ','ENRAMPE','RETIRO','CITA'
@@ -94,7 +122,7 @@ export const PREVIEW_COLS = [
  * State.sveIssues + State.edits, no es una columna de datos mapeable.
  */
 export const WORKTABLE_COLS = [
-  'RUTA', 'OPERADOR', 'LIC.', 'TARIMAS', 'MARCHAMO 1', 'FAC.', 'TIENDA', 'TRACTOR ', 'REMOLQUE'
+  'RUTA', 'OPERADOR', 'LIC.', 'TARIMAS', 'MARCHAMO 1', 'FAC.', 'MONTO FACTURA', 'TIENDA', 'TRACTOR ', 'REMOLQUE'
 ];
 
 // AJUSTE (jul-2026 — archivo final): se agregan 'ID IDA', 'ID RETORNO'
@@ -171,6 +199,10 @@ export const COL_MAP = {
   'SALIDA DE CASETA ':    r => r['_CASETA']      ?? '',
   'CAPTURA': _r => (State.currentUser ? State.currentUser.captureName : '') || '',
   'FAC.':                 r => r['FAC_PDF']      ?? '',
+  // NUEVO — 5ª fuente (processors/invoice-report.js), OPCIONAL. Resuelto en
+  // merge.js por el mismo factKey que GLS/Hora Facturación; vacío si el
+  // Reporte de Facturación no se cargó o la factura no aparece en él.
+  'MONTO FACTURA':        r => r['_MONTO_FACTURA'] ?? '',
   'LIC.':                 r => r['_LIC']         ?? '',
   'OPERADOR':             r => r['OPERADOR']     ?? '',
   'TARIMAS':              r => r['TARIMAS']      ?? '',

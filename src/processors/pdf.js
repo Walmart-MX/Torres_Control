@@ -440,8 +440,10 @@
  * debe depender de ningún otro módulo propio.
  */
 
-/** Máximo de marchamos por entrega — debe coincidir con MAX_MARCH (core/constants.js). */
-const MAX_MARCH_SLOTS = 5;
+/** Máximo de marchamos por entrega — debe coincidir con MAX_MARCH (core/constants.js).
+ *  Exportado (oct-2026) para que processors/pdf-stride.js reutilice el mismo límite —
+ *  ver nota de cabecera de ese archivo. Ningún llamador interno de pdf.js cambia. */
+export const MAX_MARCH_SLOTS = 5;
 
 /** Formato válido de marchamo: 5-6 dígitos, con o sin cero inicial. */
 const MARC_RE = /^0?\d{5,6}$/;
@@ -453,8 +455,11 @@ const MARC_RE = /^0?\d{5,6}$/;
  *  real del contenido se decide aparte con _isValidMarchamo(). */
 const MARC_CANDIDATE_RE = /^\d{3,10}$/;
 
-/** Valida el formato final de un marchamo ya extraído. @private */
-function _isValidMarchamo(s) {
+/** Valida el formato final de un marchamo ya extraído.
+ *  Exportado (oct-2026) para reutilizarse en processors/pdf-stride.js —
+ *  el formato de marchamo (5-6 dígitos) es idéntico en ambas plataformas,
+ *  confirmado con muestra real de Stride. @private */
+export function _isValidMarchamo(s) {
   return MARC_RE.test(String(s || '').trim());
 }
 
@@ -807,7 +812,7 @@ function _pushMarchamo(raw, marchamos, issues) {
  * @returns {string[]|null} lista de marchamos válidos, o null si el
  *   texto no tiene esa forma (algún token no pasa _isValidMarchamo)
  */
-function _extractMarchamoAnnotation(text) {
+export function _extractMarchamoAnnotation(text) {
   const tokens = String(text || '').trim().split(/[\s,;]+/).map(t => t.trim()).filter(Boolean);
   if (!tokens.length) return null;
   return tokens.every(t => _isValidMarchamo(t)) ? tokens : null;
@@ -826,7 +831,7 @@ function _extractMarchamoAnnotation(text) {
  * @param {string[]} values — marchamos detectados en la anotación
  * @returns {boolean} true si agregó al menos un valor nuevo
  */
-function _mergeAnnotationMarchamos(marchamos, values) {
+export function _mergeAnnotationMarchamos(marchamos, values) {
   let applied = false;
   for (const val of values) {
     if (marchamos.includes(val)) continue;

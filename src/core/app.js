@@ -534,6 +534,7 @@ async function continueInit() {
   Events.setupDrop('dropPDF', 'filePDF', Events.handlePDFs.bind(Events));
   Events.setupDrop('dropXLS', 'fileXLS', Events.handleXLS.bind(Events));
   Events.setupDrop('dropWTMS', 'fileWTMS', Events.handleWTMS.bind(Events));
+  Events.setupDrop('dropMONTOS', 'fileMONTOS', Events.handleInvoiceReport.bind(Events));
 
   document.getElementById('btnGoTable').addEventListener('click', () => goStep('fix'));
 
