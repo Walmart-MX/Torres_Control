@@ -55,9 +55,27 @@
   --amber-soft:#2A1E0A; --amber-ink:var(--amber-deep); --green-soft:#0C2620; --red-soft:#2B1315; --blue-soft:#0E1D33; --violet-soft:#1B1530;
   --paper:#080D18; --surface:#0E1626; --surface-2:#131C30; --surface-3:#182338;
   --border:rgba(255,255,255,.08); --border-2:rgba(255,255,255,.14);
-  --text:#EAF0FB; --text-2:#9FB0C9; --text-3:#657390; --text-4:#3E4B63;
+  --text:#EAF0FB; --text-2:#9FB0C9; --text-3:#8291AF; --text-4:#3E4B63;
   --shadow-sm:0 1px 3px rgba(0,0,0,.4); --shadow-md:0 6px 20px rgba(0,0,0,.45);
   --shadow-lg:0 24px 60px rgba(0,0,0,.55); --shadow-glow:0 0 0 4px rgba(245,166,35,.18);
+}
+
+/* ── Transición suave al alternar claro/oscuro (oct-2026) ──
+   Sin esto, las ~20 variables de color de arriba cambian todas de
+   golpe en el mismo frame -- se percibe como un parpadeo brusco en
+   vez de un cambio de tema. La transición SOLO se activa mientras
+   <html> tiene la clase .theme-transitioning (agregada por
+   UI.applyTheme() justo antes de tocar data-theme, retirada ~300ms
+   después) -- no queda pegada de forma permanente, así que no
+   interfiere con las transiciones propias de hover/focus del resto
+   de la app. Respeta prefers-reduced-motion: para quien pidió menos
+   movimiento, el cambio sigue siendo instantáneo (sin parpadeo raro,
+   pero tampoco una animación que no quiere ver). */
+@media (prefers-reduced-motion: no-preference) {
+  html.theme-transitioning, html.theme-transitioning *{
+    transition: background-color .25s ease, color .25s ease,
+                border-color .25s ease, box-shadow .25s ease !important;
+  }
 }
 
 /* ── PUENTE DE COMPATIBILIDAD ──

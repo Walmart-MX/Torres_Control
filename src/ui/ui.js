@@ -314,11 +314,21 @@ export const UI = {
 
   // ── Theme ──
   applyTheme(t) {
-    document.documentElement.setAttribute('data-theme', t);
+    // NUEVO (oct-2026 — mitigar parpadeo al alternar claro/oscuro): la
+    // clase .theme-transitioning habilita una transición CSS breve
+    // (ver index.html, regla junto a [data-theme="dark"]) SOLO durante
+    // el cambio -- se quita sola después, para no dejar transiciones
+    // de color pegadas en el resto de la app (hovers, focus, etc).
+    const root = document.documentElement;
+    root.classList.add('theme-transitioning');
+    clearTimeout(UI._themeTransitionTimer);
+    UI._themeTransitionTimer = setTimeout(() => root.classList.remove('theme-transitioning'), 300);
+
+    root.setAttribute('data-theme', t);
     localStorage.setItem('sd_theme', t);
     State.theme = t;
     const btn = document.getElementById('btnTheme');
-    if (btn) { btn.textContent = t === 'dark' ? '☀️' : '🌙'; btn.classList.toggle('on', t === 'dark'); }
+    if (btn) { btn.textContent = t === 'dark' ? String.fromCodePoint(9728) : String.fromCodePoint(127769); btn.classList.toggle('on', t === 'dark'); }
     const optLight = document.getElementById('themeOptLight');
     const optDark  = document.getElementById('themeOptDark');
     if (optLight) optLight.classList.toggle('selected', t === 'light');
