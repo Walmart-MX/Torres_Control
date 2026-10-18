@@ -40,6 +40,17 @@
   font-size:13.5px; line-height:1.5; color:var(--text-2, #4A5670);
 }
 
+.sd-gate-highlight{
+  margin:0; width:100%; text-align:left; box-sizing:border-box;
+  background:rgba(34,166,99,.1);
+  border-left:3px solid var(--success, #22A663);
+  border-radius:8px;
+  padding:10px 12px;
+  font-family:var(--ui, 'Inter', sans-serif);
+  font-size:12px; line-height:1.5; font-weight:600;
+  color:var(--success, #1C8A53);
+}
+
 .sd-gate-actions{
   display:flex; flex-direction:column; gap:8px; width:100%;
 }

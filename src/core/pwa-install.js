@@ -88,13 +88,13 @@ function renderGateContent() {
   let message;
   let primaryActionHtml;
   if (edge && canPrompt) {
-    message = 'Esta aplicación se usa instalada, no desde una pestaña del navegador. Instalala con un clic:';
+    message = 'Esta aplicación se usa instalada, no desde una pestaña del navegador. Instálala con un clic y sigue trabajando igual que siempre:';
     primaryActionHtml = '<button type="button" class="sd-gate-btn sd-gate-btn-primary" id="sd-gate-install">Instalar ahora</button>';
   } else if (edge && !canPrompt) {
-    message = 'Esta aplicación se usa instalada, no desde una pestaña del navegador. Instalala desde el menú de Edge: ⋯ → Apps → "Instalar esta página como app".';
+    message = 'Esta aplicación se usa instalada, no desde una pestaña del navegador. Busca el icono de instalar en la barra de direcciones de Edge (junto a la estrella de favoritos) y haz clic ahí.';
     primaryActionHtml = '';
   } else {
-    message = 'Por temas de compatibilidad, SmartDispatch solo se instala desde Microsoft Edge. Abrí este mismo enlace en Edge y luego instalala desde ahí (menú ⋯ → Apps → "Instalar esta página como app").';
+    message = 'Por temas de compatibilidad, SmartDispatch solo se instala desde Microsoft Edge. Copia este enlace y pégalo en Edge: en cuanto cargue la página, va a aparecer un icono para instalarla directo en la barra de direcciones, sin pasos adicionales.';
     primaryActionHtml = `
       <a class="sd-gate-btn sd-gate-btn-primary" id="sd-gate-open-edge" href="microsoft-edge:${currentUrl}">Abrir en Microsoft Edge</a>
       <button type="button" class="sd-gate-btn sd-gate-btn-ghost" id="sd-gate-copy">Copiar enlace</button>`;
@@ -103,8 +103,9 @@ function renderGateContent() {
   return `
     <div class="sd-gate-card" role="dialog" aria-modal="true" aria-labelledby="sd-gate-title" tabindex="-1">
       <img src="icons/icon-192.png" alt="" class="sd-gate-icon" width="56" height="56">
-      <h2 id="sd-gate-title">Instalá SmartDispatch para continuar</h2>
+      <h2 id="sd-gate-title">Instala SmartDispatch para continuar</h2>
       <p class="sd-gate-msg">${message}</p>
+      <p class="sd-gate-highlight">Compatibilidad completa con STRIDE desde el día uno: migras sin cortar el flujo que ya tienes hoy, WTMS, PDFs y catálogos siguen funcionando exactamente igual.</p>
       <div class="sd-gate-actions">${primaryActionHtml}</div>
       <p class="sd-gate-feedback" id="sd-gate-feedback"></p>
     </div>`;
@@ -119,7 +120,7 @@ function wireGateActions() {
     deferredPrompt = null;
     if (outcome === 'accepted') {
       gateEl.querySelector('.sd-gate-msg').textContent =
-        '¡Listo! Cerrá esta pestaña y abrí SmartDispatch desde el escritorio o el menú inicio.';
+        '¡Listo! Cierra esta pestaña y abre SmartDispatch desde el escritorio o el menú inicio.';
       gateEl.querySelector('.sd-gate-actions').innerHTML = '';
     }
   });
