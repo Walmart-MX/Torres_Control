@@ -110,9 +110,6 @@ export const CatalogStore = {
         console.warn(`[CatalogStore] ${catalog.label} (${catalog.table}) trajo 0 filas. ` +
           `Si cargaste datos directo en Supabase y esperabas encontrarlos, revisa Row Level ` +
           `Security en esa tabla — necesita una policy de SELECT para el rol anon.`);
-      } else {
-        console.log(`[CatalogStore] ${catalog.label}: ${data.length} filas cargadas.`,
-          'Ejemplo:', State.catalogs[catalog.id][0]);
       }
     }
 

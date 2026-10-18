@@ -1725,8 +1725,13 @@ import { initPwaInstall } from './src/core/pwa-install.js';
 // depende de cdnjs.
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
 
-initPwaInstall();
-init();
+// Si el gate de instalacion bloquea (no corre como app instalada),
+// NO arrancamos init(): nada de login, nada de llamadas a Supabase,
+// solo la pantalla de "instala la app".
+const blockedByInstallGate = initPwaInstall();
+if (!blockedByInstallGate) {
+  init();
+}
 </script>
 </body>
 </html>

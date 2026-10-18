@@ -196,6 +196,7 @@ import { Autosave } from '../features/autosave.js';
 import { ConfirmDialog } from '../ui/confirm-dialog.js';
 import { ThemeEngine } from '../theme-engine/theme-engine.js';
 import { Motion } from '../theme-engine/motion.js';
+import { warnIfFiscalYearRunningOut } from './fiscal-calendar.js';
 
 // ── Stepper — navegación entre pantallas ──
 // CAMBIO (jul-2026 — simplificación del flujo, Etapa 4): STEPS baja de
@@ -467,6 +468,7 @@ function wireAuthForms() {
  * exitoso o sesión restaurada (login bloqueante, ver propuesta §17).
  */
 export async function init() {
+  warnIfFiscalYearRunningOut(); // pendiente recurrente — ver core/fiscal-calendar.js
   ConfirmDialog._wire();
   _setRoutePicker(RoutePicker);
   _setEvents(Events);
@@ -525,10 +527,6 @@ async function continueInit() {
 
   State.factCache    = await FactCache.load();
   State.factCacheLog = await FactCache.loadLog();
-  const fcStats = FactCache.stats();
-  if (fcStats.total > 0) {
-    console.log('[FactCache] Loaded', fcStats.total, 'invoices from', fcStats.days, 'day(s):', fcStats.dates.join(', '));
-  }
   UI.renderCacheHistory();
 
   Events.setupDrop('dropPDF', 'filePDF', Events.handlePDFs.bind(Events));
@@ -787,6 +785,7 @@ async function continueInit() {
     if (!username || !password || !displayName || !captureName) {
       UI.setUsersStatus('Completa todos los campos.', 'err'); return;
     }
+    if (!(await ensureAdminSession())) return;
     UI.setUsersStatus('Creando…', 'ok');
     const result = await Auth.adminCreateUser(username, password, displayName, captureName);
     if (!result.ok) {
@@ -800,6 +799,7 @@ async function continueInit() {
   document.getElementById('usersTbody').addEventListener('click', async e => {
     const toggleBtn = e.target.closest('[data-user-toggle]');
     if (toggleBtn) {
+      if (!(await ensureAdminSession())) return;
       const active = toggleBtn.dataset.userToggle === 'activate';
       await Auth.adminSetActive(toggleBtn.dataset.userId, active);
       await refreshUsersAdmin();
@@ -807,13 +807,14 @@ async function continueInit() {
     }
     const resetBtn = e.target.closest('[data-user-reset]');
     if (resetBtn) {
+      if (!(await ensureAdminSession())) return;
       const newPass = await ConfirmDialog.prompt({
         title: 'Restablecer contraseña', body: 'Nueva contraseña temporal para este usuario:',
         placeholder: 'Nueva contraseña', confirmLabel: 'Guardar'
       });
       if (!newPass) return;
       await Auth.adminResetPassword(resetBtn.dataset.userId, newPass);
-      UI.setUsersStatus('✓ Contraseña restablecida', 'ok');
+      UI.setUsersStatus('Contraseña restablecida', 'ok');
     }
   });
 
@@ -1041,7 +1042,35 @@ async function continueInit() {
   // se resuelve por completo en el flujo de auth, antes de llegar aquí.
 }
 
+/**
+ * Guard de "step-up auth" para el panel de Usuarios: si ya hay un
+ * token de admin vigente en esta pestaña (Auth.hasAdminSession()) no
+ * hace nada; si no, pide la propia contraseña del usuario logueado y
+ * la cambia por un token via Auth.adminLogin(). Ver docs/fix_admin_session_tokens.sql
+ * y la nota de cabecera de features/auth.js para el porque de este paso.
+ * @returns {Promise<boolean>} true si queda una sesion de admin vigente.
+ */
+async function ensureAdminSession() {
+  if (Auth.hasAdminSession()) return true;
+  const password = await ConfirmDialog.prompt({
+    title: 'Confirma tu contraseña',
+    body: 'Para administrar usuarios necesitamos reconfirmar tu identidad.',
+    placeholder: 'Tu contraseña', confirmLabel: 'Continuar', inputType: 'password'
+  });
+  if (!password) return false;
+  const result = await Auth.adminLogin(password);
+  if (!result.ok) {
+    UI.setUsersStatus(
+      result.error === 'not_admin' ? 'Tu usuario no tiene permisos de administrador.' : 'Contraseña incorrecta.',
+      'err'
+    );
+    return false;
+  }
+  return true;
+}
+
 async function refreshUsersAdmin() {
+  if (!(await ensureAdminSession())) { UI.renderUsersAdmin([]); return; }
   const users = await Auth.adminListUsers();
   UI.renderUsersAdmin(users);
 }

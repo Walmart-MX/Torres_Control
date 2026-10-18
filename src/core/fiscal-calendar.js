@@ -34,6 +34,29 @@
  * Preparado para futuras funciones (quarter, período, rango de
  * semana) aunque hoy solo se consuma `sw` desde merge.js.
  *
+ * CAMBIO (oct-2026 — proyección automática del siguiente FY):
+ *   Walmart nunca detiene operaciones — la semana que sigue al cierre
+ *   de un FY es, por definición, la SW01 del siguiente (sin huecos).
+ *   Esa fecha de inicio SI se puede derivar sola (inicio FY actual +
+ *   sus semanas × 7 dias). Lo que NO se puede derivar por lógica es
+ *   CUANTAS semanas tiene ese siguiente FY (52 o 53) — eso lo decide
+ *   Walmart para realinear el calendario fiscal con el calendario real
+ *   cada 5-6 años, y no sigue ningún patrón calculable.
+ *
+ *   Por eso _effectiveFiscalYears() agrega UNA entrada "proyectada"
+ *   (confirmed:false, 52 semanas asumidas) inmediatamente después del
+ *   último FY configurado a mano — red de seguridad para que SW/DIA
+ *   nunca dejen de calcularse el dia que se cruza el limite, aunque
+ *   nadie haya tocado el codigo todavia. getFiscalWeek() devuelve
+ *   confirmed:false mientras tanto y avisa UNA vez por sesion en
+ *   consola. Si el FY real termina siendo de 53 semanas en vez de 52,
+ *   el numero de SW se desalinea recien a partir de la semana 53 — el
+ *   aviso en consola (y warnIfFiscalYearRunningOut()) existen para que
+ *   alguien actualice FISCAL_YEARS con el dato real antes de llegar ahi.
+ *   La entrada proyectada NUNCA pisa una entrada real: en cuanto se
+ *   agrega el FY de verdad a FISCAL_YEARS, la proyección deja de usarse
+ *   sola (ver _effectiveFiscalYears()).
+ *
  * Sin dependencias de otros módulos propios — funciones puras.
  */
 
@@ -67,6 +90,42 @@ function _daysBetween(a, b) {
   return Math.round((b.getTime() - a.getTime()) / 86400000);
 }
 
+// Semanas asumidas para la proyección automática del siguiente FY —
+// 52 es el caso común (un FY de 53 semanas es la excepción, no la regla).
+const PROJECTED_WEEKS_DEFAULT = 52;
+
+/** 'FY27' -> 'FY28'. Fallback generico si el label no sigue el patron 'FYnn'. @private */
+function _nextLabelGuess(label) {
+  const m = /^FY(\d+)$/.exec(label);
+  if (!m) return `${label}+1`;
+  return `FY${String(Number(m[1]) + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Lista de FY a considerar para ubicar una fecha: los configurados a
+ * mano en FISCAL_YEARS (confirmed:true) MAS una proyección automática
+ * del siguiente (confirmed:false) — ver nota de cabecera "CAMBIO
+ * (oct-2026 — proyección automática del siguiente FY)". La proyección
+ * jamás reemplaza una entrada real: si ya existe un FY configurado que
+ * cubre una fecha, ese gana siempre (se evalua primero por orden).
+ * @private
+ */
+function _effectiveFiscalYears() {
+  const real = FISCAL_YEARS.map(fy => ({ ...fy, startDate: _parseLocalDate(fy.start), confirmed: true }));
+  if (!real.length) return real;
+
+  const sorted = [...real].sort((a, b) => a.startDate - b.startDate);
+  const last = sorted[sorted.length - 1];
+  const projectedStart = new Date(last.startDate.getTime() + last.weeks * 7 * 86400000);
+  const projected = {
+    label: `${_nextLabelGuess(last.label)} (proyectado, sin confirmar)`,
+    startDate: projectedStart,
+    weeks: PROJECTED_WEEKS_DEFAULT,
+    confirmed: false,
+  };
+  return [...real, projected];
+}
+
 /**
  * Encuentra a qué año fiscal pertenece una fecha, según FISCAL_YEARS.
  * @param {Date} date — fecha ya normalizada a medianoche local
@@ -74,16 +133,16 @@ function _daysBetween(a, b) {
  * @private
  */
 function _findFiscalYear(date) {
-  const sorted = FISCAL_YEARS
-    .map(fy => ({ ...fy, startDate: _parseLocalDate(fy.start) }))
-    .sort((a, b) => a.startDate - b.startDate);
+  const sorted = _effectiveFiscalYears().sort((a, b) => a.startDate - b.startDate);
 
   for (let i = 0; i < sorted.length; i++) {
     const cur  = sorted[i];
     const next = sorted[i + 1];
-    // Si no hay siguiente FY configurado, se asume que este FY dura
-    // exactamente `weeks` semanas — cualquier fecha después de eso
-    // cae fuera de rango y getFiscalWeek() debe lanzar error explícito.
+    // Si no hay siguiente FY (real o proyectado) después de este, se
+    // asume que dura exactamente `weeks` semanas — cualquier fecha
+    // después de eso cae fuera de rango y getFiscalWeek() lanza error
+    // explicito (esto solo puede pasar mas alla de la proyección
+    // automática, que siempre cubre "el siguiente FY").
     const curEnd = next ? next.startDate : new Date(cur.startDate.getTime() + cur.weeks * 7 * 86400000);
     if (date >= cur.startDate && date < curEnd) return cur;
   }
@@ -103,9 +162,11 @@ function _findFiscalYear(date) {
  * cada año de 53 semanas específico.
  *
  * @param {Date} dateInput — fecha de referencia (normalmente row['FECHA'] del Excel)
- * @returns {{ fy:string, sw:number, quarter:number, weekStart:Date, weekEnd:Date, totalWeeksInFY:number }}
- * @throws {Error} si la fecha no cae dentro de ningún FY configurado en FISCAL_YEARS
+ * @returns {{ fy:string, sw:number, quarter:number, weekStart:Date, weekEnd:Date, totalWeeksInFY:number, confirmed:boolean }}
+ * @throws {Error} si la fecha no cae dentro de ningún FY configurado NI de la proyección automática
  */
+let _warnedProjectedUse = false;
+
 export function getFiscalWeek(dateInput) {
   const date = _localMidnight(dateInput);
   const fy = _findFiscalYear(date);
@@ -117,6 +178,18 @@ export function getFiscalWeek(dateInput) {
     );
   }
 
+  if (!fy.confirmed && !_warnedProjectedUse) {
+    _warnedProjectedUse = true;
+    console.warn(
+      `[FiscalCalendar] Usando ${fy.label} para calcular SW/DIA — fecha de inicio PROYECTADA ` +
+      `automaticamente (contigua al FY anterior, Walmart nunca detiene operaciones), semanas ` +
+      `asumidas en ${fy.weeks} SIN CONFIRMAR por Walmart todavia. Agrega la entrada real en ` +
+      `FISCAL_YEARS (core/fiscal-calendar.js) en cuanto se publique el calendario oficial — si el ` +
+      `año real tiene distinta cantidad de semanas, el numero de SW se desalinea a partir de la ` +
+      `semana ${fy.weeks + 1}.`
+    );
+  }
+
   const daysSinceStart = _daysBetween(fy.startDate, date);
   const weekIndex = Math.floor(daysSinceStart / 7); // 0-based
   const sw = weekIndex + 1;
@@ -124,7 +197,7 @@ export function getFiscalWeek(dateInput) {
   const weekEnd   = new Date(weekStart.getTime() + 6 * 86400000);
   const quarter   = Math.min(4, Math.ceil(sw / 13));
 
-  return { fy: fy.label, sw, quarter, weekStart, weekEnd, totalWeeksInFY: fy.weeks };
+  return { fy: fy.label, sw, quarter, weekStart, weekEnd, totalWeeksInFY: fy.weeks, confirmed: fy.confirmed };
 }
 
 /**
@@ -136,4 +209,30 @@ export function getFiscalWeek(dateInput) {
  */
 export function getSW(dateInput) {
   return getFiscalWeek(dateInput).sw;
+}
+
+/**
+ * PENDIENTE RECURRENTE: avisa en consola cuando al último FY
+ * configurado en FISCAL_YEARS le quedan pocos días — sin esto, el
+ * aviso de arriba (el comentario junto a FISCAL_YEARS) vive solo en
+ * texto que nadie relee hasta que ya truena en producción
+ * (getFiscalWeek() empieza a lanzar error para toda fecha fuera de
+ * rango, y las filas quedan sin SW/DIA — ver merge.js, que lo atrapa
+ * con gracia pero no lo arregla). Llamar una vez al boot (ver core/app.js).
+ * @param {number} [warnDays=30]
+ */
+export function warnIfFiscalYearRunningOut(warnDays = 30) {
+  const sorted = [...FISCAL_YEARS].sort((a, b) => _parseLocalDate(a.start) - _parseLocalDate(b.start));
+  const last = sorted[sorted.length - 1];
+  if (!last) return;
+  const lastStart = _parseLocalDate(last.start);
+  const lastEnd   = new Date(lastStart.getTime() + last.weeks * 7 * 86400000);
+  const daysLeft  = _daysBetween(_localMidnight(new Date()), lastEnd);
+  if (daysLeft > warnDays) return;
+  console.warn(
+    `[FiscalCalendar] El último año fiscal configurado (${last.label}) termina el ` +
+    `${lastEnd.toLocaleDateString('es-MX')} (en ${daysLeft} dia(s)). Agrega el siguiente ` +
+    `FY en FISCAL_YEARS (core/fiscal-calendar.js) antes de esa fecha, o las filas de ese ` +
+    `día en adelante se quedan sin SW/DIA.`
+  );
 }

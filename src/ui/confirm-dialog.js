@@ -16,8 +16,9 @@
  * Contrato (mismo criterio "falsy = cancelado" que los nativos):
  *   ConfirmDialog.confirm({ title, body, confirmLabel, cancelLabel, danger })
  *     -> Promise<boolean>  (true = confirmo, false = cancelo/Escape/backdrop)
- *   ConfirmDialog.prompt({ title, body, placeholder, defaultValue, confirmLabel })
- *     -> Promise<string|null>  (string = valor, null = cancelo)
+ *   ConfirmDialog.prompt({ title, body, placeholder, defaultValue, confirmLabel, inputType })
+ *     -> Promise<string|null>  (string = valor, null = cancelo; inputType
+ *        default 'text', usar 'password' para que no se vea lo tecleado)
  *   ConfirmDialog.alertMsg({ title, body, confirmLabel })
  *     -> Promise<void>  (un solo boton, sin opcion de cancelar)
  *
@@ -57,13 +58,14 @@ function _open(opts, isPrompt) {
   const {
     title, body, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar',
     danger = false, icon = danger ? '!' : '?',
-    placeholder = '', defaultValue = '', hideCancel = false
+    placeholder = '', defaultValue = '', hideCancel = false, inputType = 'text'
   } = opts;
 
   els.icon.textContent  = icon;
   els.title.textContent = title;
   els.body.innerHTML    = body || '';
   els.input.style.display = isPrompt ? '' : 'none';
+  els.input.type        = inputType;
   els.input.value       = defaultValue;
   els.input.placeholder = placeholder;
   els.confirm.textContent = confirmLabel;

@@ -1,65 +1,66 @@
 /* core/pwa-install.css
- * Banner de instalación de la PWA. Usa los design tokens ya definidos
- * en index.html (--navy, --amber, --surface, --shadow-lg, --r-lg) para
- * no inventar una paleta nueva — mismo look & feel que el resto de la app.
+ * Gate de instalación obligatoria. Tapa toda la pantalla mientras la
+ * app no corra instalada (standalone). Usa los design tokens ya
+ * definidos en index.html (--navy, --amber, --surface, --shadow-lg,
+ * --r-lg) para no inventar una paleta nueva.
  */
 
-.sd-install-banner{
-  position:fixed; right:18px; bottom:18px; z-index:9999;
-  max-width:380px;
-  transform:translateY(16px) scale(.98);
-  opacity:0; pointer-events:none;
-  transition:transform .25s ease, opacity .25s ease;
+.sd-install-gate{
+  position:fixed; inset:0; z-index:99999;
+  display:flex; align-items:center; justify-content:center;
+  padding:24px;
+  background:rgba(11,29,51,.82);
+  backdrop-filter:blur(6px);
+  opacity:0;
+  transition:opacity .25s ease;
 }
-.sd-install-banner.is-visible{
-  transform:translateY(0) scale(1);
-  opacity:1; pointer-events:auto;
-}
+.sd-install-gate.is-visible{ opacity:1; }
 
-.sd-install-card{
-  display:flex; align-items:flex-start; gap:12px;
+.sd-gate-card{
+  display:flex; flex-direction:column; align-items:center; gap:14px;
+  text-align:center;
+  max-width:420px; width:100%;
   background:var(--surface, #fff);
-  border:1px solid var(--border, rgba(11,29,51,.09));
   border-radius:var(--r-lg, 18px);
-  box-shadow:var(--shadow-lg, 0 20px 50px rgba(11,29,51,.14));
-  padding:14px 16px;
+  box-shadow:var(--shadow-lg, 0 20px 60px rgba(11,29,51,.35));
+  padding:32px 28px;
 }
 
-.sd-install-icon{
-  border-radius:10px; flex-shrink:0;
-}
+.sd-gate-icon{ border-radius:14px; }
 
-.sd-install-copy{
-  display:flex; flex-direction:column; gap:3px; flex:1; min-width:0;
-}
-.sd-install-copy strong{
+.sd-gate-card h2{
+  margin:0;
   font-family:var(--disp, 'Manrope', sans-serif);
-  font-size:13.5px; color:var(--text, #0B1526);
-}
-.sd-install-copy span{
-  font-size:11.5px; line-height:1.4; color:var(--text-2, #4A5670);
+  font-size:19px; color:var(--text, #0B1526);
 }
 
-.sd-install-actions{
-  display:flex; flex-direction:column; gap:6px; flex-shrink:0;
+.sd-gate-msg{
+  margin:0;
+  font-family:var(--ui, 'Inter', sans-serif);
+  font-size:13.5px; line-height:1.5; color:var(--text-2, #4A5670);
 }
-.sd-install-btn{
-  border:none; border-radius:10px; padding:7px 12px;
-  font-family:var(--ui, 'Inter', sans-serif); font-size:11.5px; font-weight:600;
-  cursor:pointer; white-space:nowrap;
+
+.sd-gate-actions{
+  display:flex; flex-direction:column; gap:8px; width:100%;
 }
-.sd-install-btn-primary{
+
+.sd-gate-btn{
+  display:inline-flex; align-items:center; justify-content:center;
+  border:none; border-radius:10px; padding:11px 16px;
+  font-family:var(--ui, 'Inter', sans-serif); font-size:13px; font-weight:600;
+  cursor:pointer; text-decoration:none; white-space:nowrap;
+}
+.sd-gate-btn-primary{
   background:var(--amber, #F5A623); color:var(--navy, #0B1D33);
 }
-.sd-install-btn-primary:hover{ filter:brightness(1.05); }
-.sd-install-btn-ghost{
+.sd-gate-btn-primary:hover{ filter:brightness(1.05); }
+.sd-gate-btn-ghost{
   background:transparent; color:var(--text-3, #64708C);
+  border:1px solid var(--border, rgba(11,29,51,.15));
 }
-.sd-install-btn-ghost:hover{ color:var(--text, #0B1526); }
+.sd-gate-btn-ghost:hover{ color:var(--text, #0B1526); }
 
-@media (max-width:480px){
-  .sd-install-banner{ left:12px; right:12px; bottom:12px; max-width:none; }
-  .sd-install-card{ flex-wrap:wrap; }
-  .sd-install-actions{ flex-direction:row; width:100%; }
-  .sd-install-btn{ flex:1; }
+.sd-gate-feedback{
+  margin:0; min-height:14px;
+  font-size:11px; color:var(--text-3, #64708C); word-break:break-all;
 }

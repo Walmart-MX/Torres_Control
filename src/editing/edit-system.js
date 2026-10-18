@@ -246,8 +246,6 @@ document.getElementById('editDrawerRuta').textContent =
             }
           });
         }
-        if (propagated) console.log(`[EditSystem] Licencia propagada a ${propagated} entrega(s) adicional(es) del mismo operador.`);
-
         const opName = String(row['OPERADOR'] || '').trim();
         if (opName && newVal) {
           addOperator(opName, newVal).then(result => {

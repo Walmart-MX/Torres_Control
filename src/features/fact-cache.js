@@ -131,7 +131,6 @@ export const FactCache = {
     newFactData.forEach((val, inv) => {
       State.factCache.set(inv, { gls: val.gls || '', horaFact: val.horaFact || '', date: today, savedAt, source: 'current' });
     });
-    console.log('[FactCache] Persisted', newFactData.size, 'entries to Supabase.');
     await FactCache._logResult({ date: today, count: newFactData.size, status: 'ok' });
   },
 

@@ -6,11 +6,24 @@
  * CAMBIO (sep-2026 — roles de admin): las funciones sd_admin_* ya NO
  * son de acceso libre — ver docs/fix_admin_roles.sql para el hallazgo
  * completo (PUBLIC tenía EXECUTE, cero verificación de quien llamaba)
- * y el parche. Ahora exigen p_actor_id (el id de State.currentUser) y
- * Postgres verifica server-side que ese usuario tenga role='admin' —
- * el prompt() de contraseña del panel de Usuarios en app.js sigue
- * existiendo, pero ya es solo una cortina cosmética; la protección
- * real vive aquí abajo, en las llamadas a los 4 adminXxx().
+ * y el parche de esa fecha.
+ *
+ * CAMBIO (oct-2026 — spoofing de identidad, cierre del hueco real):
+ * el fix de sep-2026 dejaba una grieta: las 4 funciones recibían
+ * p_actor_id (un uuid) DESDE EL CLIENTE y solo verificaban "¿este uuid
+ * es de un admin?" — nunca que quien llamaba en verdad FUERA ese uuid.
+ * Cualquiera con la anon key que consiguiera/adivinara el uuid de un
+ * admin (viaja en texto plano en localStorage y en cada request) podía
+ * impersonarlo para siempre, sin contraseña. Ver docs/fix_admin_session_tokens.sql.
+ *
+ * Ahora las 4 funciones exigen p_session_token — un token opaco que
+ * Postgres solo emite (sd_admin_login) tras re-validar la contraseña
+ * REAL del usuario, expira solo a las 4h y se desliza con cada uso. El
+ * flujo en el cliente: la primera acción de admin en una sesión de
+ * pestaña dispara un re-prompt de contraseña (ver ensureAdminSession()
+ * en app.js) — las siguientes reusan el token ya emitido hasta que
+ * expire. adminLogin()/adminLogout()/hasAdminSession() de abajo son la
+ * mitad cliente de ese flujo.
  *
  * Persistencia en esta terminal (localStorage), dos claves separadas
  * a propósito:
@@ -41,6 +54,16 @@ const ACTIVITY_THROTTLE_MS = 60 * 1000;
 let _lastActivityWrite   = 0;
 let _expiryCheckInterval = null;
 let _onExpire            = null;
+
+// Token de sesión de admin — SOLO en memoria (nunca localStorage): vive
+// mientras dure la pestaña, se pierde al recargar (el usuario vuelve a
+// confirmar su contraseña) y expira solo a las 4h en el servidor.
+let _adminSessionToken      = null;
+let _adminSessionExpiresAt  = 0;
+
+function _hasAdminSession() {
+  return !!_adminSessionToken && Date.now() < _adminSessionExpiresAt;
+}
 
 function _readJSON(key) {
   try { return JSON.parse(localStorage.getItem(key) || 'null'); }
@@ -93,6 +116,7 @@ export const Auth = {
 
   /** "Cambiar usuario" — borra todo rastro de identidad de esta terminal. */
   changeUser() {
+    Auth.adminLogout();
     _clear(KNOWN_USER_KEY);
     _clear(SESSION_KEY);
     State.currentUser = null;
@@ -100,8 +124,40 @@ export const Auth = {
 
   /** Cierra la sesión activa; conserva el usuario recordado (saludo sigue funcionando). */
   logout() {
+    Auth.adminLogout();
     _clear(SESSION_KEY);
     State.currentUser = null;
+  },
+
+  /** true si hay un token de admin vigente (no expirado) en esta pestaña. */
+  hasAdminSession() { return _hasAdminSession(); },
+
+  /**
+   * Re-autenticación ("step-up"): confirma la propia contraseña del
+   * usuario YA logueado y, si tiene role='admin', emite el token que
+   * destraba las 4 funciones sd_admin_*. Ver docs/fix_admin_session_tokens.sql.
+   * @returns {Promise<{ok:boolean, error?:string}>}
+   */
+  async adminLogin(password) {
+    if (!State.currentUser) return { ok: false, error: 'no_session' };
+    const { data, error } = await sb.rpc('sd_admin_login', {
+      p_username: State.currentUser.username, p_password: password
+    });
+    if (error) return { ok: false, error: 'network' };
+    if (data.ok) {
+      _adminSessionToken     = data.token;
+      _adminSessionExpiresAt = Date.now() + (data.expiresInMs || 0);
+    }
+    return data;
+  },
+
+  /** Revoca el token de admin en el servidor antes de que expire solo. */
+  async adminLogout() {
+    if (!_adminSessionToken) return;
+    const token = _adminSessionToken;
+    _adminSessionToken = null;
+    _adminSessionExpiresAt = 0;
+    await sb.rpc('sd_admin_logout', { p_session_token: token }).catch(() => {});
   },
 
   /** Refresca la ventana de actividad — llamar desde listeners globales (click/keydown). Throttled. */
@@ -150,38 +206,34 @@ export const Auth = {
     return data;
   },
 
-  // ── Administración (protegida por rol server-side desde sep-2026 —
-  //    ver docs/fix_admin_roles.sql. Antes de eso, las 4 funciones
-  //    sd_admin_* no verificaban quién las llamaba: cualquiera con la
-  //    anon key —pública, va en el bundle del cliente— podía listar/
-  //    crear/resetear/desactivar usuarios sin pasar por el login. El
-  //    guard real ahora vive en Postgres (_sd_assert_admin); esto solo
-  //    evita una llamada de red inútil si por lo que sea no hay sesión.
+  // ── Administración (protegida server-side desde sep-2026, identidad
+  //    del llamante verificada con token de sesión desde oct-2026 —
+  //    ver docs/fix_admin_session_tokens.sql y la nota de cabecera).
   async adminListUsers() {
-    if (!State.currentUser) return [];
-    const { data, error } = await sb.rpc('sd_admin_list_users', { p_actor_id: State.currentUser.id });
+    if (!_hasAdminSession()) return [];
+    const { data, error } = await sb.rpc('sd_admin_list_users', { p_session_token: _adminSessionToken });
     if (error) { console.warn('[Auth] Error listando usuarios:', error.message); return []; }
     return data || [];
   },
   async adminCreateUser(username, password, displayName, captureName) {
-    if (!State.currentUser) return { ok: false, error: 'no_session' };
+    if (!_hasAdminSession()) return { ok: false, error: 'admin_session_required' };
     const { data, error } = await sb.rpc('sd_admin_create_user', {
-      p_actor_id: State.currentUser.id,
+      p_session_token: _adminSessionToken,
       p_username: username, p_password: password, p_display_name: displayName, p_capture_name: captureName
     });
     return error ? { ok: false, error: error.message } : data;
   },
   async adminSetActive(userId, active) {
-    if (!State.currentUser) return { ok: false, error: 'no_session' };
+    if (!_hasAdminSession()) return { ok: false, error: 'admin_session_required' };
     const { data, error } = await sb.rpc('sd_admin_set_active', {
-      p_actor_id: State.currentUser.id, p_user_id: userId, p_active: active
+      p_session_token: _adminSessionToken, p_user_id: userId, p_active: active
     });
     return error ? { ok: false, error: error.message } : data;
   },
   async adminResetPassword(userId, newPassword) {
-    if (!State.currentUser) return { ok: false, error: 'no_session' };
+    if (!_hasAdminSession()) return { ok: false, error: 'admin_session_required' };
     const { data, error } = await sb.rpc('sd_admin_reset_password', {
-      p_actor_id: State.currentUser.id, p_user_id: userId, p_new_password: newPassword
+      p_session_token: _adminSessionToken, p_user_id: userId, p_new_password: newPassword
     });
     return error ? { ok: false, error: error.message } : data;
   }
