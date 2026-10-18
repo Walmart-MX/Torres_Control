@@ -755,7 +755,7 @@ showAuthFull() {
         ? 'Faltan fuentes por cargar — vuelve a Preparación'
         : 'Sin datos aún';
       tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state">
-        <div class="empty-ico"><svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div><div class="empty-title">${escH(msg)}</div>
+        <div class="empty-ico">&#128237;</div><div class="empty-title">${escH(msg)}</div>
       </div></td></tr>`;
       return;
     }
@@ -763,7 +763,7 @@ showAuthFull() {
     const rows = UI._filteredRows(statusMap);
     if (!rows.length) {
       tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state">
-        <div class="empty-ico"><svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div><div class="empty-title">Sin resultados para este filtro</div>
+        <div class="empty-ico">&#128269;</div><div class="empty-title">Sin resultados para este filtro</div>
       </div></td></tr>`;
       return;
     }
@@ -826,10 +826,30 @@ showAuthFull() {
       { key: 'fixed', label: 'Corregidas',       cnt: fixed },
       { key: 'ok',    label: 'Completas',        cnt: ok    },
     ];
+
+    // Snapshot de los conteos previos ANTES de tirar el innerHTML viejo —
+    // se usa después del rebuild para saber que chip cambio de numero y
+    // darle un destello (Motion.flashBg), en vez de reconstruir todo en
+    // silencio como antes.
+    const prevCounts = new Map();
+    bar.querySelectorAll('.fchip').forEach(btn => {
+      prevCounts.set(btn.dataset.filter, btn.querySelector('.cnt')?.textContent);
+    });
+
     bar.innerHTML = DEFS.map(d => `
       <button class="fchip${d.key === _tableFilter ? ' active' : ''}" data-filter="${d.key}">
         ${d.label} <span class="cnt">${d.cnt}</span>
       </button>`).join('');
+
+    if (prevCounts.size) {
+      DEFS.forEach(d => {
+        const prev = prevCounts.get(d.key);
+        if (prev !== undefined && prev !== String(d.cnt)) {
+          const cntEl = bar.querySelector(`.fchip[data-filter="${d.key}"] .cnt`);
+          Motion.flashBg(cntEl);
+        }
+      });
+    }
   },
 
   /** Sub-título de la pantalla Mesa de Trabajo — "N rutas del día operativo · actualizado HH:MM" */
@@ -859,9 +879,9 @@ showAuthFull() {
   /** Reinicia el "antes" del comparativo de calidad — llamar junto a resetFixPeak(), en el mismo momento (merge fresco), nunca tras una edición individual. */
   resetQualityBaseline() { _qualityBaseline = null; },
 
-  /** Pinta el Dashboard de Calidad: ring SVG, comparativo antes/después, grilla de métricas y CTA de cierre. */
+  /** Pinta el Dashboard de Calidad: badge emoji + numero, comparativo antes/despues, grilla de metricas y CTA de cierre. */
   renderQualityScreen() {
-    const ringArc  = document.getElementById('qArc');
+    const ringBadge = document.getElementById('qRingBadge');
     const ringNum  = document.getElementById('qRingNum');
     const heroTtl  = document.getElementById('qHeroTitle');
     const heroSub  = document.getElementById('qHeroSub');
@@ -869,13 +889,12 @@ showAuthFull() {
     const baFinal  = document.getElementById('qBaFinal');
     const metrics  = document.getElementById('qMetrics');
     const ctaWrap  = document.getElementById('qFinalCta');
-    if (!ringArc || !metrics) return;
+    if (!metrics) return;
 
     const { ok } = Events ? Events.checkSources() : { ok: true };
-    const CIRC = 452.4; // 2·π·72 — mismo radio que el SVG del anillo
 
     if (!ok || !State.merged.length) {
-      ringArc.style.strokeDashoffset = CIRC;
+      if (ringBadge) ringBadge.textContent = String.fromCodePoint(128202); // chart neutro — sin datos aun
       if (ringNum) ringNum.textContent = '—';
       if (heroTtl) heroTtl.textContent = 'Aún no hay datos';
       if (heroSub) heroSub.textContent = 'Completa las 4 fuentes en Preparación y corrige las incidencias para ver el resultado aquí.';
@@ -889,7 +908,13 @@ showAuthFull() {
     const quality = State.sveLastQuality;
     if (_qualityBaseline === null) _qualityBaseline = quality;
 
-    ringArc.style.strokeDashoffset = String(CIRC * (1 - quality / 100));
+    if (ringBadge) {
+      // Mismos cortes que el texto del hero, abajo — un solo criterio de "buena/regular/mala" para toda la pantalla.
+      const tierIco = quality >= 95 ? String.fromCodePoint(127942)  // trofeo
+        : quality >= 80 ? String.fromCodePoint(128077)              // pulgar arriba
+        : String.fromCodePoint(128295);                              // llave inglesa
+      if (ringBadge.textContent !== tierIco) { ringBadge.textContent = tierIco; Motion.popIcon(ringBadge); }
+    }
     if (ringNum) Motion.animateNumber(ringNum, quality, { suffix: '%' });
 
     const { quick, review, confirm, multi } = UI._buildFixBuckets();
@@ -1742,19 +1767,28 @@ showAuthFull() {
     const badge    = document.getElementById('cacheHistBadge');
     const list     = document.getElementById('cacheHistList');
     const totalInv = summary.reduce((s, d) => s + d.count, 0);
+    const prevTotal = Number(badge?.dataset.lastTotal ?? -1); // -1 = primera pintada, nunca destella
 
     if (State.cacheUpdating) {
-      badge.textContent = '🔄 Actualizando…';
+      badge.textContent = `${String.fromCodePoint(128260)} Actualizando…`;
       badge.className   = 'cat-badge-count';
     } else if (!summary.length) {
-      badge.textContent = '❌ Sin datos';
+      badge.textContent = `${String.fromCodePoint(10060)} Sin datos`;
       badge.className   = 'cat-badge-count err';
     } else if (summary.some(d => d.status === 'err')) {
-      badge.textContent = `⚠️ ${summary.length} día${summary.length > 1 ? 's' : ''} · revisar`;
+      badge.textContent = `${String.fromCodePoint(9888)} ${summary.length} día${summary.length > 1 ? 's' : ''} · revisar`;
       badge.className   = 'cat-badge-count warn';
     } else {
-      badge.textContent = `✅ ${summary.length} día${summary.length > 1 ? 's' : ''} · ${totalInv} facturas`;
+      badge.textContent = `${String.fromCodePoint(9989)} ${summary.length} día${summary.length > 1 ? 's' : ''} · ${totalInv} facturas`;
       badge.className   = 'cat-badge-count';
+    }
+    // Destello si el total de facturas cambio desde la ultima pintada --
+    // va DESPUES de fijar className a proposito (Motion.flashBg agrega
+    // una clase temporal; si corriera antes, el className de arriba la
+    // pisaria sin que se vea nada).
+    if (badge) {
+      if (prevTotal >= 0 && prevTotal !== totalInv) Motion.flashBg(badge);
+      badge.dataset.lastTotal = String(totalInv);
     }
 
     if (!summary.length) {
@@ -1888,7 +1922,7 @@ showAuthFull() {
     const tbody = document.getElementById(tbodyId);
     const slice = rows.slice(0, 50);
     if (!slice.length) {
-      tbody.innerHTML = '<tr><td colspan="23"><div class="empty-state"><div class="empty-ico"><svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div><div class="empty-title">Sin datos</div></div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="23"><div class="empty-state"><div class="empty-ico">&#128237;</div><div class="empty-title">Sin datos</div></div></td></tr>';
       return;
     }
     tbody.innerHTML = slice.map(row => {

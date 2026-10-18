@@ -25,7 +25,7 @@
  * en `activate`.
  */
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2'; // oct-2026: icono nuevo (camion en vez de monograma "SD") -- fuerza a los clientes ya instalados a descartar el shell viejo y traer los iconos nuevos.
 const SHELL_CACHE = `smartdispatch-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `smartdispatch-runtime-${CACHE_VERSION}`;
 

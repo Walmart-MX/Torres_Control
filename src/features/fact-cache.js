@@ -48,29 +48,53 @@ export const FactCache = {
 
   /**
    * Carga el caché vigente desde Supabase (descarta lo más viejo que TTL_DAYS).
+   *
+   * CAMBIO (oct-2026 — sin tope de 1,000 filas): Supabase/PostgREST
+   * devuelve maximo 1,000 filas por request si no se pagina — con mas
+   * de 1,000 facturas dentro de la ventana de TTL_DAYS, las filas de
+   * mas alla de la 1,000 quedaban afuera de memoria EN SILENCIO (no
+   * era error, simplemente no volvian en el SELECT). Las facturas
+   * seguían existiendo en la tabla, solo faltaba traerlas. Ahora se
+   * pagina en bloques de PAGE_SIZE hasta que una pagina vuelve
+   * incompleta (esa es la señal de que ya no hay mas filas) — sin tope
+   * artificial de cuantas facturas puede manejar el caché. MAX_PAGES
+   * es solo un freno de seguridad para nunca loopear sin fin si algo
+   * sale raro del lado del servidor, no una limitación real de negocio.
    * @returns {Promise<Map<string, object>>}
    */
   async load() {
-    const cutoff = new Date(Date.now() - FactCache.TTL_DAYS * 86400 * 1000).toISOString();
-    const { data, error } = await sb.from(TABLE)
-      .select('invoice, gls, hora_fact, cache_date, saved_at, source')
-      .gte('saved_at', cutoff);
-
-    if (error) {
-      console.warn('[FactCache] Error cargando caché desde Supabase:', error.message);
-      return new Map();
-    }
-
+    const cutoff    = new Date(Date.now() - FactCache.TTL_DAYS * 86400 * 1000).toISOString();
+    const PAGE_SIZE = 1000;
+    const MAX_PAGES = 200; // freno de seguridad — 200k filas, muy por encima de cualquier volumen real
     const map = new Map();
-    for (const row of data) {
-      map.set(row.invoice, {
-        gls:      row.gls || '',
-        horaFact: row.hora_fact || '',
-        date:     row.cache_date,
-        savedAt:  new Date(row.saved_at).getTime(),
-        source:   row.source || 'current'
-      });
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const from = page * PAGE_SIZE;
+      const to   = from + PAGE_SIZE - 1;
+      const { data, error } = await sb.from(TABLE)
+        .select('invoice, gls, hora_fact, cache_date, saved_at, source')
+        .gte('saved_at', cutoff)
+        .order('invoice', { ascending: true }) // orden estable — imprescindible para que range() no repita/salte filas entre paginas
+        .range(from, to);
+
+      if (error) {
+        console.warn('[FactCache] Error cargando caché desde Supabase:', error.message);
+        break;
+      }
+
+      for (const row of data) {
+        map.set(row.invoice, {
+          gls:      row.gls || '',
+          horaFact: row.hora_fact || '',
+          date:     row.cache_date,
+          savedAt:  new Date(row.saved_at).getTime(),
+          source:   row.source || 'current'
+        });
+      }
+
+      if (data.length < PAGE_SIZE) break; // ultima pagina — vino incompleta, no hay mas
     }
+
     return map;
   },
 

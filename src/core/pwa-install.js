@@ -105,7 +105,6 @@ function renderGateContent() {
       <img src="icons/icon-192.png" alt="" class="sd-gate-icon" width="56" height="56">
       <h2 id="sd-gate-title">Instala SmartDispatch para continuar</h2>
       <p class="sd-gate-msg">${message}</p>
-      <p class="sd-gate-highlight">Compatibilidad completa con STRIDE desde el día uno: migras sin cortar el flujo que ya tienes hoy, WTMS, PDFs y catálogos siguen funcionando exactamente igual.</p>
       <div class="sd-gate-actions">${primaryActionHtml}</div>
       <p class="sd-gate-feedback" id="sd-gate-feedback"></p>
     </div>`;

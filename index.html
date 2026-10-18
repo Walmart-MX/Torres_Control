@@ -218,6 +218,11 @@ body:not(.app-authed) .shell{display:none!important}
   padding:3px 10px;border-radius:100px;background:var(--surface-3);color:var(--text-3);transition:color .2s;
 }
 .up-card.done .up-status{background:var(--green);color:#fff}
+.up-folder-pick{
+  position:relative;z-index:2;display:inline-block;margin-top:8px;
+  font-size:9.5px;font-weight:600;color:var(--text-3);text-decoration:underline;cursor:pointer;
+}
+.up-folder-pick:hover{color:var(--brand-accent)}
 
 /* ── Feedback de arrastre (drag & drop) — NUEVO jul-2026 ──
    Events.setupDrop() ya alternaba la clase .drag en dragover/dragleave/
@@ -353,14 +358,21 @@ body:not(.app-authed) .shell{display:none!important}
 
 /* ── TODAY BANNER ── */
 .today-banner{
-  display:flex;align-items:center;gap:14px;background:var(--green-soft);border:1px solid var(--green);
-  border-radius:var(--r-lg);padding:12px 18px;margin-bottom:16px;box-shadow:var(--shadow-sm);
+  display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:var(--green-soft);border:1px solid var(--green);
+  border-radius:999px;padding:7px 16px;margin-bottom:14px;box-shadow:var(--shadow-sm);
+  animation: todayBannerIn var(--dur-slow, 320ms) var(--ease, ease) both;
 }
+@media (prefers-reduced-motion: reduce){ .today-banner{ animation:none; } }
 .today-banner.hidden{display:none}
-.today-banner-icon{font-size:22px;flex-shrink:0}
-.today-banner-text{flex:1;min-width:200px;font-size:12px;color:var(--text-2)}
-.today-banner-text strong{display:block;font-size:13px;color:var(--green);margin-bottom:2px}
-.today-banner-actions{display:flex;gap:8px;flex-shrink:0}
+.today-banner-icon{font-size:15px;flex-shrink:0;line-height:1}
+.today-banner-text{flex:1 1 auto;min-width:160px;font-size:11.5px;line-height:1.4;color:var(--text-2);display:flex;align-items:baseline;flex-wrap:wrap;gap:5px}
+.today-banner-text strong{font-size:12px;font-weight:700;color:var(--green)}
+.today-banner-actions{display:flex;gap:4px;flex-shrink:0;margin-left:auto}
+.today-banner-actions .btn{padding:4px 10px;font-size:11px}
+@keyframes todayBannerIn{
+  from{ opacity:0; transform:translateY(-6px); }
+  to  { opacity:1; transform:translateY(0); }
+}
 
 /* ══════════════════ MESA DE TRABAJO ══════════════════ */
 .toolbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
@@ -427,6 +439,7 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 /* ══════════════════ CALIDAD ══════════════════ */
 .q-hero{display:flex;align-items:center;gap:40px;padding:36px;background:linear-gradient(135deg,var(--navy),var(--navy-2));border-radius:var(--r-xl);color:#fff;margin-bottom:22px;flex-wrap:wrap;box-shadow:var(--shadow-lg)}
 .q-ring-wrap{position:relative;width:168px;height:168px;flex-shrink:0}
+.q-ring-badge{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:84px;opacity:.16;transition:opacity .3s var(--ease,ease)}
 .q-ring-num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
 .q-ring-num strong{font-family:var(--disp);font-weight:800;font-size:34px;line-height:1}
 .q-ring-num span{font-size:10px;color:rgba(255,255,255,.55);font-weight:600;letter-spacing:.04em;margin-top:2px}
@@ -1048,14 +1061,14 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 
       <!-- Aviso: día operativo ya procesado -->
       <div class="today-banner hidden" id="todayBanner">
-        <div class="today-banner-icon">✅</div>
+        <div class="today-banner-icon">&#9989;</div>
         <div class="today-banner-text">
-          <strong>El día operativo de hoy ya fue procesado.</strong>
+          <strong>Día operativo ya procesado.</strong>
           <span id="todayBannerInfo"></span>
         </div>
         <div class="today-banner-actions">
-          <button class="btn btn-ghost btn-sm" id="btnTodayPreview">👁 Ver vista previa</button>
-          <button class="btn btn-amber btn-sm" id="btnTodayRedownload">⬇ Descargar de nuevo</button>
+          <button class="btn btn-ghost btn-sm" id="btnTodayPreview">&#128065; Vista previa</button>
+          <button class="btn btn-amber btn-sm" id="btnTodayRedownload">&#11015; Descargar de nuevo</button>
         </div>
       </div>
 
@@ -1070,11 +1083,13 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 
       <div class="prep-grid" id="prepGrid">
         <div class="up-card" id="dropPDF">
-          <input type="file" id="filePDF" multiple accept=".pdf" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%">
-          <div class="up-ico">📄</div>
+          <input type="file" id="filePDF" multiple accept=".pdf" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;z-index:1">
+          <div class="up-ico">&#128196;</div>
           <div class="up-title">PDFs de cargas</div>
           <div class="up-sub" id="pdfSub">Todos los archivos del día a la vez</div>
           <div class="up-status" id="pdfStatus">Arrastra o haz clic</div>
+          <label class="up-folder-pick" for="filePDFFolder">o selecciona la carpeta completa</label>
+          <input type="file" id="filePDFFolder" webkitdirectory multiple style="display:none">
         </div>
         <div class="up-card" id="dropXLS">
           <input type="file" id="fileXLS" accept=".xlsx,.xls" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%">
@@ -1085,14 +1100,14 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
         </div>
         <div class="up-card" id="dropWTMS">
           <input type="file" id="fileWTMS" accept=".csv" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%">
-          <div class="up-ico"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14"/></svg></div>
+          <div class="up-ico">&#128752;</div>
           <div class="up-title">Reporte WTMS</div>
           <div class="up-sub" id="wtmsSub">Archivo .csv</div>
           <div class="up-status" id="wtmsStatus">Arrastra o haz clic</div>
         </div>
         <div class="up-card" id="dropMONTOS">
           <input type="file" id="fileMONTOS" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%">
-          <div class="up-ico"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+          <div class="up-ico">&#128178;</div>
           <div class="up-title">Reporte de Facturación</div>
           <div class="up-sub" id="montosSub">Reporte de mainframe (monto por factura)</div>
           <div class="up-status" id="montosStatus">Arrastra o haz clic</div>
@@ -1275,15 +1290,7 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 
       <div class="q-hero">
         <div class="q-ring-wrap">
-          <svg width="168" height="168" viewBox="0 0 168 168">
-            <circle cx="84" cy="84" r="72" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="14"/>
-            <circle cx="84" cy="84" r="72" fill="none" stroke="url(#qgrad)" stroke-width="14"
-              stroke-dasharray="452.4" stroke-dashoffset="452.4" stroke-linecap="round" transform="rotate(-90 84 84)"
-              id="qArc" style="transition:stroke-dashoffset 1.1s var(--ease)"/>
-            <defs><linearGradient id="qgrad" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stop-color="#F5A623"/><stop offset="100%" stop-color="#1E9E6B"/>
-            </linearGradient></defs>
-          </svg>
+          <div class="q-ring-badge" id="qRingBadge">&#128202;</div>
           <div class="q-ring-num"><strong id="qRingNum">—</strong><span>CALIDAD FINAL</span></div>
         </div>
         <div class="q-hero-info">

@@ -137,9 +137,13 @@ export function renderBaselineSparkle(host) {
   host.appendChild(layer);
 }
 
-// Luna grande de Halloween (ambient.moon:true) — pálida, con glow del
+// Luna grande de Halloween (ambient.moon:true) — palida, con glow del
 // acento mezclado; 28px en Sutil, 38px + pulso en Intenso (ver CSS).
-const MOON_SVG = '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/></svg>';
+// CAMBIO (oct-2026 — migracion a emoji, ver docs/convenciones_ui.md):
+// antes SVG con currentColor; el glow de --t-accent sigue viniendo del
+// drop-shadow en CSS (eso no depende del color del glifo), solo se
+// pierde el tinte directo del relleno — trade-off aceptado.
+const MOON_ICON = String.fromCodePoint(127769); // luna creciente
 
 export function renderMoon(host, entries, byId, intensity) {
   if (!host) return;
@@ -152,11 +156,12 @@ export function renderMoon(host, entries, byId, intensity) {
   if (!layer) {
     layer = document.createElement('div');
     layer.className = 't-moon';
-    layer.innerHTML = MOON_SVG;
+    layer.textContent = MOON_ICON;
     host.appendChild(layer);
   }
   layer.style.width = `${size}px`;
   layer.style.height = `${size}px`;
+  layer.style.fontSize = `${size}px`;
   layer.style.opacity = String(weight);
   layer.style.animationPlayState = weight < MIN_ANIMATED_WEIGHT ? 'paused' : 'running';
 }

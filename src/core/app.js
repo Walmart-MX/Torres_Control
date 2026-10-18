@@ -530,6 +530,18 @@ async function continueInit() {
   UI.renderCacheHistory();
 
   Events.setupDrop('dropPDF', 'filePDF', Events.handlePDFs.bind(Events));
+  // NUEVO (oct-2026 — seleccion de carpeta completa): input aparte
+  // (webkitdirectory), activado por el link "o selecciona la carpeta
+  // completa" dentro de la misma tarjeta — no usa Events.setupDrop()
+  // porque no es una zona de drag&drop, solo un input oculto disparado
+  // por su <label>. El filtro ida/retorno corre DENTRO de
+  // Events.handlePDFs() (ver processors/pdf-trip-type.js), así que
+  // comparte el mismo camino sin importar como se eligieron los archivos.
+  const filePDFFolder = document.getElementById('filePDFFolder');
+  filePDFFolder.addEventListener('change', () => {
+    Events.handlePDFs([...filePDFFolder.files]);
+    filePDFFolder.value = '';
+  });
   Events.setupDrop('dropXLS', 'fileXLS', Events.handleXLS.bind(Events));
   Events.setupDrop('dropWTMS', 'fileWTMS', Events.handleWTMS.bind(Events));
   Events.setupDrop('dropMONTOS', 'fileMONTOS', Events.handleInvoiceReport.bind(Events));

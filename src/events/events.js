@@ -212,6 +212,7 @@ import { RoutePicker } from '../editing/route-picker.js';
 import { FactCache } from '../features/fact-cache.js';
 import { Autosave } from '../features/autosave.js';
 import { pdfExtract, parsePDF } from '../processors/pdf.js';
+import { detectTipoCarga, clasificarTipoCarga } from '../processors/pdf-trip-type.js';
 import { processXLS } from '../processors/excel.js';
 import { processPaste } from '../processors/paste.js';
 import { processWTMS } from '../processors/wtms.js';
@@ -298,7 +299,11 @@ export const Events = {
   },
 
   async handlePDFs(files) {
-    files = files.filter(f => f.type === 'application/pdf');
+    // CAMBIO (oct-2026 — seleccion de carpeta completa): se acepta
+    // tambien por extension, no solo por `.type` — archivos elegidos
+    // via selector de carpeta (webkitdirectory) a veces llegan con
+    // `.type` vacio dependiendo del origen (unidades de red, etc).
+    files = files.filter(f => f.type === 'application/pdf' || /\.pdf$/i.test(f.name));
     if (!files.length) return;
     // NUEVO (ago-2026 — "reabrir para corregir"): cargar una fuente
     // cruda nueva sale del modo "sesión reabierta" — vuelve al flujo
@@ -318,6 +323,15 @@ export const Events = {
     UI.setSourceProcessing('pdf', true);
     const errors = [];
     let ok = 0;
+    // NUEVO (oct-2026 — filtro ida/retorno, ver processors/pdf-trip-type.js):
+    // al permitir seleccionar la carpeta completa del día operativo,
+    // entran mezclados los PDFs de retorno (viaje vacío de vuelta a
+    // CeDis) — no corresponden a ninguna ruta real del Excel del día y
+    // ensuciarían el merge con "rutas fantasma". Se clasifican ANTES de
+    // correr el parseo pesado de pdf.js; un PDF de ida sigue el camino
+    // de siempre sin ningún cambio de comportamiento.
+    const retornoSkipped = [];
+    const unknownSkipped = [];
     // NUEVO (Fase 0 — telemetría de citas no reconocidas, ago-2026):
     // acumula los candidatos de TODOS los PDFs de este lote — ver
     // processors/pdf.js → parsePDF() (campo `unrecognizedCitas`) y la
@@ -325,7 +339,23 @@ export const Events = {
     const citaMissesRaw = [];
     try {
       for (let i = 0; i < files.length; i++) {
+        UI.setProgress(i + 1, files.length, files[i].name);
         try {
+          // Clasificacion liviana ANTES del parseo completo — si falla
+          // (PDF raro, formato inesperado) se sigue de largo y se deja
+          // que el parseo completo de abajo decida/reporte el error,
+          // en vez de descartar un archivo legitimo por un hipo del
+          // pre-filtro.
+          const tipoCarga = await detectTipoCarga(files[i]).catch(() => null);
+          if (tipoCarga !== null) {
+            const clase = clasificarTipoCarga(tipoCarga);
+            if (clase === 'retorno') { retornoSkipped.push(files[i].name); continue; }
+            if (clase === 'desconocido') {
+              unknownSkipped.push(`${files[i].name} (Tipo de carga: "${tipoCarga || '—'}")`);
+              continue;
+            }
+          }
+
           const extracted = await pdfExtract(files[i], State.citaPatterns);
           // CAMBIO (Fase 0): parsePDF() ahora devuelve
           // { rows, unrecognizedCitas } en vez de un array plano — ver
@@ -366,12 +396,28 @@ export const Events = {
           if (parsed.length) ok++;
           else errors.push('Sin datos: ' + files[i].name);
         } catch (e) { errors.push('Error: ' + files[i].name + ' — ' + e.message); }
-        UI.setProgress(i + 1, files.length, files[i].name);
       }
     } finally {
       UI.setSourceProcessing('pdf', false);
     }
     UI.hideProgress();
+
+    // NUEVO (oct-2026 — filtro ida/retorno): resumen NO bloqueante cuando
+    // se detectó al menos un PDF de retorno en el lote (típicamente al
+    // seleccionar la carpeta completa del día operativo) — nunca en
+    // silencio, pero tampoco como error, es el comportamiento esperado.
+    if (retornoSkipped.length) {
+      const n = retornoSkipped.length;
+      Motion.toast(
+        `${n} PDF${n !== 1 ? 's' : ''} de retorno detectado${n !== 1 ? 's' : ''} y omitido${n !== 1 ? 's' : ''} automáticamente (viaje vacío de vuelta, no corresponde a ninguna ruta del día).`,
+        'info'
+      );
+    }
+    // Tipo de carga NO reconocido (ni ida ni retorno conocido) SÍ se
+    // trata como advertencia explícita en el log de errores — a
+    // diferencia de un retorno confirmado, acá no hay certeza de que
+    // corresponda excluirlo, hace falta revisión manual.
+    unknownSkipped.forEach(msg => errors.push('Tipo de carga no reconocido, se omitió — revisar manualmente: ' + msg));
 
     // NUEVO (sep-2026): modo "reemplazar todos" — el Map nuevo solo
     // sustituye al actual si al menos un PDF se procesó bien; si todo
