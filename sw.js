@@ -25,7 +25,7 @@
  * en `activate`.
  */
 
-const CACHE_VERSION = 'v2'; // oct-2026: icono nuevo (camion en vez de monograma "SD") -- fuerza a los clientes ya instalados a descartar el shell viejo y traer los iconos nuevos.
+const CACHE_VERSION = 'v3'; // oct-2026: se agrega vendor/exceljs.min.js (export.js ahora escribe el xlsx con ExcelJS) -- fuerza a los clientes ya instalados a traer la librería nueva.
 const SHELL_CACHE = `smartdispatch-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `smartdispatch-runtime-${CACHE_VERSION}`;
 
@@ -40,6 +40,7 @@ const SHELL_ASSETS = [
   './vendor/pdf.min.js',
   './vendor/pdf.worker.min.js',
   './vendor/xlsx.full.min.js',
+  './vendor/exceljs.min.js',
   './vendor/supabase-js.min.js',
 ];
 

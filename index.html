@@ -16,6 +16,11 @@
      que el service worker las sirva offline — ver sw.js. -->
 <script src="vendor/pdf.min.js"></script>
 <script src="vendor/xlsx.full.min.js"></script>
+<!-- ExcelJS: SOLO se usa para ESCRIBIR el Excel final (features/export.js).
+     xlsx.full.min.js (SheetJS, arriba) sigue siendo quien LEE todos los
+     Excel/CSV que el usuario sube -- no se toca nada de eso. Ver la nota
+     de cabecera de export.js para el porqué de dos librerías. -->
+<script src="vendor/exceljs.min.js"></script>
 <script src="vendor/supabase-js.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -231,6 +236,7 @@ body:not(.app-authed) .shell{display:none!important}
 .up-card.done .up-ico{background:var(--green);color:#fff}
 .up-title{font-weight:700;font-size:12.5px;margin-bottom:3px}
 .up-sub{font-size:10.5px;color:var(--text-3);margin-bottom:10px}
+.up-origin{font-size:10px;color:var(--amber-ink,#92400e);background:rgba(245,166,35,.12);border-radius:6px;padding:3px 7px;margin:-4px 0 10px;display:inline-block;line-height:1.4}
 .up-status{
   display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:9.5px;font-weight:600;
   padding:3px 10px;border-radius:100px;background:var(--surface-3);color:var(--text-3);transition:color .2s;
@@ -779,9 +785,20 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
 .cstat span{font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em}
 
 /* Modal (nombre + tema) */
+/* FIX (oct-2026 — modal de Configuración cortado en pantallas bajas):
+   .modal-box no tenía max-height/overflow, y .modal-overlay centra con
+   flex sin scroll propio -- en el modal de Configuración (usuario +
+   contraseñas + modo + 12 temas estacionales + intensidad + footer) el
+   contenido es más alto que muchas pantallas de laptop, así que la
+   parte de arriba y/o de abajo quedaba literalmente fuera del viewport
+   -- sin forma de hacer scroll para llegar a ella (ej. el botón
+   "Guardar cambios"). Se acota la altura del propio .modal-box (no la
+   del overlay) para que sea EL CONTENEDOR el que haga scroll interno --
+   evita un quirk conocido de flex (align-items:center + overflow-y en
+   el padre recorta el tope del hijo al hacer scroll). */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,10,30,.7);backdrop-filter:blur(6px);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;animation:overlayFade .18s ease}
 .modal-overlay.hidden{display:none}
-.modal-box{background:var(--surface);border-radius:var(--r-xl);padding:32px 36px;width:400px;max-width:100%;box-shadow:var(--shadow-lg);border:1px solid var(--border);animation:celebratePop var(--dur-slow) cubic-bezier(.2,.9,.3,1.2)}
+.modal-box{background:var(--surface);border-radius:var(--r-xl);padding:32px 36px;width:400px;max-width:100%;max-height:calc(100vh - 40px);overflow-y:auto;box-shadow:var(--shadow-lg);border:1px solid var(--border);animation:celebratePop var(--dur-slow) cubic-bezier(.2,.9,.3,1.2)}
 .modal-logo{display:flex;align-items:center;gap:9px;margin-bottom:22px}
 .modal-logo-mark{width:36px;height:36px;background:var(--amber);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px}
 .modal-logo-text{font-size:14px;font-weight:700;color:var(--text)}
@@ -1128,6 +1145,12 @@ table.dtbl{width:100%;border-collapse:collapse;font-size:12px}
           <div class="up-ico">&#128178;</div>
           <div class="up-title">Reporte de Facturación</div>
           <div class="up-sub" id="montosSub">Reporte de mainframe (monto por factura)</div>
+          <!-- NUEVO (oct-2026): aclara de dónde sale este archivo en
+               concreto -- a diferencia de las otras 4 fuentes (que el
+               usuario arma/exporta él mismo), este lo manda QA al
+               cierre del día por correo; ver docs/FUENTES_DE_DATOS.md
+               para el resumen completo de las 5 fuentes. -->
+          <div class="up-origin" title="Lo envía QA por correo al cierre del día operativo.">&#128194; Carpeta EMAIL_PROD · lo manda QA al cierre del día</div>
           <div class="up-status" id="montosStatus">Arrastra o haz clic</div>
         </div>
 

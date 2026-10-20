@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Verificación: ¿quién sí escribe estilos?</title></head>
+<body>
+<!--
+  tools/verify_export_styles.html
+  Prueba de regresión MANUAL (abrir directo en el navegador, no corre
+  en CI) que documenta por qué features/export.js usa ExcelJS para
+  ESCRIBIR el Excel final en vez de SheetJS (vendor/xlsx.full.min.js),
+  que sigue siendo la librería de LECTURA del resto de la app.
+
+  Arma un libro con cada librería, con el MISMO estilo (fuente roja en
+  negrita + relleno navy + formato de contabilidad), lo escribe, lo
+  vuelve a leer con la misma librería y compara si el estilo sobrevivió
+  el viaje de ida y vuelta.
+
+  Resultado esperado (confirmado oct-2026):
+    - SheetJS (xlsx.full.min.js, build "Community" gratuito): el fill
+      vuelve como {"patternType":"none"} — el relleno/fuente se
+      descartó al escribir. El formato numérico (numFmt) SÍ sobrevive.
+    - ExcelJS (exceljs.min.js): fill, font Y numFmt sobreviven intactos.
+
+  Si algún día SheetJS Pro se vuelve una opción viable (licencia
+  pagada), correr esta prueba de nuevo antes de plantear volver a una
+  sola librería — no asumir que "ya lo arreglaron en una versión nueva"
+  sin confirmarlo aquí primero.
+-->
+<h3>Resultado</h3>
+<pre id="out">Ejecutando…</pre>
+
+<script src="../vendor/xlsx.full.min.js"></script>
+<script src="../vendor/exceljs.min.js"></script>
+<script>
+(async () => {
+  const STYLE_FONT = { bold: true, color: { rgb: 'FF0000' } };          // SheetJS shape
+  const STYLE_FONT_EJS = { bold: true, color: { argb: 'FFFF0000' } };   // ExcelJS shape
+  const FILL_HEX = '0B1D33';
+  const ACCOUNTING_FMT = '_-$* #,##0.00_-;-$* #,##0.00_-;_-$* "-"??_-;_-@_-';
+
+  function testSheetJS() {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([['A', 'B'], [1, 1234.5]]);
+    ws.A1.s = { font: STYLE_FONT, fill: { patternType: 'solid', fgColor: { rgb: FILL_HEX } } };
+    ws.B2.z = ACCOUNTING_FMT;
+    XLSX.utils.book_append_sheet(wb, ws, 'S1');
+    const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx', cellStyles: true });
+    const wb2 = XLSX.read(out, { type: 'array', cellStyles: true });
+    const ws2 = wb2.Sheets[wb2.SheetNames[0]];
+    return { fill: JSON.stringify(ws2.A1 && ws2.A1.s), numFmt: ws2.B2 && ws2.B2.z };
+  }
+
+  async function testExcelJS() {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('S1');
+    ws.addRow(['A', 'B']);
+    ws.addRow([1, 1234.5]);
+    ws.getCell('A1').font = STYLE_FONT_EJS;
+    ws.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + FILL_HEX } };
+    ws.getCell('B2').numFmt = ACCOUNTING_FMT;
+    const buf = await wb.xlsx.writeBuffer();
+    const wb2 = new ExcelJS.Workbook();
+    await wb2.xlsx.load(buf);
+    const ws2 = wb2.getWorksheet('S1');
+    return { fill: JSON.stringify(ws2.getCell('A1').fill), numFmt: ws2.getCell('B2').numFmt };
+  }
+
+  const sheetjs = testSheetJS();
+  const exceljs = await testExcelJS();
+  document.getElementById('out').textContent = JSON.stringify({ sheetjs, exceljs }, null, 2);
+})();
+</script>
+</body>
+</html>

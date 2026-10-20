@@ -727,7 +727,12 @@ export const Events = {
     }
     UI.setExportBusy(false);
 
-    exportXLSX();
+    // CAMBIO (oct-2026): exportXLSX() ahora es async (ExcelJS solo
+    // entrega el buffer vía Promise, ver features/export.js) -- se
+    // espera a que termine de armar el archivo antes de la secuencia
+    // de éxito, para no lanzar el banner de celebración si algo truena
+    // a mitad del armado del Excel.
+    await exportXLSX();
     // Secuencia de éxito (sección 6): botón con checkmark + ráfaga de
     // partículas con los colores del tema activo, y RECIÉN después el
     // modal de celebración — se difiere 700ms (duración de la ráfaga)
@@ -772,9 +777,9 @@ export const Events = {
     UI.renderHistoryPreview(rows, session);
   },
 
-  redownloadHistorySession() {
+  async redownloadHistorySession() {
     if (!Events._currentHistoryRows || !Events._currentHistorySession) return;
-    exportXLSX(Events._currentHistoryRows, 'despacho', Events._currentHistorySession.session_date);
+    await exportXLSX(Events._currentHistoryRows, 'despacho', Events._currentHistorySession.session_date);
   },
 
   /**
@@ -882,7 +887,7 @@ export const Events = {
     const session = await DispatchHistory.getTodaySession();
     if (!session) return;
     const rows = await DispatchHistory.getSessionRows(session.id);
-    exportXLSX(rows, 'despacho', session.session_date);
+    await exportXLSX(rows, 'despacho', session.session_date);
   },
 
   async addCatalogEntry() {

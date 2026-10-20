@@ -8,12 +8,15 @@
  * CONTEXTO: el CEDIS emite un reporte plano de mainframe ("INVOICE
  * DETAIL", Report id RPinvdtl) con el detalle línea a línea de cada
  * factura del día — uno o varios renglones por INVOICE, cada uno con
- * su TOTAL COST. El archivo real que llega a diario NO trae extensión
- * reconocible (se descarga tal cual de un correo) y puede ser texto
- * plano (.TXT) o el mismo contenido pegado en un .xlsx con columnas
- * ya separadas — este módulo solo atiende el primer caso (texto
- * plano); un .xlsx ya estructurado se procesaría como cualquier otro
- * Excel (fuera de alcance aquí).
+ * su TOTAL COST. ORIGEN (aclarado oct-2026): lo manda QA por correo al
+ * cierre del día operativo — el archivo descargado queda disponible en
+ * la carpeta EMAIL_PROD (ver docs/FUENTES_DE_DATOS.md para el resumen
+ * de las 5 fuentes obligatorias). El archivo real que llega a diario NO
+ * trae extensión reconocible (se descarga tal cual de ese correo) y
+ * puede ser texto plano (.TXT) o el mismo contenido pegado en un .xlsx
+ * con columnas ya separadas — este módulo solo atiende el primer caso
+ * (texto plano); un .xlsx ya estructurado se procesaría como cualquier
+ * otro Excel (fuera de alcance aquí).
  *
  * OBJETIVO: calcular MONTO_FACTURA = SUM(TOTAL COST) agrupado por
  * INVOICE, y exponerlo bajo la MISMA llave que ya usa el resto del

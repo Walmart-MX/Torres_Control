@@ -80,30 +80,45 @@ function escapeAttr(value) {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 }
 
+// CAMBIO (oct-2026 — copy de "evolución" + animaciones): se reescribe el
+// mensaje de cada variante con tono de lanzamiento de producto (antes
+// era puramente instructivo: "esta app se usa instalada..."). Título Y
+// mensaje ahora son dinámicos por variante (antes solo el mensaje — el
+// título estaba fijo en "Instala SmartDispatch para continuar" para las
+// 3 variantes). El badge "Nuevo" y el brillo de los botones primarios
+// viven en CSS (ver pwa-install.css — .sd-gate-badge/.sd-gate-btn-shine),
+// aquí solo se decide QUÉ texto va en cada caso.
 function renderGateContent() {
   const edge = isEdge();
   const canPrompt = !!deferredPrompt;
   const currentUrl = escapeAttr(window.location.href);
 
+  let title;
   let message;
   let primaryActionHtml;
   if (edge && canPrompt) {
-    message = 'Esta aplicación se usa instalada, no desde una pestaña del navegador. Instálala con un clic y sigue trabajando igual que siempre:';
-    primaryActionHtml = '<button type="button" class="sd-gate-btn sd-gate-btn-primary" id="sd-gate-install">Instalar ahora</button>';
+    title = '¡Descubre la nueva experiencia SmartDispatch!';
+    message = 'SmartDispatch incorpora nuevas funciones y mejoras para facilitar tus actividades diarias. Instálala en tu equipo y disfruta de una experiencia más cómoda, con acceso directo desde tu escritorio y una ventana propia, como cualquier otra aplicación.';
+    primaryActionHtml = '<button type="button" class="sd-gate-btn sd-gate-btn-primary sd-gate-btn-shine" id="sd-gate-install">Instalar ahora</button>';
   } else if (edge && !canPrompt) {
-    message = 'Esta aplicación se usa instalada, no desde una pestaña del navegador. Busca el icono de instalar en la barra de direcciones de Edge (junto a la estrella de favoritos) y haz clic ahí.';
+    title = '¡Descubre la nueva experiencia SmartDispatch!';
+    message = 'SmartDispatch incorpora nuevas funciones y mejoras para facilitar tus actividades diarias. Instálala en tu equipo: busca el ícono de instalar en la barra de direcciones de Edge (junto a la estrella de favoritos) y haz clic ahí para tener acceso directo desde tu escritorio, en su propia ventana.';
     primaryActionHtml = '';
   } else {
-    message = 'Por temas de compatibilidad, SmartDispatch solo se instala desde Microsoft Edge. Copia este enlace y pégalo en Edge: en cuanto cargue la página, va a aparecer un icono para instalarla directo en la barra de direcciones, sin pasos adicionales.';
+    title = '¡SmartDispatch evoluciona!';
+    message = 'Ya puedes disfrutar de las nuevas funciones y mejoras de SmartDispatch desde su aplicación de escritorio. Para una instalación más confiable y una mejor compatibilidad, te recomendamos instalarla desde Microsoft Edge. Copia este enlace y ábrelo en Edge. Al cargar SmartDispatch, selecciona el ícono de instalación en la barra de direcciones.';
     primaryActionHtml = `
-      <a class="sd-gate-btn sd-gate-btn-primary" id="sd-gate-open-edge" href="microsoft-edge:${currentUrl}">Abrir en Microsoft Edge</a>
+      <a class="sd-gate-btn sd-gate-btn-primary sd-gate-btn-shine" id="sd-gate-open-edge" href="microsoft-edge:${currentUrl}">Abrir en Microsoft Edge</a>
       <button type="button" class="sd-gate-btn sd-gate-btn-ghost" id="sd-gate-copy">Copiar enlace</button>`;
   }
 
   return `
     <div class="sd-gate-card" role="dialog" aria-modal="true" aria-labelledby="sd-gate-title" tabindex="-1">
-      <img src="icons/icon-192.png" alt="" class="sd-gate-icon" width="56" height="56">
-      <h2 id="sd-gate-title">Instala SmartDispatch para continuar</h2>
+      <div class="sd-gate-icon-wrap">
+        <img src="icons/icon-192.png" alt="" class="sd-gate-icon" width="56" height="56">
+      </div>
+      <span class="sd-gate-badge">Nuevo</span>
+      <h2 id="sd-gate-title">${title}</h2>
       <p class="sd-gate-msg">${message}</p>
       <div class="sd-gate-actions">${primaryActionHtml}</div>
       <p class="sd-gate-feedback" id="sd-gate-feedback"></p>
@@ -118,8 +133,13 @@ function wireGateActions() {
     const { outcome } = await deferredPrompt.userChoice;
     deferredPrompt = null;
     if (outcome === 'accepted') {
+      // CAMBIO (oct-2026): remate de éxito — el ícono dispara el "burst"
+      // verde (ver .sd-gate-card.is-success en pwa-install.css) y el
+      // badge "Nuevo" se retira (ya no aplica una vez instalada).
+      gateEl.querySelector('.sd-gate-card').classList.add('is-success');
+      gateEl.querySelector('#sd-gate-title').textContent = '¡Todo listo!';
       gateEl.querySelector('.sd-gate-msg').textContent =
-        '¡Listo! Cierra esta pestaña y abre SmartDispatch desde el escritorio o el menú inicio.';
+        'Cierra esta pestaña y abre SmartDispatch desde el escritorio o el menú inicio.';
       gateEl.querySelector('.sd-gate-actions').innerHTML = '';
     }
   });
