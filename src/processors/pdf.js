@@ -429,6 +429,26 @@
  *   exactamente igual, sin que les importe si un valor vino de la
  *   tabla impresa o de una anotación.
  *
+ * FIX (oct-2026) — ruta unificada con entregas a TIENDA: nuevo criterio de
+ *   partición por remolque cuando el marchamo no alcanza.
+ *   _splitUnifiedBlocksByMarchamo() asume marchamo solo en la 1ª fila de
+ *   cada remolque (cierto en cargas HUB). En cargas con tiendas, WTMS
+ *   imprime un marchamo por TIENDA (todas las filas lo traen) → N bloques
+ *   en vez de 2 → respaldo "corte por mitad", correcto solo con reparto
+ *   parejo entre remolques. Con reparto desigual (1+2, 1+3…) una tienda
+ *   cambiaba de ruta — o dos tiendas iguales de remolques distintos se
+ *   fusionaban y una entrega desaparecía — y no cruzaba con el Excel
+ *   (clave ruta|D|destino).
+ *   Ahora ROW_RE captura la "Placa Trailer" y, SOLO si el marchamo no dio
+ *   exactamente 2 bloques, _splitUnifiedBlocksByTrailer() corta cuando la
+ *   placa cambia. Cascada: marchamo → placa → mitad (respaldo anterior).
+ *   La placa NO va primero a propósito: en cargas HUB WTMS repite la misma
+ *   placa en casi todas las filas (ej. 5202-5203: 21UV9W ×25 y 32UV9W
+ *   ×1), así que usarla primero rompió 5 PDFs HUB en la regresión.
+ *   Regresión antes/después: 304 PDFs unificados históricos → 297
+ *   idénticos, 7 corregidos (todos tiendas con reparto desigual);
+ *   466 PDFs de SW 38 → 0 cambios.
+ *
  * Dependencia externa: pdfjsLib (cargado globalmente desde el CDN en
  * index.html, con su workerSrc ya configurado ahí). Este módulo no
  * configura el worker — eso es responsabilidad del bootstrap en index.html.
@@ -925,11 +945,24 @@ function _dedupeByDestino(list) {
  *   sub-arreglo contiguo de rawRows)
  */
 function _splitUnifiedBlocksByMarchamo(rawRows) {
+  return _splitBlocks(rawRows, r =>
+    (r.marchamos && r.marchamos.length) || (r.marchamoIssues && r.marchamoIssues.length));
+}
+
+/**
+ * Corta `rows` en sub-arreglos contiguos: cada fila (que no sea la
+ * primera) para la que `startsNewBlock(fila, filaAnterior)` sea
+ * verdadero abre un bloque nuevo. Base común de los dos criterios de
+ * partición por remolque (por placa y por marchamo). @private
+ * @param {Array<object>} rows
+ * @param {(row:object, prev:object) => any} startsNewBlock
+ * @returns {Array<Array<object>>}
+ */
+function _splitBlocks(rows, startsNewBlock) {
   const blocks = [];
   let current = [];
-  rawRows.forEach((r, i) => {
-    const hasOwnMarchamo = (r.marchamos && r.marchamos.length) || (r.marchamoIssues && r.marchamoIssues.length);
-    if (i > 0 && hasOwnMarchamo) {
+  rows.forEach((r, i) => {
+    if (i > 0 && startsNewBlock(r, rows[i - 1])) {
       blocks.push(current);
       current = [];
     }
@@ -937,6 +970,40 @@ function _splitUnifiedBlocksByMarchamo(rawRows) {
   });
   if (current.length) blocks.push(current);
   return blocks;
+}
+
+/**
+ * Divide rawRows de una ruta unificada en bloques por REMOLQUE usando
+ * la columna "Placa Trailer" de la tabla de datos — NUEVO (oct-2026,
+ * ver nota de cabecera "FIX (oct-2026) — ruta unificada con tiendas").
+ *
+ * PROBLEMA que corrige: _splitUnifiedBlocksByMarchamo() asume que WTMS
+ * imprime marchamo SOLO en la primera fila de cada remolque. Con
+ * entregas a TIENDA no es así — cada tienda trae su propio sello, así
+ * que TODAS las filas traen marchamo → salen N bloques (no 2) → se cae
+ * al respaldo "corte por mitad", que solo acierta cuando cada remolque
+ * lleva igual número de tiendas. Con reparto desigual (1+2, 1+3, 3+1…,
+ * el caso común: 6104-6105, 1116-1117, 6116-6117, 1110-1111) una tienda
+ * del remolque B queda asignada a la ruta del remolque A: su clave
+ * `ruta|D|destino` ya no coincide con el Excel y la entrega "no se
+ * detecta".
+ *
+ * La placa del trailer es la señal física en cargas a TIENDA (un
+ * remolque = una ruta) y viaja en CADA fila, sin importar cuántas
+ * tiendas o marchamos traiga. Se corta cada vez que la placa cambia
+ * respecto a la fila anterior. Se aplica sobre filas YA filtradas (sin
+ * HUBs de ruta alterna), así que sus placas no cuentan.
+ *
+ * ADVERTENCIA: NO es fiable en cargas HUB (WTMS repite la misma placa
+ * en casi todas las filas) — por eso el caller la usa SOLO cuando el
+ * criterio por marchamo no dio 2 bloques. Si tampoco da 2 (ej. una sola
+ * placa), el caller cae al corte por mitad — nunca peor que antes.
+ * @private
+ * @param {Array<{placa:string}>} rawRows
+ * @returns {Array<Array<object>>}
+ */
+function _splitUnifiedBlocksByTrailer(rawRows) {
+  return _splitBlocks(rawRows, (r, prev) => r.placa !== prev.placa);
 }
 
 /**
@@ -1092,7 +1159,12 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
   // usa _pushMarchamo() para marchamos. El grupo del marchamo de
   // encabezado sigue siendo \S+ OPCIONAL — ver nota de cabecera "FIX
   // (jul-2026) — bug del marchamo ausente por completo".
-  const ROW_RE  = /^CeDis\s+(?:TIENDA|HUB)\s+\S+\s+\d+\s+(\d{10})\s+(\d+)\s+\d+\s+\d+\s+\d+\s+[\d.]+(?:\s+(\S+))?$/;
+  // FIX (oct-2026 — ruta unificada con tiendas): se captura también la
+  // PLACA DEL TRAILER (grupo `placa`) — antes era un `\S+` descartado.
+  // Es la única señal física confiable de a qué remolque (= ruta)
+  // pertenece cada fila — ver _splitUnifiedBlocksByTrailer(). Grupos con
+  // nombre para que agregar campos no vuelva a correr índices numéricos.
+  const ROW_RE  = /^CeDis\s+(?:TIENDA|HUB)\s+(?<placa>\S+)\s+\d+\s+(?<factura>\d{10})\s+(?<tarimas>\d+)\s+\d+\s+\d+\s+\d+\s+[\d.]+(?:\s+(?<marchamo>\S+))?$/;
   // CONT_RE — línea de continuación que trae el destino real (grupo 1).
   // FIX (sep-2026, ver nota de cabecera "segunda factura embebida"):
   // se agrega un grupo opcional intermedio para una SEGUNDA factura de
@@ -1138,7 +1210,7 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
       // específico contra el Excel sin ganar nada a cambio. Solo se
       // registra el detalle crudo en facturaIssues para diagnóstico
       // (ver features/validation/sve.js, regla 'bad_fact').
-      const facturaRaw = rm[1], tarimas = rm[2];
+      const { placa, factura: facturaRaw, tarimas, marchamo } = rm.groups;
       const factura = facturaRaw;
       const facturaIssues = [];
       if (!_isValidFactura(facturaRaw)) facturaIssues.push({ raw: facturaRaw });
@@ -1146,10 +1218,10 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
       const marchamos = [], marchamoIssues = [];
 
       // Marchamo de encabezado — validado de forma independiente,
-      // nunca invalida factura/tarimas ya capturados arriba. rm[3]
+      // nunca invalida factura/tarimas ya capturados arriba. `marchamo`
       // puede venir undefined (grupo opcional) — _pushMarchamo() lo
       // maneja de forma segura (early return, no agrega nada).
-      _pushMarchamo(rm[3], marchamos, marchamoIssues);
+      _pushMarchamo(marchamo, marchamos, marchamoIssues);
 
       let destino = '';
       // NUEVO (sep-2026) — se guarda la posición de ESTE renglón
@@ -1176,7 +1248,7 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
           if (cm[2]) {
             const raw2 = cm[2];
             extraFacturaRow = {
-              factura: raw2, tarimas: '0', marchamos: [], marchamoIssues: [],
+              factura: raw2, tarimas: '0', marchamos: [], marchamoIssues: [], placa,
               facturaIssues: _isValidFactura(raw2) ? [] : [{ raw: raw2 }],
               destino: cm[1]
             };
@@ -1197,7 +1269,7 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
         if (MARC_CANDIDATE_RE.test(tl)) { _pushMarchamo(tl, marchamos, marchamoIssues); i++; }
         else break;
       }
-      rawRows.push({ factura, tarimas, marchamos, marchamoIssues, facturaIssues, destino });
+      rawRows.push({ factura, tarimas, marchamos, marchamoIssues, facturaIssues, destino, placa });
       // NUEVO (sep-2026): se empuja DESPUÉS del row principal — ver
       // comentario junto a la declaración de extraFacturaRow arriba.
       if (extraFacturaRow) rawRows.push(extraFacturaRow);
@@ -1221,7 +1293,18 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
     // asignado a su ruta real. Un bloque con un solo destino se
     // comporta igual que antes; un bloque con destinos distintos ahora
     // genera una entrega por cada uno, con la ruta correcta.
-    const blocks = _splitUnifiedBlocksByMarchamo(filteredRawRows);
+    // FIX (oct-2026 — ruta unificada con tiendas): cascada de criterios.
+    // 1) marchamo de encabezado — comportamiento histórico, válido cuando
+    //    WTMS lo imprime solo en la 1ª fila de cada remolque (cargas HUB).
+    // 2) placa del trailer — solo si (1) no dio exactamente 2 bloques
+    //    (cargas a TIENDA: un marchamo por tienda). NO va primero: en
+    //    cargas HUB la placa es poco fiable (misma placa en casi todas
+    //    las filas), verificado contra PDFs reales.
+    // 3) corte por mitad — respaldo de último recurso (abajo).
+    const marchBlocks = _splitUnifiedBlocksByMarchamo(filteredRawRows);
+    const blocks = marchBlocks.length === 2
+      ? marchBlocks
+      : _splitUnifiedBlocksByTrailer(filteredRawRows);
     let grupos;
     if (blocks.length === 2) {
       grupos = blocks;
@@ -1231,7 +1314,7 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
       // patrón inesperado). Se conserva el corte por mitad como
       // antes — nunca peor que el comportamiento previo — con aviso
       // en consola para diagnóstico manual.
-      console.warn(`[PDF] ${baseName}: se esperaban 2 bloques por remolque (detección por marchamo) pero se detectaron ${blocks.length} — usando corte por mitad como respaldo.`);
+      console.warn(`[PDF] ${baseName}: se esperaban 2 bloques por remolque pero se detectaron ${marchBlocks.length} por marchamo y ${blocks.length} por placa de trailer — usando corte por mitad como respaldo.`);
       const mid = Math.ceil(filteredRawRows.length / 2);
       grupos = [filteredRawRows.slice(0, mid), filteredRawRows.slice(mid)];
     }
