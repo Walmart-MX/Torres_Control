@@ -449,6 +449,14 @@
  *   idénticos, 7 corregidos (todos tiendas con reparto desigual);
  *   466 PDFs de SW 38 → 0 cambios.
  *
+ * FIX (oct-2026) — qué bloque es qué ruta NO se puede saber desde el PDF:
+ *   la regla "el primer bloque impreso es la ruta de número MAYOR" (caso
+ *   1205-1206) es falsa en 4107-4108, donde el Excel asigna 3505/3632 a
+ *   4107 (la MENOR) y 1124/1004 a 4108 — las 4 tiendas quedaban sin
+ *   cruzar. El PDF no trae ninguna señal que ligue remolque→ruta, así que
+ *   parsePDF() solo etiqueta cada fila con `bloque` y `rutasPar`, y
+ *   processors/unified-routes.js decide la asignación con el Excel.
+ *
  * Dependencia externa: pdfjsLib (cargado globalmente desde el CDN en
  * index.html, con su workerSrc ya configurado ahí). Este módulo no
  * configura el worker — eso es responsabilidad del bootstrap en index.html.
@@ -1336,7 +1344,13 @@ const rutas        = isUnified ? [unifiedMatch[1], unifiedMatch[2]] : [baseName]
       // mezclaría datos de dos rutas). Ver _groupBlockByDestino().
       const entregas = _groupBlockByDestino(grupo);
       entregas.forEach(e => {
-        result.push({ ruta, operador, destino: e.destino, factura: e.factura, tarimas: e.tarimas, marchamos: e.marchamos, marchamoIssues: e.marchamoIssues, facturaIssues: e.facturaIssues, cita: '', hrDespacho });
+        // FIX (oct-2026 — asignación bloque→ruta por Excel): `bloque` (0 =
+        // primero impreso en el PDF) y `rutasPar` (ambas rutas, mayor
+        // primero) permiten que processors/unified-routes.js corrija la
+        // asignación con evidencia del Excel — el PDF NO dice qué remolque
+        // es qué ruta (ver nota de cabecera). `ruta` conserva la regla
+        // histórica (bloque 0 → ruta mayor) como valor por defecto.
+        result.push({ ruta, operador, destino: e.destino, factura: e.factura, tarimas: e.tarimas, marchamos: e.marchamos, marchamoIssues: e.marchamoIssues, facturaIssues: e.facturaIssues, cita: '', hrDespacho, bloque: idx, rutasPar: rutasPorMagnitud });
       });
     });
   } else {

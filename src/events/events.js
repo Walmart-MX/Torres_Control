@@ -228,6 +228,7 @@ import { INCIDENT_TYPES } from '../features/incidents/incident-types.js';
 import { saveInlineFix } from '../features/incidents/inline-fix.js';
 import { CitaPatternStore } from '../features/citas/cita-pattern-store.js';
 import { compareExcelPdf } from '../features/source-check.js';
+import { reconcileUnifiedRoutes } from '../processors/unified-routes.js';
 import { Motion } from '../theme-engine/motion.js';
 
 export const Events = {
@@ -594,6 +595,14 @@ export const Events = {
   },
 
   triggerMerge() {
+    // FIX (oct-2026 — asignación bloque→ruta de PDFs unificados): se
+    // reasigna con evidencia del Excel ANTES de comparar/cruzar, para que
+    // source-check y runMerge() vean las mismas rutas. Idempotente y sin
+    // efecto si falta Excel o no hay PDFs unificados — ver
+    // processors/unified-routes.js.
+    const swapped = reconcileUnifiedRoutes(State.pdfData, State.xlsData);
+    if (swapped) console.info(`[PDF] ${swapped} PDF(s) unificado(s): bloques reasignados a su ruta según el Excel.`);
+
     // NUEVO (ago-2026 — validación informativa Excel vs PDF, ver nota de
     // cabecera de este archivo y features/source-check.js). Deliberadamente
     // ANTES de checkSources()/el gate de las 4 fuentes: compareExcelPdf()
